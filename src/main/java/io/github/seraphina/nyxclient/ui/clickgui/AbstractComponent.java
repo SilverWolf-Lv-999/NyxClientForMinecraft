@@ -1,0 +1,145 @@
+package io.github.seraphina.nyxclient.ui.clickgui;
+
+import io.github.seraphina.nyxclient.manager.FontManager;
+import io.github.seraphina.nyxclient.utility.Render2DUtility;
+import io.github.seraphina.nyxclient.utility.font.FontRenderer;
+import io.github.seraphina.nyxclient.value.AbstractValue;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+
+public abstract class AbstractComponent {
+    public static final float ROW_HEIGHT = 30.0F;
+
+    protected static final int CONTROL_BACKGROUND = 0xFF0C0D11;
+    protected static final int CONTROL_HOVER = 0xFF181B24;
+    protected static final int SLIDER_BACKGROUND = 0xFF20222B;
+    protected static final int TEXT = 0xFFFFFFFF;
+    protected static final int TEXT_MUTED = 0xFFA0A5B5;
+    protected static final int TEXT_DIM = 0xFF4B5263;
+    protected static final int TEXT_SUBTLE = 0xFF6C717E;
+    protected static final int BORDER = 0x1AFFFFFF;
+    protected static final int BORDER_SOFT = 0x0AFFFFFF;
+    protected static final int HOVER = 0x0AFFFFFF;
+    protected static final int ACCENT = 0xB33D81F7;
+    protected static final int ACCENT_SOLID = 0xFF3D81F7;
+    protected static final int TOGGLE_OFF = 0xFF20222B;
+
+    protected final AbstractValue<?> value;
+    protected float x;
+    protected float y;
+    protected float width;
+
+    protected AbstractComponent(AbstractValue<?> value) {
+        this.value = value;
+    }
+
+    public final AbstractValue<?> value() {
+        return value;
+    }
+
+    public final void render(float x, float y, float width, int mouseX, int mouseY, float partialTick) {
+        setBounds(x, y, width);
+        render(mouseX, mouseY, partialTick);
+    }
+
+    public void setBounds(float x, float y, float width) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+    }
+
+    protected abstract void render(int mouseX, int mouseY, float partialTick);
+
+    public float getHeight() {
+        return ROW_HEIGHT;
+    }
+
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        return false;
+    }
+
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        return false;
+    }
+
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        return false;
+    }
+
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        return false;
+    }
+
+    public boolean keyPressed(KeyEvent event) {
+        return false;
+    }
+
+    public boolean charTyped(CharacterEvent event) {
+        return false;
+    }
+
+    public void tick() {
+    }
+
+    public void blur() {
+    }
+
+    protected void drawLabel(float reservedRightWidth) {
+        FontRenderer labelFont = font(10.0F);
+        float maxWidth = Math.max(20.0F, width - reservedRightWidth);
+        labelFont.drawString(trimToWidth(labelFont, value.getDisplayName(), maxWidth), x, y + centeredTextY(ROW_HEIGHT, labelFont), TEXT_MUTED);
+    }
+
+    protected void renderPill(float pillX, float pillY, float pillWidth, float pillHeight, String text, boolean accentText) {
+        FontRenderer pillFont = font(9.0F);
+        Render2DUtility.drawRoundedRect(pillX, pillY, pillWidth, pillHeight, 4.0F, CONTROL_BACKGROUND);
+        Render2DUtility.drawOutlineRoundedRect(pillX, pillY, pillWidth, pillHeight, 4.0F, 1.0F, BORDER_SOFT);
+        pillFont.drawCenteredString(
+            trimToWidth(pillFont, text, pillWidth - 10.0F),
+            pillX + pillWidth * 0.5F,
+            pillY + centeredTextY(pillHeight, pillFont),
+            accentText ? ACCENT : TEXT_SUBTLE
+        );
+    }
+
+    protected FontRenderer font(float size) {
+        return FontManager.getClickGuiRenderer(size);
+    }
+
+    protected static int colorToArgb(java.awt.Color color) {
+        return Render2DUtility.rgba(color.getRed(), color.getGreen(), color.getBlue(), color.getAlpha());
+    }
+
+    protected static String trimToWidth(FontRenderer renderer, String text, float maxWidth) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        if (renderer.getStringWidth(text) <= maxWidth) {
+            return text;
+        }
+
+        String suffix = "...";
+        float suffixWidth = renderer.getStringWidth(suffix);
+        if (suffixWidth > maxWidth) {
+            return "";
+        }
+
+        int end = text.length();
+        while (end > 0 && renderer.getStringWidth(text.substring(0, end)) + suffixWidth > maxWidth) {
+            end--;
+        }
+        return text.substring(0, end) + suffix;
+    }
+
+    protected static float centeredTextY(float height, FontRenderer renderer) {
+        return (height - renderer.getLineHeight()) * 0.5F;
+    }
+
+    protected static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
+        return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+    }
+
+    protected static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+}
