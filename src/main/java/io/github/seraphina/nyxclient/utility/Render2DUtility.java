@@ -17,17 +17,40 @@ import io.github.humbleui.types.RRect;
 import io.github.humbleui.types.Rect;
 import io.github.seraphina.nyxclient.utility.skija.SkiaUtility;
 
+import java.util.ArrayDeque;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.function.Consumer;
 
 public final class Render2DUtility {
     private static final ThreadLocal<Canvas> CURRENT_CANVAS = new ThreadLocal<>();
+    private static final Queue<Consumer<Canvas>> PENDING_RENDERERS = new ArrayDeque<>();
 
     private Render2DUtility() {
     }
 
     public static void withCanvas(Consumer<Canvas> renderer) {
         draw(renderer);
+    }
+
+    public static void flush() {
+        if (PENDING_RENDERERS.isEmpty()) {
+            return;
+        }
+
+        Queue<Consumer<Canvas>> renderers = new ArrayDeque<>(PENDING_RENDERERS);
+        PENDING_RENDERERS.clear();
+
+        SkiaUtility.draw(canvas -> {
+            CURRENT_CANVAS.set(canvas);
+            try {
+                while (!renderers.isEmpty()) {
+                    renderers.remove().accept(canvas);
+                }
+            } finally {
+                CURRENT_CANVAS.remove();
+            }
+        });
     }
 
     public static int rgb(int red, int green, int blue) {
@@ -458,14 +481,7 @@ public final class Render2DUtility {
             return;
         }
 
-        SkiaUtility.draw(canvas -> {
-            CURRENT_CANVAS.set(canvas);
-            try {
-                renderer.accept(canvas);
-            } finally {
-                CURRENT_CANVAS.remove();
-            }
-        });
+        PENDING_RENDERERS.add(renderer);
     }
 
     private static Paint fillPaint(int color) {

@@ -10,6 +10,7 @@
     "ClientPacketListenerMixin",
     "ConnectionMixin",
     "EntityMixin",
+    "GameRendererMixin",
     "GuiMixin",
     "ItemMixin",
     "KeyboardHandlerMixin",
