@@ -13,6 +13,7 @@ public class DelayRemover extends Module {
     public static final DelayRemover INSTANCE = new DelayRemover();
     @EventTarget
     public void onTick(TickEvent.Pre event) {
+        if (mc.player == null) return;
         mc.player.noJumpDelay = 0;
     }
 }
