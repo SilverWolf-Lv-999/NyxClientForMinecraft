@@ -4,6 +4,7 @@ import io.github.seraphina.nyxclient.events.api.EventManager;
 import io.github.seraphina.nyxclient.events.api.EventTarget;
 import io.github.seraphina.nyxclient.events.impl.SetScreenEvent;
 import io.github.seraphina.nyxclient.manager.ConfigManager;
+import io.github.seraphina.nyxclient.manager.KeyManager;
 import io.github.seraphina.nyxclient.manager.ModuleManager;
 import io.github.seraphina.nyxclient.ui.mainui.MainUI;
 import net.minecraft.client.gui.screens.TitleScreen;
@@ -15,6 +16,7 @@ public class Client {
         ModuleManager.init();
         ConfigManager.init();
         EventManager.register(this);
+        EventManager.register(KeyManager.class);
     }
 
     @EventTarget

@@ -9,83 +9,128 @@ import com.google.gson.JsonParser;
 import io.github.seraphina.nyxclient.module.Module;
 import io.github.seraphina.nyxclient.value.AbstractValue;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 
-public class ConfigManager {
+public final class ConfigManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path CONFIG_FILE = Path.of(PathManager.CONFIG, "modules.json");
+    private static final int CONFIG_VERSION = 1;
+    private static final String MODULES_KEY = "modules";
+    private static final Path CONFIG_FILE = PathManager.CONFIG_PATH.resolve("modules.json");
+
     private static boolean shutdownHookRegistered;
+
+    private ConfigManager() {
+    }
 
     public static void init() {
         try {
-            Files.createDirectories(CONFIG_FILE.getParent());
+            PathManager.init();
         } catch (IOException exception) {
             exception.printStackTrace();
             return;
         }
 
         load();
+        if (!Files.exists(CONFIG_FILE)) {
+            save();
+        }
         registerShutdownHook();
     }
 
     public static void load() {
-        if (!Files.exists(CONFIG_FILE)) {
+        load(CONFIG_FILE);
+    }
+
+    public static void load(Path configFile) {
+        if (configFile == null || !Files.exists(configFile)) {
             return;
         }
 
-        try (Reader reader = Files.newBufferedReader(CONFIG_FILE, StandardCharsets.UTF_8)) {
+        try (Reader reader = Files.newBufferedReader(configFile, StandardCharsets.UTF_8)) {
             JsonElement rootElement = JsonParser.parseReader(reader);
             if (!rootElement.isJsonObject()) {
                 return;
             }
 
             JsonObject root = rootElement.getAsJsonObject();
-            JsonObject modules = root.has("modules") && root.get("modules").isJsonObject()
-                    ? root.getAsJsonObject("modules")
-                    : root;
-
-            for (Module module : ModuleManager.MODULES) {
-                JsonElement moduleElement = modules.get(module.getConfigName());
-                if (moduleElement != null && moduleElement.isJsonObject()) {
-                    try {
-                        loadModule(module, moduleElement.getAsJsonObject());
-                    } catch (RuntimeException exception) {
-                        exception.printStackTrace();
-                    }
-                }
-            }
+            loadModules(readModules(root));
         } catch (IOException | JsonParseException exception) {
             exception.printStackTrace();
         }
     }
 
     public static void save() {
-        try {
-            Files.createDirectories(CONFIG_FILE.getParent());
-        } catch (IOException exception) {
-            exception.printStackTrace();
+        save(CONFIG_FILE);
+    }
+
+    public static void save(Path configFile) {
+        if (configFile == null) {
             return;
         }
 
+        try {
+            writeConfig(configFile, createRoot());
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
+    }
+
+    public static Path getConfigFile() {
+        return CONFIG_FILE;
+    }
+
+    public static boolean delete() {
+        try {
+            return Files.deleteIfExists(CONFIG_FILE);
+        } catch (IOException exception) {
+            exception.printStackTrace();
+            return false;
+        }
+    }
+
+    private static JsonObject createRoot() {
         JsonObject root = new JsonObject();
         JsonObject modules = new JsonObject();
 
-        ModuleManager.MODULES.stream()
+        ModuleManager.getModules().stream()
                 .sorted(Comparator.comparing(Module::getConfigName))
                 .forEach(module -> modules.add(module.getConfigName(), writeModule(module)));
 
-        root.add("modules", modules);
+        root.addProperty("version", CONFIG_VERSION);
+        root.add(MODULES_KEY, modules);
+        return root;
+    }
 
-        try (Writer writer = Files.newBufferedWriter(CONFIG_FILE, StandardCharsets.UTF_8)) {
-            GSON.toJson(root, writer);
-        } catch (IOException exception) {
-            exception.printStackTrace();
+    private static JsonObject readModules(JsonObject root) {
+        JsonElement modulesElement = root.get(MODULES_KEY);
+        if (modulesElement != null && modulesElement.isJsonObject()) {
+            return modulesElement.getAsJsonObject();
+        }
+
+        return root;
+    }
+
+    private static void loadModules(JsonObject modules) {
+        for (Module module : ModuleManager.getModules()) {
+            JsonElement moduleElement = modules.get(module.getConfigName());
+            if (moduleElement == null || !moduleElement.isJsonObject()) {
+                continue;
+            }
+
+            try {
+                loadModule(module, moduleElement.getAsJsonObject());
+            } catch (RuntimeException exception) {
+                exception.printStackTrace();
+            }
         }
     }
 
@@ -106,8 +151,9 @@ public class ConfigManager {
     }
 
     private static void loadModule(Module module, JsonObject object) {
-        if (object.has("key")) {
-            module.setKey(object.get("key").getAsInt());
+        Integer key = readInt(object, "key");
+        if (key != null) {
+            module.setKey(key);
         }
 
         JsonObject values = object.has("values") && object.get("values").isJsonObject()
@@ -129,8 +175,64 @@ public class ConfigManager {
             }
         }
 
-        if (object.has("enabled")) {
-            module.setEnabled(object.get("enabled").getAsBoolean());
+        Boolean enabled = readBoolean(object, "enabled");
+        if (enabled != null) {
+            module.setEnabled(enabled);
+        }
+    }
+
+    private static Integer readInt(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+
+        try {
+            return element.getAsInt();
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    private static Boolean readBoolean(JsonObject object, String key) {
+        JsonElement element = object.get(key);
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+
+        try {
+            return element.getAsBoolean();
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    private static void writeConfig(Path configFile, JsonObject root) throws IOException {
+        Path target = configFile.toAbsolutePath();
+        Path directory = target.getParent();
+        if (directory == null) {
+            throw new FileNotFoundException("Config path has no parent: " + configFile);
+        }
+
+        Files.createDirectories(directory);
+        Path tempFile = Files.createTempFile(directory, target.getFileName().toString(), ".tmp");
+        boolean moved = false;
+
+        try {
+            try (Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
+                GSON.toJson(root, writer);
+            }
+
+            try {
+                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(tempFile);
+            }
         }
     }
 
