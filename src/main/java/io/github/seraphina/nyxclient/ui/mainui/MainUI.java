@@ -85,7 +85,6 @@ public final class MainUI extends Screen {
             updateFrameTime();
             updatePanelAnimation();
             renderSelectedBackground();
-            renderBackgroundShade();
             renderSettingsPanel(mouseX, mouseY);
             renderSettingsButton(mouseX, mouseY);
         });
@@ -160,10 +159,6 @@ public final class MainUI extends Screen {
         if (selected == null || !selected.render(0.0F, 0.0F, this.width, this.height)) {
             Render2DUtility.drawVerticalGradientRect(0.0F, 0.0F, this.width, this.height, 0xFF10131B, 0xFF05060A);
         }
-    }
-
-    private void renderBackgroundShade() {
-        Render2DUtility.drawVerticalGradientRect(0.0F, 0.0F, this.width, this.height, 0x44000000, 0xAA000000);
     }
 
     private void renderSettingsButton(int mouseX, int mouseY) {
