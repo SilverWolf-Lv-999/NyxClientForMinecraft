@@ -1,0 +1,32 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.seraphina.nyxclient.mixins",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+  ],
+  "client": [
+    "BlockCollisionsMixin",
+    "ClientPacketListenerMixin",
+    "ConnectionMixin",
+    "EntityMixin",
+    "GuiMixin",
+    "ItemMixin",
+    "KeyboardHandlerMixin",
+    "KeyboardInputMixin",
+    "LevelRendererMixin",
+    "LivingEntityMixin",
+    "LocalPlayerMixin",
+    "MinecraftMixin",
+    "MouseHandlerMixin",
+    "MultiPlayerGameModeMixin",
+    "PlayerMixin",
+    "RenderSystemMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}
