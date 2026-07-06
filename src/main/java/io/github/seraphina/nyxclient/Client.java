@@ -13,7 +13,7 @@ public class Client {
         ModuleManager.init();
         ConfigManager.init();
         EventManager.register(this);
-        EventManager.register(KeyManager.class);
+        EventManager.register(KeyManager.INSTANCE);
         RotationManager.INSTANCE.getClass();
         Shaders.init();
         FontManager.init();
