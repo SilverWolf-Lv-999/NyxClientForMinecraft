@@ -9,7 +9,9 @@ import io.github.seraphina.nyxclient.events.impl.LevelUpdateEvent;
 import io.github.seraphina.nyxclient.events.impl.SetScreenEvent;
 import io.github.seraphina.nyxclient.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyxclient.events.impl.TickEvent;
+import io.github.seraphina.nyxclient.manager.FontManager;
 import io.github.seraphina.nyxclient.utility.Render2DUtility;
+import io.github.seraphina.nyxclient.utility.render.Shaders;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -68,6 +70,8 @@ public class MinecraftMixin {
 
     @Inject(method = "close", at = @At("HEAD"))
     public void close(CallbackInfo info) {
+        FontManager.close();
+        Shaders.close();
         Render2DUtility.close();
     }
 }

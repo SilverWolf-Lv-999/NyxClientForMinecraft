@@ -3,11 +3,9 @@ package io.github.seraphina.nyxclient;
 import io.github.seraphina.nyxclient.events.api.EventManager;
 import io.github.seraphina.nyxclient.events.api.EventTarget;
 import io.github.seraphina.nyxclient.events.impl.SetScreenEvent;
-import io.github.seraphina.nyxclient.manager.ConfigManager;
-import io.github.seraphina.nyxclient.manager.KeyManager;
-import io.github.seraphina.nyxclient.manager.ModuleManager;
-import io.github.seraphina.nyxclient.manager.RotationManager;
+import io.github.seraphina.nyxclient.manager.*;
 import io.github.seraphina.nyxclient.ui.mainui.MainUI;
+import io.github.seraphina.nyxclient.utility.render.Shaders;
 import net.minecraft.client.gui.screens.TitleScreen;
 
 public class Client {
@@ -19,6 +17,8 @@ public class Client {
         EventManager.register(this);
         EventManager.register(KeyManager.class);
         RotationManager.INSTANCE.getClass();
+        Shaders.init();
+        FontManager.init();
     }
 
     @EventTarget
