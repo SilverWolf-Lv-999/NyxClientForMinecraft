@@ -4,6 +4,7 @@ import io.github.seraphina.nyxclient.module.Module;
 import io.github.seraphina.nyxclient.module.movement.Scaffold;
 import io.github.seraphina.nyxclient.module.other.Test;
 import io.github.seraphina.nyxclient.module.Category;
+import io.github.seraphina.nyxclient.module.player.FastPlace;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -44,7 +45,7 @@ public final class ModuleManager {
         );
         //Player
         registerModule(
-
+                FastPlace.INSTANCE
         );
         //Visual
         registerModule(
