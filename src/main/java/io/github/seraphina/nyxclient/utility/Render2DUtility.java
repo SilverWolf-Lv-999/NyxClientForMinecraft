@@ -1,6 +1,9 @@
 package io.github.seraphina.nyxclient.utility;
 
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -69,6 +72,77 @@ public final class Render2DUtility {
 
     public static int mix(int from, int to, float progress) {
         return lerpColor(from, to, clamp01(progress));
+    }
+
+    public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height) {
+        drawTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, 0xFFFFFFFF);
+    }
+
+    public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height, int color) {
+        drawTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, color);
+    }
+
+    public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                   float u0, float v0, float u1, float v1, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        GuiGraphics graphics = currentGraphics();
+        graphics.submitGuiElementRenderState(new TextureRenderState(
+            RenderPipelines.GUI_TEXTURED,
+            TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
+            new Matrix3x2f(graphics.pose()),
+            x,
+            y,
+            x + width,
+            y + height,
+            clamp01(u0),
+            clamp01(v0),
+            clamp01(u1),
+            clamp01(v1),
+            color,
+            graphics.peekScissorStack()
+        ));
+    }
+
+    public static void drawTextureCover(GpuTextureView texture, float sourceWidth, float sourceHeight,
+                                        float x, float y, float width, float height) {
+        drawTextureCover(texture, sourceWidth, sourceHeight, x, y, width, height, 0xFFFFFFFF);
+    }
+
+    public static void drawTextureCover(GpuTextureView texture, float sourceWidth, float sourceHeight,
+                                        float x, float y, float width, float height, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        if (sourceWidth <= 0.0F || sourceHeight <= 0.0F) {
+            drawTexture(texture, x, y, width, height, color);
+            return;
+        }
+
+        float sourceAspect = sourceWidth / sourceHeight;
+        float targetAspect = width / height;
+        float u0 = 0.0F;
+        float v0 = 0.0F;
+        float u1 = 1.0F;
+        float v1 = 1.0F;
+        if (sourceAspect > targetAspect) {
+            float visibleWidth = targetAspect / sourceAspect;
+            float crop = (1.0F - visibleWidth) * 0.5F;
+            u0 = crop;
+            u1 = 1.0F - crop;
+        } else if (sourceAspect < targetAspect) {
+            float visibleHeight = sourceAspect / targetAspect;
+            float crop = (1.0F - visibleHeight) * 0.5F;
+            v0 = crop;
+            v1 = 1.0F - crop;
+        }
+
+        drawTexture(texture, x, y, width, height, u0, v0, u1, v1, color);
     }
 
     public static void drawRect(float x, float y, float width, float height, int color) {
@@ -748,6 +822,36 @@ public final class Render2DUtility {
             consumer.addVertexWith2DPose(this.pose, this.x0, this.y1).setColor(this.bottomLeft);
             consumer.addVertexWith2DPose(this.pose, this.x1, this.y1).setColor(this.bottomRight);
             consumer.addVertexWith2DPose(this.pose, this.x1, this.y0).setColor(this.topRight);
+        }
+    }
+
+    private record TextureRenderState(
+        RenderPipeline pipeline,
+        TextureSetup textureSetup,
+        Matrix3x2f pose,
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        float u0,
+        float v0,
+        float u1,
+        float v1,
+        int color,
+        @Nullable ScreenRectangle scissorArea,
+        @Nullable ScreenRectangle bounds
+    ) implements GuiElementRenderState {
+        private TextureRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float x0, float y0, float x1, float y1,
+                                   float u0, float v0, float u1, float v1, int color, @Nullable ScreenRectangle scissorArea) {
+            this(pipeline, textureSetup, pose, x0, y0, x1, y1, u0, v0, u1, v1, color, scissorArea, boundsFor(x0, y0, x1, y1, pose, scissorArea));
+        }
+
+        @Override
+        public void buildVertices(VertexConsumer consumer) {
+            consumer.addVertexWith2DPose(this.pose, this.x0, this.y0).setUv(this.u0, this.v0).setColor(this.color);
+            consumer.addVertexWith2DPose(this.pose, this.x0, this.y1).setUv(this.u0, this.v1).setColor(this.color);
+            consumer.addVertexWith2DPose(this.pose, this.x1, this.y1).setUv(this.u1, this.v1).setColor(this.color);
+            consumer.addVertexWith2DPose(this.pose, this.x1, this.y0).setUv(this.u1, this.v0).setColor(this.color);
         }
     }
 

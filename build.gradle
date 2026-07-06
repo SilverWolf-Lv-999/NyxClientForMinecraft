@@ -95,6 +95,12 @@ dependencies {
     compileOnly "io.github.llamalad7:mixinextras-common:0.5.3"
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
 
+    implementation("org.bytedeco:javacv:1.5.13") {
+        transitive = false
+    }
+    implementation "org.bytedeco:ffmpeg:8.0.1-1.5.13"
+    runtimeOnly "org.bytedeco:ffmpeg-platform:8.0.1-1.5.13"
+
     // Example mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
     // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
