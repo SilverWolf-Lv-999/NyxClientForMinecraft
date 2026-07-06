@@ -1,5 +1,6 @@
 package io.github.seraphina.nyxclient.utility;
 
+import io.github.seraphina.nyxclient.module.client.Client;
 import net.minecraft.client.Minecraft;
 
 import java.util.HashMap;
@@ -61,6 +62,19 @@ public final class LanguageUtility {
     }
 
     private static String getSelectedLanguage() {
+        Client.Language language = Client.INSTANCE.LANGUAGE.getValue();
+        if (language == null) {
+            return DEFAULT_LANGUAGE;
+        }
+
+        return switch (language) {
+            case EN_US -> "en_us";
+            case ZH_CN -> "zh_cn";
+            case MINECRAFT_LANGUAGE -> getMinecraftLanguage();
+        };
+    }
+
+    private static String getMinecraftLanguage() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.options == null || minecraft.options.languageCode == null || minecraft.options.languageCode.isBlank()) {
             return DEFAULT_LANGUAGE;

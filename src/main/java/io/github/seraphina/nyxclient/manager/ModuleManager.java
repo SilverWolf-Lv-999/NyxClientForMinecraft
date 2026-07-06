@@ -1,19 +1,16 @@
 package io.github.seraphina.nyxclient.manager;
 
+import io.github.seraphina.nyxclient.module.Category;
 import io.github.seraphina.nyxclient.module.Module;
 import io.github.seraphina.nyxclient.module.client.ClickGui;
+import io.github.seraphina.nyxclient.module.client.Client;
+import io.github.seraphina.nyxclient.module.combat.KillAura;
 import io.github.seraphina.nyxclient.module.movement.Scaffold;
 import io.github.seraphina.nyxclient.module.other.Test;
-import io.github.seraphina.nyxclient.module.Category;
 import io.github.seraphina.nyxclient.module.player.FastPlace;
+import io.github.seraphina.nyxclient.module.visual.Cape;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public final class ModuleManager {
@@ -30,11 +27,12 @@ public final class ModuleManager {
 
         //Client
         registerModule(
-                ClickGui.INSTANCE
+                ClickGui.INSTANCE,
+                Client.INSTANCE
         );
         //Combat
         registerModule(
-
+                KillAura.INSTANCE
         );
         //Movement
         registerModule(
@@ -50,7 +48,7 @@ public final class ModuleManager {
         );
         //Visual
         registerModule(
-
+                Cape.INSTANCE
         );
 
         initialized = true;

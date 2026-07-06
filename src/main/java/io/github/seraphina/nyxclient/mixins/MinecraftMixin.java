@@ -2,7 +2,7 @@ package io.github.seraphina.nyxclient.mixins;
 
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
-import io.github.seraphina.nyxclient.Client;
+import io.github.seraphina.nyxclient.NyxClient;
 import io.github.seraphina.nyxclient.events.bus.EventBus;
 import io.github.seraphina.nyxclient.events.impl.ClickEvent;
 import io.github.seraphina.nyxclient.events.impl.LevelUpdateEvent;
@@ -24,7 +24,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class MinecraftMixin {
     @Inject(method = "<init>", at = @At("TAIL"))
     public void init(CallbackInfo info) {
-        Client.INSTANCE.init();
+        NyxClient.INSTANCE.init();
     }
 
     @Inject(method = "tick", at = @At("HEAD"))

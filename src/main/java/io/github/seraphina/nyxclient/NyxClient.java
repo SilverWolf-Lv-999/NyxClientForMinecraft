@@ -6,8 +6,8 @@ import io.github.seraphina.nyxclient.events.impl.SetScreenEvent;
 import io.github.seraphina.nyxclient.manager.*;
 import io.github.seraphina.nyxclient.utility.render.Shaders;
 
-public class Client {
-    public static final Client INSTANCE = new Client();
+public class NyxClient {
+    public static final NyxClient INSTANCE = new NyxClient();
     public static final String CLIENT_NAME = "Nyx";
     public void init() {
         ModuleManager.init();
