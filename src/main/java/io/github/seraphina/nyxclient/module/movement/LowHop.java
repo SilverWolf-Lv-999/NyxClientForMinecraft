@@ -20,9 +20,15 @@ public class LowHop extends Module {
         else airTime++;
         if (MovingUtility.isMoving()) {
             if (mc.player.onGround()) mc.player.jumpFromGround();
-            var dist = mc.player.getDeltaMovement().x * mc.player.getDeltaMovement().x + mc.player.getDeltaMovement().z * mc.player.getDeltaMovement().z;
-            if (dist < 0.04f) MovingUtility.strafe(2.6f);
+            MovingUtility.strafe(2.1f);
         }
-        if (airTime % 2 == 0) mc.player.addDeltaMovement(new Vec3(0.0, -0.1, 0.0));
+        var dist = Math.sqrt(mc.player.getDeltaMovement().x * mc.player.getDeltaMovement().x + mc.player.getDeltaMovement().z * mc.player.getDeltaMovement().z);
+        if (dist > 0.265) MovingUtility.strafe(1.9f);
+        if (airTime < 8) {
+            if (airTime % 2 == 0) mc.player.addDeltaMovement(new Vec3(0.0, -0.1, 0.0));
+            boolean b = MovingUtility.canMove(mc.player.getDeltaMovement().x * 2, mc.player.getDeltaMovement().z * 2, -0.2);
+            if (airTime>6 && !b) mc.player.addDeltaMovement(new Vec3(0.0, 0.42, 0.0));
+            if (airTime > 6 && b)mc.player.addDeltaMovement(new Vec3(0.0, -0.1, 0.0));
+        }
     }
 }

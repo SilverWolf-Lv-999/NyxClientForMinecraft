@@ -3,6 +3,7 @@ package io.github.seraphina.nyxclient.utility.player;
 import io.github.seraphina.nyxclient.utility.IMinecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.AABB;
 
 public class MovingUtility implements IMinecraft {
     public static boolean isMoving() {
@@ -62,5 +63,10 @@ public class MovingUtility implements IMinecraft {
             --leftValue;
         }
         return leftValue;
+    }
+
+    public static boolean canMove(double x, double z, double y) {
+        AABB boundingBox = mc.player.getBoundingBox().move(x, y, z);
+        return mc.level.noBlockCollision(mc.player, boundingBox);
     }
 }
