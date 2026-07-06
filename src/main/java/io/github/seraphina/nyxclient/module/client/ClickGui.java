@@ -7,7 +7,7 @@ import io.github.seraphina.nyxclient.ui.clickgui.ClickGuiUI;
 
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT;
 
-@ModuleInfo(name = "nyxclient.module.clickgui.name", description = "nyxclient.module.clickgui.description", category = Category.OTHER)
+@ModuleInfo(name = "nyxclient.module.clickgui.name", description = "nyxclient.module.clickgui.description", category = Category.CLIENT)
 public class ClickGui extends Module {
     public static final ClickGui INSTANCE = new ClickGui();
     private ClickGuiUI clickGui;

@@ -6,7 +6,7 @@ import io.github.seraphina.nyxclient.module.ModuleInfo;
 import io.github.seraphina.nyxclient.value.ValueBuild;
 import io.github.seraphina.nyxclient.value.impl.EnumValue;
 
-@ModuleInfo(name = "nyxclient.module.client.name", description = "nyxclient.module.client.description", category = Category.OTHER)
+@ModuleInfo(name = "nyxclient.module.client.name", description = "nyxclient.module.client.description", category = Category.CLIENT)
 public class Client extends Module {
     public static final Client INSTANCE = new Client();
 
