@@ -1,9 +1,11 @@
 package io.github.seraphina.nyxclient.ui.mainui;
 
+import io.github.seraphina.nyxclient.manager.FontManager;
 import io.github.seraphina.nyxclient.manager.PathManager;
 import io.github.seraphina.nyxclient.ui.mainui.background.BackgroundLibrary;
 import io.github.seraphina.nyxclient.ui.mainui.background.BackgroundMedia;
 import io.github.seraphina.nyxclient.utility.Render2DUtility;
+import io.github.seraphina.nyxclient.utility.font.FontRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -188,12 +190,13 @@ public final class MainUI extends Screen {
         Render2DUtility.drawRect(panelX, 0.0F, 1.0F, this.height, Render2DUtility.applyOpacity(PANEL_BORDER, visibleAlpha));
 
         float titleX = panelX + PANEL_PADDING;
-        Render2DUtility.drawText("Background", titleX, 20.0F, 17.0F, Render2DUtility.applyOpacity(TEXT, visibleAlpha));
-        Render2DUtility.drawText(
-            trimToWidth(PathManager.BACKGROUND, panelWidth - PANEL_PADDING * 2.0F, 9.0F),
+        FontRenderer titleFont = displayFont(17.0F);
+        FontRenderer pathFont = textFont(9.0F);
+        titleFont.drawString("Background", titleX, 20.0F, Render2DUtility.applyOpacity(TEXT, visibleAlpha));
+        pathFont.drawString(
+            trimToWidth(pathFont, PathManager.BACKGROUND, panelWidth - PANEL_PADDING * 2.0F),
             titleX,
             45.0F,
-            9.0F,
             Render2DUtility.applyOpacity(TEXT_DIM, visibleAlpha)
         );
 
@@ -206,6 +209,8 @@ public final class MainUI extends Screen {
     private void renderBackgroundRows(float panelX, float listTop, float panelWidth, int mouseX, int mouseY, float alpha) {
         float rowX = panelX + PANEL_PADDING;
         float rowWidth = panelWidth - PANEL_PADDING * 2.0F;
+        FontRenderer nameFont = textFont(11.0F);
+        FontRenderer metaFont = textFont(9.0F);
         for (int i = 0; i < this.backgrounds.size(); i++) {
             float rowY = rowY(listTop, i);
             if (rowY > this.height || rowY + ROW_HEIGHT < listTop) {
@@ -234,9 +239,9 @@ public final class MainUI extends Screen {
 
             float textX = thumbX + THUMBNAIL_WIDTH + 12.0F;
             float textWidth = Math.max(1.0F, rowX + rowWidth - 12.0F - textX);
-            Render2DUtility.drawText(trimToWidth(background.displayName(), textWidth, 11.0F), textX, rowY + 17.0F, 11.0F,
+            nameFont.drawString(trimToWidth(nameFont, background.displayName(), textWidth), textX, rowY + 17.0F,
                 Render2DUtility.applyOpacity(TEXT, alpha));
-            Render2DUtility.drawText(background.animated() ? "Animated" : "Image", textX, rowY + 38.0F, 9.0F,
+            metaFont.drawString(background.animated() ? "Animated" : "Image", textX, rowY + 38.0F,
                 Render2DUtility.applyOpacity(selected ? 0xFFD7E6FF : TEXT_MUTED, alpha));
         }
     }
@@ -372,21 +377,29 @@ public final class MainUI extends Screen {
         Render2DUtility.drawTexture(minecraft.getTextureManager().getTexture(resource).getTextureView(), x, y, width, height, color);
     }
 
-    private String trimToWidth(String text, float maxWidth, float size) {
+    private FontRenderer displayFont(float size) {
+        return FontManager.getAppleDisplayRenderer(size);
+    }
+
+    private FontRenderer textFont(float size) {
+        return FontManager.getAppleTextRenderer(size);
+    }
+
+    private String trimToWidth(FontRenderer renderer, String text, float maxWidth) {
         if (maxWidth <= 0.0F) {
             return "";
         }
-        if (text == null || text.isEmpty() || Render2DUtility.getTextWidth(text, size) <= maxWidth) {
+        if (text == null || text.isEmpty() || renderer.getStringWidth(text) <= maxWidth) {
             return text == null ? "" : text;
         }
 
         String suffix = "...";
-        float suffixWidth = Render2DUtility.getTextWidth(suffix, size);
+        float suffixWidth = renderer.getStringWidth(suffix);
         if (suffixWidth > maxWidth) {
             return "";
         }
         int end = text.length();
-        while (end > 0 && Render2DUtility.getTextWidth(text.substring(0, end), size) + suffixWidth > maxWidth) {
+        while (end > 0 && renderer.getStringWidth(text.substring(0, end)) + suffixWidth > maxWidth) {
             end--;
         }
         return text.substring(0, Math.max(0, end)) + suffix;
