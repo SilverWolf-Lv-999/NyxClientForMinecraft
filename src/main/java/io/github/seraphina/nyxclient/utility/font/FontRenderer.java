@@ -1,6 +1,9 @@
 package io.github.seraphina.nyxclient.utility.font;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
 import io.github.seraphina.nyxclient.manager.FontManager;
 import io.github.seraphina.nyxclient.utility.Render2DUtility;
 import net.minecraft.client.gui.GuiGraphics;
@@ -11,10 +14,12 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import org.joml.Matrix3x2f;
 
+import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphMetrics;
@@ -29,12 +34,18 @@ public final class FontRenderer implements AutoCloseable {
     private static final int INITIAL_ATLAS_SIZE = 1024;
     private static final int MAX_ATLAS_SIZE = 4096;
     private static final int GLYPH_PADDING = 2;
+    private static final float ANTIALIAS_RASTER_SCALE = 2.0F;
+    private static final Color TRANSPARENT_WHITE = new Color(255, 255, 255, 0);
     private static final AtomicInteger TEXTURE_IDS = new AtomicInteger();
 
     private final Font javaFont;
+    private final Font rasterFont;
     private final boolean antialias;
     private final FontRenderContext fontRenderContext;
+    private final FontRenderContext rasterFontRenderContext;
     private final Map<Integer, Glyph> glyphs = new HashMap<>();
+    private final float rasterScale;
+    private final int rasterPadding;
 
     private BufferedImage atlasImage;
     private Graphics2D atlasGraphics;
@@ -58,6 +69,10 @@ public final class FontRenderer implements AutoCloseable {
         this.javaFont = Objects.requireNonNull(javaFont, "javaFont");
         this.antialias = antialias;
         this.fontRenderContext = new FontRenderContext(null, antialias, true);
+        this.rasterFontRenderContext = new FontRenderContext(null, antialias, true);
+        this.rasterScale = antialias ? ANTIALIAS_RASTER_SCALE : 1.0F;
+        this.rasterPadding = Math.max(1, Math.round(GLYPH_PADDING * this.rasterScale));
+        this.rasterFont = this.javaFont.deriveFont(this.javaFont.getSize2D() * this.rasterScale);
         this.atlasSize = INITIAL_ATLAS_SIZE;
         this.atlasImage = createAtlasImage(this.atlasSize);
         this.atlasGraphics = createAtlasGraphics(this.atlasImage);
@@ -116,7 +131,7 @@ public final class FontRenderer implements AutoCloseable {
 
             ensureTexture();
             graphics.submitGuiElementRenderState(new FontTextRenderState(
-                TextureSetup.singleTexture(texture.getTextureView(), texture.getSampler()),
+                TextureSetup.singleTexture(texture.getTextureView(), fontSampler()),
                 new Matrix3x2f(graphics.pose()),
                 layout.quads(),
                 color,
@@ -263,8 +278,8 @@ public final class FontRenderer implements AutoCloseable {
                 draw.y1,
                 glyph.textureX / (float)atlasSize,
                 glyph.textureY / (float)atlasSize,
-                (glyph.textureX + glyph.width) / (float)atlasSize,
-                (glyph.textureY + glyph.height) / (float)atlasSize
+                (glyph.textureX + glyph.textureWidth) / (float)atlasSize,
+                (glyph.textureY + glyph.textureHeight) / (float)atlasSize
             );
         }
 
@@ -274,34 +289,37 @@ public final class FontRenderer implements AutoCloseable {
 
     private Glyph createGlyph(int codePoint) {
         String value = new String(Character.toChars(codePoint));
-        GlyphVector vector = javaFont.createGlyphVector(fontRenderContext, value);
-        java.awt.Rectangle bounds = vector.getPixelBounds(fontRenderContext, 0.0F, 0.0F);
-        GlyphMetrics metrics = vector.getGlyphMetrics(0);
+        GlyphVector logicalVector = javaFont.createGlyphVector(fontRenderContext, value);
+        GlyphMetrics metrics = logicalVector.getGlyphMetrics(0);
         float advance = Math.max(0.0F, metrics.getAdvanceX());
+        GlyphVector rasterVector = rasterFont.createGlyphVector(rasterFontRenderContext, value);
+        Rectangle rasterBounds = rasterVector.getPixelBounds(rasterFontRenderContext, 0.0F, 0.0F);
 
-        if (bounds.width <= 0 || bounds.height <= 0 || Character.isWhitespace(codePoint)) {
-            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, advance, false);
+        if (rasterBounds.width <= 0 || rasterBounds.height <= 0 || Character.isWhitespace(codePoint)) {
+            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, 0.0F, 0.0F, advance, false);
         }
 
-        int width = bounds.width + GLYPH_PADDING * 2;
-        int height = bounds.height + GLYPH_PADDING * 2;
-        GlyphSlot slot = allocateGlyphSlot(width, height);
+        int textureWidth = rasterBounds.width + rasterPadding * 2;
+        int textureHeight = rasterBounds.height + rasterPadding * 2;
+        GlyphSlot slot = allocateGlyphSlot(textureWidth, textureHeight);
         if (slot == null) {
-            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, advance, false);
+            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, 0.0F, 0.0F, advance, false);
         }
 
-        atlasGraphics.setFont(javaFont);
+        atlasGraphics.setFont(rasterFont);
         atlasGraphics.setColor(Color.WHITE);
-        atlasGraphics.drawGlyphVector(vector, slot.x + GLYPH_PADDING - bounds.x, slot.y + GLYPH_PADDING - bounds.y);
+        atlasGraphics.drawGlyphVector(rasterVector, slot.x + rasterPadding - rasterBounds.x, slot.y + rasterPadding - rasterBounds.y);
         textureDirty = true;
 
         return new Glyph(
             slot.x,
             slot.y,
-            width,
-            height,
-            bounds.x - GLYPH_PADDING,
-            bounds.y - GLYPH_PADDING,
+            textureWidth,
+            textureHeight,
+            (rasterBounds.x - rasterPadding) / rasterScale,
+            (rasterBounds.y - rasterPadding) / rasterScale,
+            textureWidth / rasterScale,
+            textureHeight / rasterScale,
             advance,
             true
         );
@@ -381,17 +399,28 @@ public final class FontRenderer implements AutoCloseable {
     }
 
     private static BufferedImage createAtlasImage(int size) {
-        return new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setComposite(AlphaComposite.Src);
+        graphics.setColor(TRANSPARENT_WHITE);
+        graphics.fillRect(0, 0, size, size);
+        graphics.dispose();
+        return image;
     }
 
     private Graphics2D createAtlasGraphics(BufferedImage image) {
         Graphics2D graphics = image.createGraphics();
-        graphics.setFont(javaFont);
+        graphics.setFont(rasterFont);
         graphics.setColor(Color.WHITE);
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, antialias ? RenderingHints.VALUE_ANTIALIAS_ON : RenderingHints.VALUE_ANTIALIAS_OFF);
         graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, antialias ? RenderingHints.VALUE_TEXT_ANTIALIAS_ON : RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
         graphics.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         return graphics;
+    }
+
+    private GpuSampler fontSampler() {
+        return RenderSystem.getSamplerCache().getClampToEdge(antialias ? FilterMode.LINEAR : FilterMode.NEAREST);
     }
 
     private static boolean canRender(String text, int color) {
@@ -416,7 +445,8 @@ public final class FontRenderer implements AutoCloseable {
         return (int)Math.ceil(value);
     }
 
-    private record Glyph(int textureX, int textureY, int width, int height, float xOffset, float yOffset, float advance, boolean visible) {
+    private record Glyph(int textureX, int textureY, int textureWidth, int textureHeight, float xOffset, float yOffset, float width, float height,
+                         float advance, boolean visible) {
     }
 
     private record GlyphSlot(int x, int y) {
