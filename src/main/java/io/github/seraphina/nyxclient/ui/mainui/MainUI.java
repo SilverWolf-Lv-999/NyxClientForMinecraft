@@ -18,8 +18,8 @@ public final class MainUI extends Screen {
     }
 
     @Override
-    public void renderBackground(GuiGraphics p_283688_, int p_296369_, int p_296477_, float p_294317_) {
-        super.renderBackground(p_283688_, p_296369_, p_296477_, p_294317_);
+    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
         Render2DUtility.drawRect(10, 10, 42, 252, Color.RED.getRGB());
     }
 }

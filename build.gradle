@@ -92,9 +92,27 @@ neoForge {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 
+def lwjglVersion = '3.3.3'
+
 dependencies {
     compileOnly "io.github.llamalad7:mixinextras-common:0.5.3"
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
+
+    implementation "org.lwjgl:lwjgl-nanovg:${lwjglVersion}"
+    runtimeOnly "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-linux"
+    runtimeOnly "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-linux-arm64"
+    runtimeOnly "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-windows-arm64"
+    runtimeOnly "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-macos"
+    runtimeOnly "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-macos-arm64"
+
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}"
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-linux"
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-linux-arm64"
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-windows"
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-windows-arm64"
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-macos"
+    jarJar "org.lwjgl:lwjgl-nanovg:${lwjglVersion}:natives-macos-arm64"
 
     // Example mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime

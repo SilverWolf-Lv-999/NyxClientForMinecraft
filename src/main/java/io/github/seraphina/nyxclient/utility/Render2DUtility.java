@@ -14,6 +14,9 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import org.joml.Matrix4f;
 import org.lwjgl.BufferUtils;
+import org.lwjgl.nanovg.NVGColor;
+import org.lwjgl.nanovg.NVGPaint;
+import org.lwjgl.nanovg.NanoVGGL3;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL14;
@@ -21,31 +24,58 @@ import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GL33;
+import org.lwjgl.system.MemoryStack;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.function.Consumer;
 
+import static org.lwjgl.nanovg.NanoVG.NVG_HOLE;
+import static org.lwjgl.nanovg.NanoVG.NVG_ROUND;
+import static org.lwjgl.nanovg.NanoVG.nvgBeginFrame;
+import static org.lwjgl.nanovg.NanoVG.nvgBeginPath;
+import static org.lwjgl.nanovg.NanoVG.nvgBoxGradient;
+import static org.lwjgl.nanovg.NanoVG.nvgCircle;
+import static org.lwjgl.nanovg.NanoVG.nvgEllipse;
+import static org.lwjgl.nanovg.NanoVG.nvgEndFrame;
+import static org.lwjgl.nanovg.NanoVG.nvgFill;
+import static org.lwjgl.nanovg.NanoVG.nvgFillColor;
+import static org.lwjgl.nanovg.NanoVG.nvgFillPaint;
+import static org.lwjgl.nanovg.NanoVG.nvgLineCap;
+import static org.lwjgl.nanovg.NanoVG.nvgLineJoin;
+import static org.lwjgl.nanovg.NanoVG.nvgLineTo;
+import static org.lwjgl.nanovg.NanoVG.nvgLinearGradient;
+import static org.lwjgl.nanovg.NanoVG.nvgMoveTo;
+import static org.lwjgl.nanovg.NanoVG.nvgPathWinding;
+import static org.lwjgl.nanovg.NanoVG.nvgRadialGradient;
+import static org.lwjgl.nanovg.NanoVG.nvgRect;
+import static org.lwjgl.nanovg.NanoVG.nvgResetScissor;
+import static org.lwjgl.nanovg.NanoVG.nvgResetTransform;
+import static org.lwjgl.nanovg.NanoVG.nvgRoundedRect;
+import static org.lwjgl.nanovg.NanoVG.nvgRoundedRectVarying;
+import static org.lwjgl.nanovg.NanoVG.nvgScissor;
+import static org.lwjgl.nanovg.NanoVG.nvgStroke;
+import static org.lwjgl.nanovg.NanoVG.nvgStrokeColor;
+import static org.lwjgl.nanovg.NanoVG.nvgStrokeWidth;
+import static org.lwjgl.nanovg.NanoVG.nvgTransform;
+
 public final class Render2DUtility {
     private static final int MAX_TRACKED_TEXTURE_UNITS = 12;
-    private static final int FLOATS_PER_VERTEX = 6;
     private static final int MIN_SEGMENTS = 18;
     private static final int MAX_SEGMENTS = 96;
     private static final int FULL_BRIGHT = 15728880;
 
-    private static final ThreadLocal<OpenGLRenderer> CURRENT_RENDERER = new ThreadLocal<>();
-    private static final Queue<Consumer<OpenGLRenderer>> PENDING_RENDERERS = new ArrayDeque<>();
+    private static final ThreadLocal<NanoVGRenderer> CURRENT_RENDERER = new ThreadLocal<>();
+    private static final Queue<Consumer<NanoVGRenderer>> PENDING_RENDERERS = new ArrayDeque<>();
 
     private Render2DUtility() {
     }
 
     public static void withOpenGL(Runnable renderer) {
         Objects.requireNonNull(renderer, "renderer");
-        draw(context -> renderer.run());
+        draw(context -> context.runOpenGL(renderer));
     }
 
     public static void flush() {
@@ -60,13 +90,13 @@ public final class Render2DUtility {
             return;
         }
 
-        Queue<Consumer<OpenGLRenderer>> renderers = new ArrayDeque<>(PENDING_RENDERERS);
+        Queue<Consumer<NanoVGRenderer>> renderers = new ArrayDeque<>(PENDING_RENDERERS);
         PENDING_RENDERERS.clear();
 
         GLState state = GLState.capture();
-        OpenGLRenderer renderer = null;
+        NanoVGRenderer renderer = null;
         try {
-            renderer = OpenGLRenderer.create(minecraft);
+            renderer = NanoVGRenderer.create(minecraft);
             renderer.begin();
             CURRENT_RENDERER.set(renderer);
             while (!renderers.isEmpty()) {
@@ -83,7 +113,7 @@ public final class Render2DUtility {
 
     public static void close() {
         RenderSystem.assertOnRenderThread();
-        OpenGLRenderer.closeSharedResources();
+        NanoVGRenderer.closeSharedResources();
     }
 
     public static int rgb(int red, int green, int blue) {
@@ -111,12 +141,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawQuad(
-            new Vertex(x, y, color),
-            new Vertex(x + width, y, color),
-            new Vertex(x + width, y + height, color),
-            new Vertex(x, y + height, color)
-        ));
+        draw(renderer -> renderer.fillRect(x, y, width, height, color));
     }
 
     public static void drawOutlineRect(float x, float y, float width, float height, float strokeWidth, int color) {
@@ -128,7 +153,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawPolygon(filledRoundedRectVertices(x, y, width, height, radius, color)));
+        draw(renderer -> renderer.fillRoundedRect(x, y, width, height, radius, color));
     }
 
     public static void drawRoundedRect(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
@@ -137,8 +162,16 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawPolygon(
-            filledRoundedRectVertices(x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius, color)
+        draw(renderer -> renderer.fillRoundedRect(
+            x,
+            y,
+            width,
+            height,
+            topLeftRadius,
+            topRightRadius,
+            bottomRightRadius,
+            bottomLeftRadius,
+            color
         ));
     }
 
@@ -147,7 +180,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawTriangles(strokedRoundedRectVertices(x, y, width, height, radius, strokeWidth, color)));
+        draw(renderer -> renderer.strokeRoundedRect(x, y, width, height, radius, strokeWidth, color));
     }
 
     public static void drawCircle(float centerX, float centerY, float radius, int color) {
@@ -155,7 +188,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawPolygon(filledEllipseVertices(centerX, centerY, radius, radius, color)));
+        draw(renderer -> renderer.fillCircle(centerX, centerY, radius, color));
     }
 
     public static void drawOutlineCircle(float centerX, float centerY, float radius, float strokeWidth, int color) {
@@ -163,7 +196,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawTriangles(strokedEllipseVertices(centerX, centerY, radius, radius, strokeWidth, color)));
+        draw(renderer -> renderer.strokeCircle(centerX, centerY, radius, strokeWidth, color));
     }
 
     public static void drawOval(float x, float y, float width, float height, int color) {
@@ -171,7 +204,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawPolygon(filledEllipseVertices(x + width * 0.5F, y + height * 0.5F, width * 0.5F, height * 0.5F, color)));
+        draw(renderer -> renderer.fillOval(x + width * 0.5F, y + height * 0.5F, width * 0.5F, height * 0.5F, color));
     }
 
     public static void drawLine(float startX, float startY, float endX, float endY, float strokeWidth, int color) {
@@ -179,27 +212,7 @@ public final class Render2DUtility {
             return;
         }
 
-        float dx = endX - startX;
-        float dy = endY - startY;
-        float length = (float)Math.sqrt(dx * dx + dy * dy);
-        if (length <= 0.0F) {
-            drawCircle(startX, startY, strokeWidth * 0.5F, color);
-            return;
-        }
-
-        float half = strokeWidth * 0.5F;
-        float nx = -dy / length * half;
-        float ny = dx / length * half;
-        draw(renderer -> {
-            renderer.drawQuad(
-                new Vertex(startX + nx, startY + ny, color),
-                new Vertex(endX + nx, endY + ny, color),
-                new Vertex(endX - nx, endY - ny, color),
-                new Vertex(startX - nx, startY - ny, color)
-            );
-            renderer.drawPolygon(filledEllipseVertices(startX, startY, half, half, color));
-            renderer.drawPolygon(filledEllipseVertices(endX, endY, half, half, color));
-        });
+        draw(renderer -> renderer.strokeLine(startX, startY, endX, endY, strokeWidth, color));
     }
 
     public static void drawArc(float x, float y, float width, float height, float startAngle, float sweepAngle, float strokeWidth, int color) {
@@ -207,7 +220,7 @@ public final class Render2DUtility {
             return;
         }
 
-        draw(renderer -> renderer.drawTriangles(strokedArcVertices(x, y, width, height, startAngle, sweepAngle, strokeWidth, color)));
+        draw(renderer -> renderer.strokeArc(x, y, width, height, startAngle, sweepAngle, strokeWidth, color));
     }
 
     public static void drawVerticalGradientRect(float x, float y, float width, float height, int topColor, int bottomColor) {
@@ -230,11 +243,18 @@ public final class Render2DUtility {
         }
 
         Gradient gradient = Gradient.of(colors, positions);
-        draw(renderer -> renderer.drawQuad(
-            new Vertex(x, y, gradient.linearColor(x, y, startX, startY, endX, endY)),
-            new Vertex(x + width, y, gradient.linearColor(x + width, y, startX, startY, endX, endY)),
-            new Vertex(x + width, y + height, gradient.linearColor(x + width, y + height, startX, startY, endX, endY)),
-            new Vertex(x, y + height, gradient.linearColor(x, y + height, startX, startY, endX, endY))
+        draw(renderer -> renderer.fillLinearGradientRect(
+            x,
+            y,
+            width,
+            height,
+            0.0F,
+            startX,
+            startY,
+            endX,
+            endY,
+            gradient.colorAt(0.0F),
+            gradient.colorAt(1.0F)
         ));
     }
 
@@ -258,8 +278,18 @@ public final class Render2DUtility {
         }
 
         Gradient gradient = Gradient.of(colors, positions);
-        draw(renderer -> renderer.drawPolygon(
-            filledRoundedRectVertices(x, y, width, height, radius, local -> gradient.linearColor(local.x, local.y, startX, startY, endX, endY))
+        draw(renderer -> renderer.fillLinearGradientRect(
+            x,
+            y,
+            width,
+            height,
+            radius,
+            startX,
+            startY,
+            endX,
+            endY,
+            gradient.colorAt(0.0F),
+            gradient.colorAt(1.0F)
         ));
     }
 
@@ -278,17 +308,7 @@ public final class Render2DUtility {
         }
 
         Gradient gradient = Gradient.of(colors, positions);
-        int segments = segmentsForRadius(radius);
-        List<Vertex> vertices = new ArrayList<>(segments + 2);
-        vertices.add(new Vertex(centerX, centerY, gradient.colorAt(0.0F)));
-        for (int i = 0; i <= segments; i++) {
-            float angle = (float)(Math.PI * 2.0 * i / segments);
-            float px = centerX + (float)Math.cos(angle) * radius;
-            float py = centerY + (float)Math.sin(angle) * radius;
-            vertices.add(new Vertex(px, py, gradient.colorAt(1.0F)));
-        }
-
-        draw(renderer -> renderer.drawTriangleFan(vertices));
+        draw(renderer -> renderer.fillRadialGradientCircle(centerX, centerY, radius, gradient.colorAt(0.0F), gradient.colorAt(1.0F)));
     }
 
     public static void drawDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
@@ -297,21 +317,7 @@ public final class Render2DUtility {
             return;
         }
 
-        int steps = Math.max(4, Math.min(18, Math.round(blurRadius)));
-        for (int i = steps; i >= 1; i--) {
-            float progress = i / (float)steps;
-            float spread = blurRadius * progress;
-            float alpha = ((color >>> 24) & 0xFF) * (1.0F - progress * 0.85F) / steps;
-            int layerColor = withAlpha(color, Math.round(alpha));
-            drawRoundedRect(
-                x + offsetX - spread,
-                y + offsetY - spread,
-                width + spread * 2.0F,
-                height + spread * 2.0F,
-                radius + spread,
-                layerColor
-            );
-        }
+        draw(renderer -> renderer.drawBoxShadow(x, y, width, height, radius, offsetX, offsetY, blurRadius, color));
     }
 
     public static void drawBlurredRect(float x, float y, float width, float height, float radius, float blurRadius, int color) {
@@ -425,10 +431,10 @@ public final class Render2DUtility {
         }));
     }
 
-    private static void draw(Consumer<OpenGLRenderer> renderer) {
+    private static void draw(Consumer<NanoVGRenderer> renderer) {
         Objects.requireNonNull(renderer, "renderer");
 
-        OpenGLRenderer currentRenderer = CURRENT_RENDERER.get();
+        NanoVGRenderer currentRenderer = CURRENT_RENDERER.get();
         if (currentRenderer != null) {
             renderer.accept(currentRenderer);
             return;
@@ -444,171 +450,6 @@ public final class Render2DUtility {
     private static Font minecraftFont() {
         Minecraft minecraft = Minecraft.getInstance();
         return minecraft == null ? null : minecraft.font;
-    }
-
-    private static List<Vertex> filledRoundedRectVertices(float x, float y, float width, float height, float radius, int color) {
-        return filledRoundedRectVertices(x, y, width, height, radius, radius, radius, radius, color);
-    }
-
-    private static List<Vertex> filledRoundedRectVertices(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
-                                                          float bottomRightRadius, float bottomLeftRadius, int color) {
-        return filledRoundedRectVertices(x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius, point -> color);
-    }
-
-    private static List<Vertex> filledRoundedRectVertices(float x, float y, float width, float height, float radius, ColorPicker colorPicker) {
-        return filledRoundedRectVertices(x, y, width, height, radius, radius, radius, radius, colorPicker);
-    }
-
-    private static List<Vertex> filledRoundedRectVertices(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
-                                                          float bottomRightRadius, float bottomLeftRadius, ColorPicker colorPicker) {
-        int segments = segmentsForRadius(Math.max(Math.max(topLeftRadius, topRightRadius), Math.max(bottomRightRadius, bottomLeftRadius)));
-        List<Point> boundary = roundedRectBoundary(x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius, segments);
-        List<Vertex> vertices = new ArrayList<>(boundary.size() + 1);
-        Point center = new Point(x + width * 0.5F, y + height * 0.5F);
-        vertices.add(new Vertex(center.x, center.y, colorPicker.color(center)));
-        for (Point point : boundary) {
-            vertices.add(new Vertex(point.x, point.y, colorPicker.color(point)));
-        }
-        return vertices;
-    }
-
-    private static List<Vertex> strokedRoundedRectVertices(float x, float y, float width, float height, float radius, float strokeWidth, int color) {
-        float stroke = Math.min(strokeWidth, Math.min(width, height) * 0.5F);
-        if (stroke <= 0.0F) {
-            return List.of();
-        }
-
-        float outerRadius = clampRadius(width, height, radius);
-        float innerWidth = width - stroke * 2.0F;
-        float innerHeight = height - stroke * 2.0F;
-        if (innerWidth <= 0.0F || innerHeight <= 0.0F) {
-            return filledRoundedRectVertices(x, y, width, height, outerRadius, color);
-        }
-
-        int segments = segmentsForRadius(outerRadius);
-        List<Point> outer = roundedRectBoundary(x, y, width, height, outerRadius, outerRadius, outerRadius, outerRadius, segments);
-        List<Point> inner = roundedRectBoundary(
-            x + stroke,
-            y + stroke,
-            innerWidth,
-            innerHeight,
-            Math.max(0.0F, outerRadius - stroke),
-            Math.max(0.0F, outerRadius - stroke),
-            Math.max(0.0F, outerRadius - stroke),
-            Math.max(0.0F, outerRadius - stroke),
-            segments
-        );
-        return ringVertices(outer, inner, color);
-    }
-
-    private static List<Vertex> filledEllipseVertices(float centerX, float centerY, float radiusX, float radiusY, int color) {
-        int segments = segmentsForRadius(Math.max(radiusX, radiusY));
-        List<Vertex> vertices = new ArrayList<>(segments + 2);
-        vertices.add(new Vertex(centerX, centerY, color));
-        for (int i = 0; i <= segments; i++) {
-            float angle = (float)(Math.PI * 2.0 * i / segments);
-            vertices.add(new Vertex(centerX + (float)Math.cos(angle) * radiusX, centerY + (float)Math.sin(angle) * radiusY, color));
-        }
-        return vertices;
-    }
-
-    private static List<Vertex> strokedEllipseVertices(float centerX, float centerY, float radiusX, float radiusY, float strokeWidth, int color) {
-        float stroke = Math.min(strokeWidth, Math.min(radiusX, radiusY));
-        float innerX = Math.max(0.0F, radiusX - stroke);
-        float innerY = Math.max(0.0F, radiusY - stroke);
-        if (innerX <= 0.0F || innerY <= 0.0F) {
-            return filledEllipseVertices(centerX, centerY, radiusX, radiusY, color);
-        }
-
-        int segments = segmentsForRadius(Math.max(radiusX, radiusY));
-        List<Point> outer = new ArrayList<>(segments);
-        List<Point> inner = new ArrayList<>(segments);
-        for (int i = 0; i < segments; i++) {
-            float angle = (float)(Math.PI * 2.0 * i / segments);
-            float cos = (float)Math.cos(angle);
-            float sin = (float)Math.sin(angle);
-            outer.add(new Point(centerX + cos * radiusX, centerY + sin * radiusY));
-            inner.add(new Point(centerX + cos * innerX, centerY + sin * innerY));
-        }
-        return ringVertices(outer, inner, color);
-    }
-
-    private static List<Vertex> strokedArcVertices(float x, float y, float width, float height, float startAngle, float sweepAngle,
-                                                   float strokeWidth, int color) {
-        float centerX = x + width * 0.5F;
-        float centerY = y + height * 0.5F;
-        float radiusX = width * 0.5F;
-        float radiusY = height * 0.5F;
-        float stroke = Math.min(strokeWidth, Math.min(radiusX, radiusY));
-        int segments = Math.max(2, Math.min(MAX_SEGMENTS, (int)Math.ceil(Math.abs(sweepAngle) / 360.0F * segmentsForRadius(Math.max(radiusX, radiusY)))));
-        float innerX = Math.max(0.0F, radiusX - stroke);
-        float innerY = Math.max(0.0F, radiusY - stroke);
-        List<Vertex> vertices = new ArrayList<>(segments * 6);
-        for (int i = 0; i < segments; i++) {
-            float angleA = (float)Math.toRadians(startAngle + sweepAngle * i / segments);
-            float angleB = (float)Math.toRadians(startAngle + sweepAngle * (i + 1) / segments);
-            Point outerA = new Point(centerX + (float)Math.cos(angleA) * radiusX, centerY + (float)Math.sin(angleA) * radiusY);
-            Point outerB = new Point(centerX + (float)Math.cos(angleB) * radiusX, centerY + (float)Math.sin(angleB) * radiusY);
-            Point innerA = new Point(centerX + (float)Math.cos(angleA) * innerX, centerY + (float)Math.sin(angleA) * innerY);
-            Point innerB = new Point(centerX + (float)Math.cos(angleB) * innerX, centerY + (float)Math.sin(angleB) * innerY);
-            addQuad(vertices, outerA, outerB, innerB, innerA, color);
-        }
-        return vertices;
-    }
-
-    private static List<Point> roundedRectBoundary(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
-                                                   float bottomRightRadius, float bottomLeftRadius, int segmentsPerCorner) {
-        float tl = clampRadius(width, height, topLeftRadius);
-        float tr = clampRadius(width, height, topRightRadius);
-        float br = clampRadius(width, height, bottomRightRadius);
-        float bl = clampRadius(width, height, bottomLeftRadius);
-        List<Point> points = new ArrayList<>(segmentsPerCorner * 4 + 4);
-        addCorner(points, x + width - tr, y + tr, tr, 270.0F, 360.0F, segmentsPerCorner);
-        addCorner(points, x + width - br, y + height - br, br, 0.0F, 90.0F, segmentsPerCorner);
-        addCorner(points, x + bl, y + height - bl, bl, 90.0F, 180.0F, segmentsPerCorner);
-        addCorner(points, x + tl, y + tl, tl, 180.0F, 270.0F, segmentsPerCorner);
-        return points;
-    }
-
-    private static void addCorner(List<Point> points, float centerX, float centerY, float radius, float startAngle, float endAngle, int segments) {
-        if (radius <= 0.0F) {
-            points.add(new Point(centerX, centerY));
-            return;
-        }
-
-        for (int i = 0; i <= segments; i++) {
-            if (!points.isEmpty() && i == 0) {
-                continue;
-            }
-            float angle = (float)Math.toRadians(startAngle + (endAngle - startAngle) * i / segments);
-            points.add(new Point(centerX + (float)Math.cos(angle) * radius, centerY + (float)Math.sin(angle) * radius));
-        }
-    }
-
-    private static List<Vertex> ringVertices(List<Point> outer, List<Point> inner, int color) {
-        int count = Math.min(outer.size(), inner.size());
-        List<Vertex> vertices = new ArrayList<>(count * 6);
-        for (int i = 0; i < count; i++) {
-            Point outerA = outer.get(i);
-            Point outerB = outer.get((i + 1) % count);
-            Point innerB = inner.get((i + 1) % count);
-            Point innerA = inner.get(i);
-            addQuad(vertices, outerA, outerB, innerB, innerA, color);
-        }
-        return vertices;
-    }
-
-    private static void addQuad(List<Vertex> vertices, Point a, Point b, Point c, Point d, int color) {
-        vertices.add(new Vertex(a.x, a.y, color));
-        vertices.add(new Vertex(b.x, b.y, color));
-        vertices.add(new Vertex(c.x, c.y, color));
-        vertices.add(new Vertex(c.x, c.y, color));
-        vertices.add(new Vertex(d.x, d.y, color));
-        vertices.add(new Vertex(a.x, a.y, color));
-    }
-
-    private static int segmentsForRadius(float radius) {
-        return Math.max(MIN_SEGMENTS, Math.min(MAX_SEGMENTS, (int)Math.ceil(Math.max(1.0F, radius) * 0.45F)));
     }
 
     private static boolean canDraw(float width, float height, int color) {
@@ -648,8 +489,12 @@ public final class Render2DUtility {
         return Math.max(0.0F, Math.min(1.0F, value));
     }
 
-    private interface ColorPicker {
-        int color(Point point);
+    private static NVGColor nvgColor(int color, MemoryStack stack) {
+        return NVGColor.malloc(stack)
+            .r(((color >>> 16) & 0xFF) / 255.0F)
+            .g(((color >>> 8) & 0xFF) / 255.0F)
+            .b((color & 0xFF) / 255.0F)
+            .a(((color >>> 24) & 0xFF) / 255.0F);
     }
 
     private interface TransformOperation {
@@ -657,9 +502,6 @@ public final class Render2DUtility {
     }
 
     private record Point(float x, float y) {
-    }
-
-    private record Vertex(float x, float y, int color) {
     }
 
     private static final class Gradient {
@@ -684,18 +526,6 @@ public final class Render2DUtility {
                 }
             }
             return new Gradient(colors.clone(), stops.clone());
-        }
-
-        private int linearColor(float x, float y, float startX, float startY, float endX, float endY) {
-            float dx = endX - startX;
-            float dy = endY - startY;
-            float lengthSquared = dx * dx + dy * dy;
-            if (lengthSquared <= 0.0F) {
-                return colorAt(0.0F);
-            }
-
-            float t = ((x - startX) * dx + (y - startY) * dy) / lengthSquared;
-            return colorAt(t);
         }
 
         private int colorAt(float position) {
@@ -812,32 +642,8 @@ public final class Render2DUtility {
         }
     }
 
-    private static final class OpenGLRenderer {
-        private static final String VERTEX_SHADER = """
-            #version 330 core
-            layout(location = 0) in vec2 Position;
-            layout(location = 1) in vec4 Color;
-            uniform vec2 ScreenSize;
-            out vec4 vertexColor;
-            void main() {
-                vec2 normalized = vec2(Position.x / ScreenSize.x * 2.0 - 1.0, 1.0 - Position.y / ScreenSize.y * 2.0);
-                gl_Position = vec4(normalized, 0.0, 1.0);
-                vertexColor = Color;
-            }
-            """;
-        private static final String FRAGMENT_SHADER = """
-            #version 330 core
-            in vec4 vertexColor;
-            out vec4 fragColor;
-            void main() {
-                fragColor = vertexColor;
-            }
-            """;
-
-        private static int shaderProgram;
-        private static int vao;
-        private static int vbo;
-        private static int screenSizeUniform;
+    private static final class NanoVGRenderer {
+        private static long context;
 
         private final Minecraft minecraft;
         private final Window window;
@@ -846,11 +652,11 @@ public final class Render2DUtility {
         private final float scaleX;
         private final float scaleY;
         private final ArrayDeque<Transform> transformStack = new ArrayDeque<>();
-        private final ArrayDeque<ScissorRect> scissorStack = new ArrayDeque<>();
         private Transform transform = new Transform();
         private ScissorRect currentScissor;
+        private boolean frameOpen;
 
-        private OpenGLRenderer(Minecraft minecraft) {
+        private NanoVGRenderer(Minecraft minecraft) {
             this.minecraft = minecraft;
             this.window = minecraft.getWindow();
             this.guiWidth = Math.max(1, this.window.getGuiScaledWidth());
@@ -859,29 +665,38 @@ public final class Render2DUtility {
             this.scaleY = this.window.getHeight() / this.guiHeight;
         }
 
-        private static OpenGLRenderer create(Minecraft minecraft) {
+        private static NanoVGRenderer create(Minecraft minecraft) {
             ensureSharedResources();
-            return new OpenGLRenderer(minecraft);
+            return new NanoVGRenderer(minecraft);
         }
 
         private void begin() {
+            if (frameOpen) {
+                return;
+            }
+
             bindMainRenderTarget();
             GlStateManager._viewport(0, 0, window.getWidth(), window.getHeight());
             GlStateManager._disableDepthTest();
             GlStateManager._depthMask(false);
             GlStateManager._disableCull();
-            GlStateManager._disableStencilTest();
             GlStateManager._enableBlend();
             GL20.glBlendEquationSeparate(GL14.GL_FUNC_ADD, GL14.GL_FUNC_ADD);
             GlStateManager._blendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
             GlStateManager._disableScissorTest();
-            useShader();
+
+            nvgBeginFrame(context, guiWidth, guiHeight, Math.max(scaleX, scaleY));
+            frameOpen = true;
+            applyNanoVGState();
         }
 
         private void end() {
-            GlStateManager._glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-            GlStateManager._glBindVertexArray(0);
-            GlStateManager._glUseProgram(0);
+            if (!frameOpen) {
+                return;
+            }
+
+            nvgEndFrame(context);
+            frameOpen = false;
         }
 
         private void withTransform(Runnable action, TransformOperation operation) {
@@ -896,17 +711,30 @@ public final class Render2DUtility {
 
         private void withClip(float x, float y, float width, float height, Runnable action) {
             ScissorRect previous = currentScissor;
-            scissorStack.push(previous);
             try {
                 ScissorRect clip = toScissor(x, y, width, height);
                 currentScissor = previous == null ? clip : previous.intersect(clip);
-                applyScissor();
                 if (!currentScissor.empty()) {
                     action.run();
                 }
             } finally {
-                currentScissor = scissorStack.pop();
-                applyScissor();
+                currentScissor = previous;
+            }
+        }
+
+        private void runOpenGL(Runnable action) {
+            Objects.requireNonNull(action, "action");
+            if (currentScissor != null && currentScissor.empty()) {
+                return;
+            }
+
+            end();
+            applyGLScissor();
+            try {
+                action.run();
+            } finally {
+                GlStateManager._disableScissorTest();
+                begin();
             }
         }
 
@@ -916,78 +744,302 @@ public final class Render2DUtility {
             }
 
             Matrix4f matrix = transform.toMatrix(x, y, size / font.lineHeight);
-            if (currentScissor != null) {
-                RenderSystem.enableScissorForRenderTypeDraws(currentScissor.x, currentScissor.y, currentScissor.width, currentScissor.height);
-            }
-
-            try (ByteBufferBuilder buffer = new ByteBufferBuilder(786432)) {
-                MultiBufferSource.BufferSource source = MultiBufferSource.immediate(buffer);
-                font.drawInBatch(text, 0.0F, 0.0F, color, false, matrix, source, Font.DisplayMode.NORMAL, 0, FULL_BRIGHT);
-                source.endBatch();
-            } finally {
+            runOpenGL(() -> {
                 if (currentScissor != null) {
-                    RenderSystem.disableScissorForRenderTypeDraws();
+                    RenderSystem.enableScissorForRenderTypeDraws(currentScissor.x, currentScissor.y, currentScissor.width, currentScissor.height);
                 }
-                useShader();
-                applyScissor();
-            }
+
+                try (ByteBufferBuilder buffer = new ByteBufferBuilder(786432)) {
+                    MultiBufferSource.BufferSource source = MultiBufferSource.immediate(buffer);
+                    font.drawInBatch(text, 0.0F, 0.0F, color, false, matrix, source, Font.DisplayMode.NORMAL, 0, FULL_BRIGHT);
+                    source.endBatch();
+                } finally {
+                    if (currentScissor != null) {
+                        RenderSystem.disableScissorForRenderTypeDraws();
+                    }
+                }
+            });
         }
 
-        private void drawQuad(Vertex a, Vertex b, Vertex c, Vertex d) {
-            drawTriangles(List.of(a, b, c, c, d, a));
-        }
-
-        private void drawPolygon(List<Vertex> vertices) {
-            if (vertices.size() < 3) {
+        private void fillRect(float x, float y, float width, float height, int color) {
+            if (isClippedOut()) {
                 return;
             }
 
-            drawTriangleFan(vertices);
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgRect(context, x, y, width, height);
+                nvgFillColor(context, nvgColor(color, stack));
+                nvgFill(context);
+            }
         }
 
-        private void drawTriangleFan(List<Vertex> vertices) {
-            if (vertices.size() < 3) {
+        private void fillRoundedRect(float x, float y, float width, float height, float radius, int color) {
+            if (isClippedOut()) {
                 return;
             }
 
-            float[] data = toData(vertices);
-            draw(data, GL11.GL_TRIANGLE_FAN);
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgRoundedRect(context, x, y, width, height, clampRadius(width, height, radius));
+                nvgFillColor(context, nvgColor(color, stack));
+                nvgFill(context);
+            }
         }
 
-        private void drawTriangles(List<Vertex> vertices) {
-            if (vertices.size() < 3) {
+        private void fillRoundedRect(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
+                                     float bottomRightRadius, float bottomLeftRadius, int color) {
+            if (isClippedOut()) {
                 return;
             }
 
-            float[] data = toData(vertices);
-            draw(data, GL11.GL_TRIANGLES);
+            float tl = clampRadius(width, height, topLeftRadius);
+            float tr = clampRadius(width, height, topRightRadius);
+            float br = clampRadius(width, height, bottomRightRadius);
+            float bl = clampRadius(width, height, bottomLeftRadius);
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgRoundedRectVarying(context, x, y, width, height, tl, tr, br, bl);
+                nvgFillColor(context, nvgColor(color, stack));
+                nvgFill(context);
+            }
         }
 
-        private void draw(float[] vertexData, int mode) {
-            if (vertexData.length == 0 || currentScissor != null && currentScissor.empty()) {
+        private void strokeRoundedRect(float x, float y, float width, float height, float radius, float strokeWidth, int color) {
+            if (isClippedOut()) {
                 return;
             }
 
-            useShader();
-            applyScissor();
-            GL15.glBufferData(GL15.GL_ARRAY_BUFFER, vertexData, GL15.GL_STREAM_DRAW);
-            GL11.glDrawArrays(mode, 0, vertexData.length / FLOATS_PER_VERTEX);
+            float halfStroke = strokeWidth * 0.5F;
+            float localX = x + halfStroke;
+            float localY = y + halfStroke;
+            float localWidth = Math.max(0.0F, width - strokeWidth);
+            float localHeight = Math.max(0.0F, height - strokeWidth);
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgRoundedRect(context, localX, localY, localWidth, localHeight, clampRadius(localWidth, localHeight, radius));
+                nvgStrokeWidth(context, strokeWidth);
+                nvgStrokeColor(context, nvgColor(color, stack));
+                nvgStroke(context);
+            }
         }
 
-        private float[] toData(List<Vertex> vertices) {
-            float[] data = new float[vertices.size() * FLOATS_PER_VERTEX];
-            int index = 0;
-            for (Vertex vertex : vertices) {
-                Point point = transform.transform(vertex.x, vertex.y);
-                int color = vertex.color;
-                data[index++] = point.x;
-                data[index++] = point.y;
-                data[index++] = ((color >>> 16) & 0xFF) / 255.0F;
-                data[index++] = ((color >>> 8) & 0xFF) / 255.0F;
-                data[index++] = (color & 0xFF) / 255.0F;
-                data[index++] = ((color >>> 24) & 0xFF) / 255.0F;
+        private void fillCircle(float centerX, float centerY, float radius, int color) {
+            if (isClippedOut()) {
+                return;
             }
-            return data;
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgCircle(context, centerX, centerY, radius);
+                nvgFillColor(context, nvgColor(color, stack));
+                nvgFill(context);
+            }
+        }
+
+        private void strokeCircle(float centerX, float centerY, float radius, float strokeWidth, int color) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgCircle(context, centerX, centerY, Math.max(0.0F, radius - strokeWidth * 0.5F));
+                nvgStrokeWidth(context, strokeWidth);
+                nvgStrokeColor(context, nvgColor(color, stack));
+                nvgStroke(context);
+            }
+        }
+
+        private void fillOval(float centerX, float centerY, float radiusX, float radiusY, int color) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgEllipse(context, centerX, centerY, radiusX, radiusY);
+                nvgFillColor(context, nvgColor(color, stack));
+                nvgFill(context);
+            }
+        }
+
+        private void strokeLine(float startX, float startY, float endX, float endY, float strokeWidth, int color) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                nvgMoveTo(context, startX, startY);
+                nvgLineTo(context, endX, endY);
+                nvgLineCap(context, NVG_ROUND);
+                nvgLineJoin(context, NVG_ROUND);
+                nvgStrokeWidth(context, strokeWidth);
+                nvgStrokeColor(context, nvgColor(color, stack));
+                nvgStroke(context);
+            }
+        }
+
+        private void strokeArc(float x, float y, float width, float height, float startAngle, float sweepAngle, float strokeWidth, int color) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            float centerX = x + width * 0.5F;
+            float centerY = y + height * 0.5F;
+            float radiusX = width * 0.5F;
+            float radiusY = height * 0.5F;
+            int segments = Math.max(2, Math.min(MAX_SEGMENTS, (int)Math.ceil(Math.abs(sweepAngle) / 360.0F * segmentsForRadius(Math.max(radiusX, radiusY)))));
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                nvgBeginPath(context);
+                for (int i = 0; i <= segments; i++) {
+                    float angle = (float)Math.toRadians(startAngle + sweepAngle * i / segments);
+                    float px = centerX + (float)Math.cos(angle) * radiusX;
+                    float py = centerY + (float)Math.sin(angle) * radiusY;
+                    if (i == 0) {
+                        nvgMoveTo(context, px, py);
+                    } else {
+                        nvgLineTo(context, px, py);
+                    }
+                }
+                nvgLineCap(context, NVG_ROUND);
+                nvgLineJoin(context, NVG_ROUND);
+                nvgStrokeWidth(context, strokeWidth);
+                nvgStrokeColor(context, nvgColor(color, stack));
+                nvgStroke(context);
+            }
+        }
+
+        private void fillLinearGradientRect(float x, float y, float width, float height, float radius, float startX, float startY,
+                                            float endX, float endY, int startColor, int endColor) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            if (startX == endX && startY == endY) {
+                if (radius <= 0.0F) {
+                    fillRect(x, y, width, height, startColor);
+                } else {
+                    fillRoundedRect(x, y, width, height, radius, startColor);
+                }
+                return;
+            }
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                NVGPaint paint = NVGPaint.malloc(stack);
+                nvgLinearGradient(context, startX, startY, endX, endY, nvgColor(startColor, stack), nvgColor(endColor, stack), paint);
+                nvgBeginPath(context);
+                if (radius <= 0.0F) {
+                    nvgRect(context, x, y, width, height);
+                } else {
+                    nvgRoundedRect(context, x, y, width, height, clampRadius(width, height, radius));
+                }
+                nvgFillPaint(context, paint);
+                nvgFill(context);
+            }
+        }
+
+        private void fillRadialGradientCircle(float centerX, float centerY, float radius, int innerColor, int outerColor) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                NVGPaint paint = NVGPaint.malloc(stack);
+                nvgRadialGradient(context, centerX, centerY, 0.0F, radius, nvgColor(innerColor, stack), nvgColor(outerColor, stack), paint);
+                nvgBeginPath(context);
+                nvgCircle(context, centerX, centerY, radius);
+                nvgFillPaint(context, paint);
+                nvgFill(context);
+            }
+        }
+
+        private void drawBoxShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
+                                   float blurRadius, int color) {
+            if (isClippedOut()) {
+                return;
+            }
+
+            float spread = Math.max(1.0F, blurRadius);
+            float shadowX = x + offsetX;
+            float shadowY = y + offsetY;
+            int transparent = withAlpha(color, 0);
+
+            applyNanoVGState();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                NVGPaint paint = NVGPaint.malloc(stack);
+                nvgBoxGradient(
+                    context,
+                    shadowX - spread,
+                    shadowY - spread,
+                    width + spread * 2.0F,
+                    height + spread * 2.0F,
+                    clampRadius(width + spread * 2.0F, height + spread * 2.0F, radius + spread),
+                    blurRadius,
+                    nvgColor(color, stack),
+                    nvgColor(transparent, stack),
+                    paint
+                );
+
+                nvgBeginPath(context);
+                nvgRoundedRect(
+                    context,
+                    shadowX - spread,
+                    shadowY - spread,
+                    width + spread * 2.0F,
+                    height + spread * 2.0F,
+                    clampRadius(width + spread * 2.0F, height + spread * 2.0F, radius + spread)
+                );
+                nvgRoundedRect(context, shadowX, shadowY, width, height, clampRadius(width, height, radius));
+                nvgPathWinding(context, NVG_HOLE);
+                nvgFillPaint(context, paint);
+                nvgFill(context);
+            }
+        }
+
+        private boolean isClippedOut() {
+            return currentScissor != null && currentScissor.empty();
+        }
+
+        private void applyNanoVGState() {
+            begin();
+            nvgResetTransform(context);
+            nvgResetScissor(context);
+            if (currentScissor != null) {
+                if (currentScissor.empty()) {
+                    nvgScissor(context, 0.0F, 0.0F, 0.0F, 0.0F);
+                } else {
+                    float scissorX = currentScissor.x / scaleX;
+                    float scissorY = guiHeight - (currentScissor.y + currentScissor.height) / scaleY;
+                    float scissorWidth = currentScissor.width / scaleX;
+                    float scissorHeight = currentScissor.height / scaleY;
+                    nvgScissor(context, scissorX, scissorY, scissorWidth, scissorHeight);
+                }
+            }
+            nvgTransform(context, transform.a, transform.b, transform.c, transform.d, transform.tx, transform.ty);
+        }
+
+        private void applyGLScissor() {
+            if (currentScissor == null) {
+                GlStateManager._disableScissorTest();
+                return;
+            }
+
+            GlStateManager._enableScissorTest();
+            GlStateManager._scissorBox(currentScissor.x, currentScissor.y, Math.max(0, currentScissor.width), Math.max(0, currentScissor.height));
         }
 
         private ScissorRect toScissor(float x, float y, float width, float height) {
@@ -1007,23 +1059,6 @@ public final class Render2DUtility {
             return new ScissorRect(scissorX, scissorY, scissorWidth, scissorHeight);
         }
 
-        private void applyScissor() {
-            if (currentScissor == null) {
-                GlStateManager._disableScissorTest();
-                return;
-            }
-
-            GlStateManager._enableScissorTest();
-            GlStateManager._scissorBox(currentScissor.x, currentScissor.y, Math.max(0, currentScissor.width), Math.max(0, currentScissor.height));
-        }
-
-        private void useShader() {
-            GlStateManager._glUseProgram(shaderProgram);
-            GL20.glUniform2f(screenSizeUniform, guiWidth, guiHeight);
-            GlStateManager._glBindVertexArray(vao);
-            GlStateManager._glBindBuffer(GL15.GL_ARRAY_BUFFER, vbo);
-        }
-
         private void bindMainRenderTarget() {
             RenderTarget target = minecraft.getMainRenderTarget();
             if (target == null) {
@@ -1035,63 +1070,36 @@ public final class Render2DUtility {
                 GpuTexture depthTexture = target.useDepth ? target.getDepthTexture() : null;
                 int framebufferId = glColorView.texture().getFbo(glDevice.directStateAccess(), depthTexture);
                 GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, framebufferId);
+                GL11.glDrawBuffer(GL30.GL_COLOR_ATTACHMENT0);
+
+                int status = GL30.glCheckFramebufferStatus(GL30.GL_FRAMEBUFFER);
+                if (status != GL30.GL_FRAMEBUFFER_COMPLETE) {
+                    GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
+                    throw new IllegalStateException("Main render target framebuffer is incomplete: 0x" + Integer.toHexString(status));
+                }
             }
+        }
+
+        private static int segmentsForRadius(float radius) {
+            return Math.max(MIN_SEGMENTS, Math.min(MAX_SEGMENTS, (int)Math.ceil(Math.max(1.0F, radius) * 0.45F)));
         }
 
         private static void ensureSharedResources() {
-            if (shaderProgram != 0) {
+            if (context != 0L) {
                 return;
             }
 
-            int vertexShader = compileShader(GL20.GL_VERTEX_SHADER, VERTEX_SHADER);
-            int fragmentShader = compileShader(GL20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
-            shaderProgram = GL20.glCreateProgram();
-            GL20.glAttachShader(shaderProgram, vertexShader);
-            GL20.glAttachShader(shaderProgram, fragmentShader);
-            GL20.glLinkProgram(shaderProgram);
-            if (GL20.glGetProgrami(shaderProgram, GL20.GL_LINK_STATUS) == GL11.GL_FALSE) {
-                throw new IllegalStateException("Failed to link 2D OpenGL shader: " + GL20.glGetProgramInfoLog(shaderProgram));
+            context = NanoVGGL3.nvgCreate(NanoVGGL3.NVG_ANTIALIAS | NanoVGGL3.NVG_STENCIL_STROKES);
+            if (context == 0L) {
+                throw new IllegalStateException("Failed to create NanoVG context");
             }
-            GL20.glDeleteShader(vertexShader);
-            GL20.glDeleteShader(fragmentShader);
-
-            screenSizeUniform = GL20.glGetUniformLocation(shaderProgram, "ScreenSize");
-            vao = GL30.glGenVertexArrays();
-            vbo = GL15.glGenBuffers();
-            GlStateManager._glBindVertexArray(vao);
-            GlStateManager._glBindBuffer(GL15.GL_ARRAY_BUFFER, vbo);
-            GL20.glEnableVertexAttribArray(0);
-            GL20.glVertexAttribPointer(0, 2, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 0L);
-            GL20.glEnableVertexAttribArray(1);
-            GL20.glVertexAttribPointer(1, 4, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 2L * Float.BYTES);
-            GlStateManager._glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-            GlStateManager._glBindVertexArray(0);
-        }
-
-        private static int compileShader(int type, String source) {
-            int shader = GL20.glCreateShader(type);
-            GL20.glShaderSource(shader, source);
-            GL20.glCompileShader(shader);
-            if (GL20.glGetShaderi(shader, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
-                throw new IllegalStateException("Failed to compile 2D OpenGL shader: " + GL20.glGetShaderInfoLog(shader));
-            }
-            return shader;
         }
 
         private static void closeSharedResources() {
-            if (vbo != 0) {
-                GL15.glDeleteBuffers(vbo);
-                vbo = 0;
+            if (context != 0L) {
+                NanoVGGL3.nvgDelete(context);
+                context = 0L;
             }
-            if (vao != 0) {
-                GL30.glDeleteVertexArrays(vao);
-                vao = 0;
-            }
-            if (shaderProgram != 0) {
-                GL20.glDeleteProgram(shaderProgram);
-                shaderProgram = 0;
-            }
-            screenSizeUniform = 0;
         }
     }
 
@@ -1113,6 +1121,20 @@ public final class Render2DUtility {
         private final boolean blend;
         private final boolean cull;
         private final boolean stencilTest;
+        private final int stencilFunc;
+        private final int stencilRef;
+        private final int stencilValueMask;
+        private final int stencilFail;
+        private final int stencilPassDepthFail;
+        private final int stencilPassDepthPass;
+        private final int stencilWriteMask;
+        private final int stencilBackFunc;
+        private final int stencilBackRef;
+        private final int stencilBackValueMask;
+        private final int stencilBackFail;
+        private final int stencilBackPassDepthFail;
+        private final int stencilBackPassDepthPass;
+        private final int stencilBackWriteMask;
         private final boolean framebufferSrgb;
         private final boolean[] colorMask = new boolean[4];
         private final int blendSrcRgb;
@@ -1136,6 +1158,20 @@ public final class Render2DUtility {
             this.blend = GL11.glIsEnabled(GL11.GL_BLEND);
             this.cull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
             this.stencilTest = GL11.glIsEnabled(GL11.GL_STENCIL_TEST);
+            this.stencilFunc = GL11.glGetInteger(GL11.GL_STENCIL_FUNC);
+            this.stencilRef = GL11.glGetInteger(GL11.GL_STENCIL_REF);
+            this.stencilValueMask = GL11.glGetInteger(GL11.GL_STENCIL_VALUE_MASK);
+            this.stencilFail = GL11.glGetInteger(GL11.GL_STENCIL_FAIL);
+            this.stencilPassDepthFail = GL11.glGetInteger(GL11.GL_STENCIL_PASS_DEPTH_FAIL);
+            this.stencilPassDepthPass = GL11.glGetInteger(GL11.GL_STENCIL_PASS_DEPTH_PASS);
+            this.stencilWriteMask = GL11.glGetInteger(GL11.GL_STENCIL_WRITEMASK);
+            this.stencilBackFunc = GL11.glGetInteger(GL20.GL_STENCIL_BACK_FUNC);
+            this.stencilBackRef = GL11.glGetInteger(GL20.GL_STENCIL_BACK_REF);
+            this.stencilBackValueMask = GL11.glGetInteger(GL20.GL_STENCIL_BACK_VALUE_MASK);
+            this.stencilBackFail = GL11.glGetInteger(GL20.GL_STENCIL_BACK_FAIL);
+            this.stencilBackPassDepthFail = GL11.glGetInteger(GL20.GL_STENCIL_BACK_PASS_DEPTH_FAIL);
+            this.stencilBackPassDepthPass = GL11.glGetInteger(GL20.GL_STENCIL_BACK_PASS_DEPTH_PASS);
+            this.stencilBackWriteMask = GL11.glGetInteger(GL20.GL_STENCIL_BACK_WRITEMASK);
             this.framebufferSrgb = GL11.glIsEnabled(GL30.GL_FRAMEBUFFER_SRGB);
             this.blendSrcRgb = GL11.glGetInteger(GL14.GL_BLEND_SRC_RGB);
             this.blendDstRgb = GL11.glGetInteger(GL14.GL_BLEND_DST_RGB);
@@ -1216,6 +1252,12 @@ public final class Render2DUtility {
             } else {
                 GlStateManager._disableStencilTest();
             }
+            GL20.glStencilFuncSeparate(GL11.GL_FRONT, this.stencilFunc, this.stencilRef, this.stencilValueMask);
+            GL20.glStencilFuncSeparate(GL11.GL_BACK, this.stencilBackFunc, this.stencilBackRef, this.stencilBackValueMask);
+            GL20.glStencilOpSeparate(GL11.GL_FRONT, this.stencilFail, this.stencilPassDepthFail, this.stencilPassDepthPass);
+            GL20.glStencilOpSeparate(GL11.GL_BACK, this.stencilBackFail, this.stencilBackPassDepthFail, this.stencilBackPassDepthPass);
+            GL20.glStencilMaskSeparate(GL11.GL_FRONT, this.stencilWriteMask);
+            GL20.glStencilMaskSeparate(GL11.GL_BACK, this.stencilBackWriteMask);
 
             if (this.framebufferSrgb) {
                 GL11.glEnable(GL30.GL_FRAMEBUFFER_SRGB);
