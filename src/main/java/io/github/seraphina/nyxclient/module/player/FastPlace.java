@@ -13,12 +13,9 @@ import net.minecraft.client.Minecraft;
 public class FastPlace extends Module {
     public static final FastPlace INSTANCE = new FastPlace();
 
-    public final IntValue delay = ValueBuild.intSetting("delay", 2, 0, 10, 1, null);
+    public final IntValue delay = ValueBuild.intSetting("delay", 2, 0, 10, 1, this);
 
     public FastPlace() {
-        this.registerValue(
-                delay
-        );
     }
 
     @EventTarget
