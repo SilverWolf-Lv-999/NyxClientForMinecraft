@@ -18,7 +18,7 @@ public class GameRendererMixin {
             shift = At.Shift.AFTER
         )
     )
-    private void flushSkia2D(DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo info) {
+    private void flushOpenGL2D(DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo info) {
         Render2DUtility.flush();
     }
 }

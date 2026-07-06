@@ -21,8 +21,7 @@
     "MinecraftMixin",
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
-    "PlayerMixin",
-    "RenderSystemMixin"
+    "PlayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
