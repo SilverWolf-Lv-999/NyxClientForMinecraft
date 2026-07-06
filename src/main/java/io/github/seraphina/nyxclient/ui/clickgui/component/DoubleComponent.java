@@ -15,6 +15,9 @@ public class DoubleComponent extends AbstractComponent {
     private float sliderY;
     private float sliderWidth;
     private boolean dragging;
+    private float progressVisual = Float.NaN;
+    private float hoverProgress;
+    private float dragProgress;
 
     public DoubleComponent(DoubleValue value) {
         super(value);
@@ -32,9 +35,16 @@ public class DoubleComponent extends AbstractComponent {
 
         drawLabel(width - sliderX + 10.0F);
         float progress = percentage(doubleValue.getValue(), doubleValue.getMin(), doubleValue.getMax());
-        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth, 3.0F, 2.0F, SLIDER_BACKGROUND);
-        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth * progress, 3.0F, 2.0F, ACCENT);
-        Render2DUtility.drawCircle(sliderX + sliderWidth * progress, sliderY + 1.5F, dragging ? 4.0F : 3.0F, TEXT);
+        boolean hovered = isInside(mouseX, mouseY, sliderX - 4.0F, y, sliderWidth + 8.0F, ROW_HEIGHT);
+        hoverProgress = animate(hoverProgress, hovered ? 1.0F : 0.0F, 18.0F);
+        dragProgress = animate(dragProgress, dragging ? 1.0F : 0.0F, 20.0F);
+        progressVisual = animate(progressVisual, progress, dragging ? 30.0F : 14.0F);
+
+        int trackColor = Render2DUtility.mix(SLIDER_BACKGROUND, CONTROL_HOVER, hoverProgress * 0.7F);
+        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth, 3.0F, 2.0F, trackColor);
+        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth * progressVisual, 3.0F, 2.0F, ACCENT);
+        float knobRadius = 3.0F + hoverProgress * 0.45F + dragProgress * 1.0F;
+        Render2DUtility.drawCircle(sliderX + sliderWidth * progressVisual, sliderY + 1.5F, knobRadius, TEXT);
         renderPill(x + width - valueBoxWidth, y + 5.0F, valueBoxWidth, 20.0F, valueText, false);
     }
 

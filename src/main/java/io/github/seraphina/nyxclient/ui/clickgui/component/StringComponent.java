@@ -27,6 +27,9 @@ public class StringComponent extends AbstractComponent {
     private boolean focused;
     private boolean selectedAll;
     private int cursor;
+    private float hoverProgress;
+    private float focusProgress;
+    private float selectionProgress;
 
     public StringComponent(StringValue value) {
         super(value);
@@ -42,22 +45,31 @@ public class StringComponent extends AbstractComponent {
 
         drawLabel(inputWidth + 12.0F);
         boolean hovered = isInside(mouseX, mouseY, inputX, inputY, inputWidth, INPUT_HEIGHT);
-        Render2DUtility.drawRoundedRect(inputX, inputY, inputWidth, INPUT_HEIGHT, 4.0F, focused ? CONTROL_HOVER : CONTROL_BACKGROUND);
-        Render2DUtility.drawOutlineRoundedRect(inputX, inputY, inputWidth, INPUT_HEIGHT, 4.0F, 1.0F, focused ? ACCENT : hovered ? BORDER : BORDER_SOFT);
+        hoverProgress = animate(hoverProgress, hovered ? 1.0F : 0.0F, 18.0F);
+        focusProgress = animate(focusProgress, focused ? 1.0F : 0.0F, 16.0F);
+        selectionProgress = animate(selectionProgress, selectedAll && focused ? 1.0F : 0.0F, 18.0F);
+        int fillColor = Render2DUtility.mix(CONTROL_BACKGROUND, CONTROL_HOVER, Math.max(hoverProgress * 0.55F, focusProgress));
+        int outlineColor = Render2DUtility.mix(BORDER_SOFT, BORDER, hoverProgress);
+        outlineColor = Render2DUtility.mix(outlineColor, ACCENT, focusProgress);
+        Render2DUtility.drawRoundedRect(inputX, inputY, inputWidth, INPUT_HEIGHT, 4.0F, fillColor);
+        Render2DUtility.drawOutlineRoundedRect(inputX, inputY, inputWidth, INPUT_HEIGHT, 4.0F, 1.0F, outlineColor);
 
         FontRenderer inputFont = font(9.0F);
         String text = safeValue();
         cursor = Math.max(0, Math.min(cursor, text.length()));
         String displayText = displayText(inputFont, text, inputWidth - 12.0F);
 
-        if (selectedAll && focused) {
-            Render2DUtility.drawRoundedRect(inputX + 5.0F, inputY + 4.0F, Math.max(2.0F, inputWidth - 10.0F), INPUT_HEIGHT - 8.0F, 2.0F, 0x443D81F7);
+        if (selectionProgress > 0.0F) {
+            Render2DUtility.drawRoundedRect(inputX + 5.0F, inputY + 4.0F, Math.max(2.0F, inputWidth - 10.0F), INPUT_HEIGHT - 8.0F, 2.0F,
+                Render2DUtility.applyOpacity(0x443D81F7, selectionProgress));
         }
 
-        inputFont.drawString(displayText, inputX + 6.0F, inputY + centeredTextY(INPUT_HEIGHT, inputFont), focused ? TEXT : TEXT_SUBTLE);
+        inputFont.drawString(displayText, inputX + 6.0F, inputY + centeredTextY(INPUT_HEIGHT, inputFont),
+            Render2DUtility.mix(TEXT_SUBTLE, TEXT, focusProgress));
         if (focused && shouldDrawCursor()) {
             float cursorX = cursorX(inputFont, text, displayText);
-            Render2DUtility.drawRect(cursorX, inputY + 4.0F, 1.0F, INPUT_HEIGHT - 8.0F, TEXT);
+            Render2DUtility.drawRect(cursorX, inputY + 4.0F, 1.0F, INPUT_HEIGHT - 8.0F,
+                Render2DUtility.applyOpacity(TEXT, focusProgress));
         }
     }
 

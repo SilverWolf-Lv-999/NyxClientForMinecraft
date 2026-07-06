@@ -9,6 +9,8 @@ import net.minecraft.client.input.KeyEvent;
 
 public abstract class AbstractComponent {
     public static final float ROW_HEIGHT = 30.0F;
+    private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
+    private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
 
     protected static final int CONTROL_BACKGROUND = 0xFF0C0D11;
     protected static final int CONTROL_HOVER = 0xFF181B24;
@@ -28,6 +30,8 @@ public abstract class AbstractComponent {
     protected float x;
     protected float y;
     protected float width;
+    private long lastRenderNanos;
+    private float frameSeconds = DEFAULT_FRAME_SECONDS;
 
     protected AbstractComponent(AbstractValue<?> value) {
         this.value = value;
@@ -39,6 +43,7 @@ public abstract class AbstractComponent {
 
     public final void render(float x, float y, float width, int mouseX, int mouseY, float partialTick) {
         setBounds(x, y, width);
+        updateAnimationFrame();
         render(mouseX, mouseY, partialTick);
     }
 
@@ -106,6 +111,20 @@ public abstract class AbstractComponent {
         return FontManager.getClickGuiRenderer(size);
     }
 
+    protected float animate(float current, float target, float speed) {
+        if (Float.isNaN(current)) {
+            return target;
+        }
+
+        float progress = 1.0F - (float)Math.exp(-Math.max(0.0F, speed) * frameSeconds);
+        float result = lerp(current, target, progress);
+        return Math.abs(result - target) < 0.001F ? target : result;
+    }
+
+    protected float frameSeconds() {
+        return frameSeconds;
+    }
+
     protected static int colorToArgb(java.awt.Color color) {
         return Render2DUtility.rgba(color.getRed(), color.getGreen(), color.getBlue(), color.getAlpha());
     }
@@ -135,11 +154,25 @@ public abstract class AbstractComponent {
         return (height - renderer.getLineHeight()) * 0.5F;
     }
 
+    protected static float lerp(float from, float to, float progress) {
+        return from + (to - from) * clamp(progress, 0.0F, 1.0F);
+    }
+
     protected static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
         return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
     }
 
     protected static float clamp(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private void updateAnimationFrame() {
+        long now = System.nanoTime();
+        if (lastRenderNanos == 0L) {
+            frameSeconds = DEFAULT_FRAME_SECONDS;
+        } else {
+            frameSeconds = clamp((now - lastRenderNanos) / 1_000_000_000.0F, 0.0F, MAX_FRAME_SECONDS);
+        }
+        lastRenderNanos = now;
     }
 }

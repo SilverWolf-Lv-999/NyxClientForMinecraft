@@ -31,6 +31,14 @@ public class ColorComponent extends AbstractComponent {
     private boolean draggingPalette;
     private boolean draggingHue;
     private boolean draggingAlpha;
+    private float resetHoverProgress;
+    private float paletteActiveProgress;
+    private float hueActiveProgress;
+    private float alphaActiveProgress;
+    private float visualRed = Float.NaN;
+    private float visualGreen = Float.NaN;
+    private float visualBlue = Float.NaN;
+    private float visualAlpha = Float.NaN;
 
     public ColorComponent(ColorValue value) {
         super(value);
@@ -46,11 +54,15 @@ public class ColorComponent extends AbstractComponent {
         resetX = x + width - resetSize;
         resetY = y;
         boolean resetHovered = isInside(mouseX, mouseY, resetX, resetY, resetSize, resetSize);
-        Render2DUtility.drawRoundedRect(resetX, resetY, resetSize, resetSize, 2.0F, resetHovered ? 0xFFE05252 : CONTROL_HOVER);
-        font(7.0F).drawCenteredString("R", resetX + resetSize * 0.5F, resetY + centeredTextY(resetSize, font(7.0F)), resetHovered ? TEXT : TEXT_SUBTLE);
+        resetHoverProgress = animate(resetHoverProgress, resetHovered ? 1.0F : 0.0F, 18.0F);
+        Render2DUtility.drawRoundedRect(resetX, resetY, resetSize, resetSize, 2.0F,
+            Render2DUtility.mix(CONTROL_HOVER, 0xFFE05252, resetHoverProgress));
+        font(7.0F).drawCenteredString("R", resetX + resetSize * 0.5F, resetY + centeredTextY(resetSize, font(7.0F)),
+            Render2DUtility.mix(TEXT_SUBTLE, TEXT, resetHoverProgress));
 
         Color color = colorValue.getValue();
-        float[] hsb = Color.RGBtoHSB(color.getRed(), color.getGreen(), color.getBlue(), null);
+        Color visualColor = animatedColor(color);
+        float[] hsb = Color.RGBtoHSB(visualColor.getRed(), visualColor.getGreen(), visualColor.getBlue(), null);
         float hue = hsb[0];
         float saturation = hsb[1];
         float brightness = hsb[2];
@@ -65,10 +77,12 @@ public class ColorComponent extends AbstractComponent {
         Render2DUtility.drawVerticalGradientRect(paletteX, paletteY, paletteW, PALETTE_H, 0x00000000, 0xFF000000);
         Render2DUtility.drawOutlineRoundedRect(paletteX, paletteY, paletteW, PALETTE_H, 2.0F, 1.0F, BORDER);
 
+        boolean paletteHovered = isInside(mouseX, mouseY, paletteX, paletteY, paletteW, PALETTE_H);
+        paletteActiveProgress = animate(paletteActiveProgress, draggingPalette || paletteHovered ? 1.0F : 0.0F, 18.0F);
         float indicatorX = paletteX + paletteW * saturation;
         float indicatorY = paletteY + PALETTE_H * (1.0F - brightness);
-        Render2DUtility.drawCircle(indicatorX, indicatorY, 3.0F, TEXT);
-        Render2DUtility.drawOutlineCircle(indicatorX, indicatorY, 4.0F, 1.0F, 0xB0000000);
+        Render2DUtility.drawCircle(indicatorX, indicatorY, 3.0F + paletteActiveProgress * 0.8F, TEXT);
+        Render2DUtility.drawOutlineCircle(indicatorX, indicatorY, 4.0F + paletteActiveProgress * 0.8F, 1.0F, 0xB0000000);
 
         alphaX = paletteX + paletteW + GAP;
         alphaY = paletteY;
@@ -79,18 +93,21 @@ public class ColorComponent extends AbstractComponent {
                 alphaY,
                 ALPHA_W,
                 PALETTE_H,
-                Render2DUtility.rgba(color.getRed(), color.getGreen(), color.getBlue(), 16),
-                Render2DUtility.rgba(color.getRed(), color.getGreen(), color.getBlue(), 255)
+                Render2DUtility.rgba(visualColor.getRed(), visualColor.getGreen(), visualColor.getBlue(), 16),
+                Render2DUtility.rgba(visualColor.getRed(), visualColor.getGreen(), visualColor.getBlue(), 255)
             );
             Render2DUtility.drawOutlineRoundedRect(alphaX, alphaY, ALPHA_W, PALETTE_H, 2.0F, 1.0F, BORDER);
 
-            float alphaIndicatorY = alphaY + PALETTE_H * (1.0F - color.getAlpha() / 255.0F);
-            Render2DUtility.drawRect(alphaX - 1.0F, alphaIndicatorY - 1.0F, ALPHA_W + 2.0F, 2.0F, TEXT);
+            boolean alphaHovered = isInside(mouseX, mouseY, alphaX, alphaY, ALPHA_W, PALETTE_H);
+            alphaActiveProgress = animate(alphaActiveProgress, draggingAlpha || alphaHovered ? 1.0F : 0.0F, 18.0F);
+            float alphaIndicatorY = alphaY + PALETTE_H * (1.0F - visualColor.getAlpha() / 255.0F);
+            Render2DUtility.drawRect(alphaX - 1.0F - alphaActiveProgress, alphaIndicatorY - 1.0F,
+                ALPHA_W + 2.0F + alphaActiveProgress * 2.0F, 2.0F, TEXT);
         }
 
         float previewX = colorValue.isAllowAlpha() ? alphaX : alphaX - GAP;
         float previewY = paletteY + PALETTE_H + 4.0F;
-        Render2DUtility.drawRoundedRect(previewX, previewY, PREVIEW_SIZE, PREVIEW_SIZE, 3.0F, colorToArgb(color));
+        Render2DUtility.drawRoundedRect(previewX, previewY, PREVIEW_SIZE, PREVIEW_SIZE, 3.0F, colorToArgb(visualColor));
         Render2DUtility.drawOutlineRoundedRect(previewX, previewY, PREVIEW_SIZE, PREVIEW_SIZE, 3.0F, 1.0F, BORDER);
 
         hueX = paletteX;
@@ -111,8 +128,11 @@ public class ColorComponent extends AbstractComponent {
         }
         Render2DUtility.drawOutlineRoundedRect(hueX, hueY, hueW, HUE_H, 1.0F, 1.0F, BORDER);
 
+        boolean hueHovered = isInside(mouseX, mouseY, hueX, hueY - 3.0F, hueW, HUE_H + 6.0F);
+        hueActiveProgress = animate(hueActiveProgress, draggingHue || hueHovered ? 1.0F : 0.0F, 18.0F);
         float hueIndicatorX = hueX + hueW * hue;
-        Render2DUtility.drawRect(hueIndicatorX - 1.0F, hueY - 1.0F, 2.0F, HUE_H + 2.0F, TEXT);
+        Render2DUtility.drawRect(hueIndicatorX - 1.0F - hueActiveProgress, hueY - 1.0F,
+            2.0F + hueActiveProgress * 2.0F, HUE_H + 2.0F, TEXT);
     }
 
     @Override
@@ -205,5 +225,13 @@ public class ColorComponent extends AbstractComponent {
     private void setColorFromHsb(float hue, float saturation, float brightness, int alpha) {
         int rgb = Color.HSBtoRGB(hue, saturation, brightness);
         colorValue.setValue(new Color((rgb >>> 16) & 0xFF, (rgb >>> 8) & 0xFF, rgb & 0xFF, alpha));
+    }
+
+    private Color animatedColor(Color target) {
+        visualRed = animate(visualRed, target.getRed(), 18.0F);
+        visualGreen = animate(visualGreen, target.getGreen(), 18.0F);
+        visualBlue = animate(visualBlue, target.getBlue(), 18.0F);
+        visualAlpha = animate(visualAlpha, target.getAlpha(), 18.0F);
+        return new Color(Math.round(visualRed), Math.round(visualGreen), Math.round(visualBlue), Math.round(visualAlpha));
     }
 }

@@ -58,11 +58,15 @@ public class ClickGuiUI extends Screen {
     private static final float MODULE_ROW_HEIGHT = 50.0F;
     private static final float EXPANDED_TOP_PADDING = 8.0F;
     private static final float EXPANDED_BOTTOM_PADDING = 8.0F;
-    private static final float EMPTY_EXPANDED_HEIGHT = 34.0F;
     private static final float BOTTOM_PADDING = 28.0F;
     private static final float SCROLL_STEP = 34.0F;
     private static final float AVATAR_TEXTURE_SIZE = 64.0F;
     private static final long CATEGORY_SWITCH_ANIMATION_NANOS = 260_000_000L;
+    private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
+    private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
+    private static final float MODULE_EXPAND_ANIMATION_SPEED = 13.0F;
+    private static final float MODULE_TOGGLE_ANIMATION_SPEED = 16.0F;
+    private static final float MODULE_HOVER_ANIMATION_SPEED = 18.0F;
 
     private static final int SCREEN_DIM = 0xB005060A;
     private static final int PANEL_BACKGROUND = 0xFF0C0D11;
@@ -86,6 +90,7 @@ public class ClickGuiUI extends Screen {
     private static final AtomicInteger AVATAR_TEXTURE_IDS = new AtomicInteger();
 
     private final Map<Module, Boolean> expandedModules = new IdentityHashMap<>();
+    private final Map<Module, ModuleAnimationState> moduleAnimations = new IdentityHashMap<>();
     private final Map<AbstractValue<?>, AbstractComponent> valueComponents = new IdentityHashMap<>();
     private final String userName;
     @Nullable
@@ -109,6 +114,8 @@ public class ClickGuiUI extends Screen {
     private long categorySwitchStartedAtNanos;
     private int categorySwitchDirection = 1;
     private float categorySwitchProgress = 1.0F;
+    private long lastAnimationFrameNanos;
+    private float animationFrameSeconds = DEFAULT_FRAME_SECONDS;
     @Nullable
     private AbstractComponent capturedComponent;
     @Nullable
@@ -126,7 +133,9 @@ public class ClickGuiUI extends Screen {
         Render2DUtility.withGuiGraphics(guiGraphics, () -> {
             updatePanelMetrics();
             ensureVisibleCategory();
+            updateAnimationFrame();
             updateCategorySwitchAnimation();
+            updateModuleAnimations();
             updateScrollLimit();
 
             float scale = coordinateScale();
@@ -188,8 +197,10 @@ public class ClickGuiUI extends Screen {
         }
 
         if (event.button() == GLFW_MOUSE_BUTTON_RIGHT) {
-            expandedModules.put(row.module(), !isExpanded(row.module()));
-            updateScrollLimit();
+            if (canExpandModule(row.module())) {
+                setModuleExpanded(row.module(), !isExpanded(row.module()));
+                updateScrollLimit();
+            }
             return true;
         }
 
@@ -526,67 +537,81 @@ public class ClickGuiUI extends Screen {
 
     private void renderModuleRow(Module module, float x, float y, float width, float totalHeight, int mouseX, int mouseY) {
         boolean hovered = isInside(mouseX, mouseY, x, y, width, MODULE_ROW_HEIGHT);
-        boolean enabled = module.isEnabled();
-        boolean expanded = isExpanded(module);
+        ModuleAnimationState animation = moduleAnimation(module);
+        animation.hoverProgress = animate(animation.hoverProgress, hovered ? 1.0F : 0.0F, MODULE_HOVER_ANIMATION_SPEED);
+        float hoverProgress = animation.hoverProgress;
+        float enabledProgress = animation.enabledProgress;
+        float expandProgress = animation.expandProgress;
+        boolean expandable = canExpandModule(module);
 
-        if (hovered) {
-            Render2DUtility.drawRoundedRect(x, y + 2.0F, width, MODULE_ROW_HEIGHT - 4.0F, 6.0F, HOVER);
+        if (hoverProgress > 0.0F) {
+            Render2DUtility.drawRoundedRect(x, y + 2.0F, width, MODULE_ROW_HEIGHT - 4.0F, 6.0F,
+                Render2DUtility.applyOpacity(HOVER, hoverProgress));
         }
 
-        if (enabled) {
-            Render2DUtility.drawRect(x + 2.0F, y + 10.0F, 2.0F, MODULE_ROW_HEIGHT - 20.0F, ACCENT);
+        if (enabledProgress > 0.0F) {
+            Render2DUtility.drawRect(x + 2.0F, y + 10.0F, 2.0F, MODULE_ROW_HEIGHT - 20.0F,
+                Render2DUtility.applyOpacity(ACCENT, enabledProgress));
         }
 
         FontRenderer nameFont = clickGuiFont(12.0F);
         FontRenderer descriptionFont = clickGuiFont(10.0F);
-        float arrowAreaWidth = 18.0F;
         float toggleWidth = 32.0F;
         float toggleHeight = 16.0F;
+        float arrowAreaWidth = expandable ? 18.0F : 0.0F;
         float arrowX = x + width - arrowAreaWidth - 8.0F;
-        float toggleX = arrowX - toggleWidth - 12.0F;
+        float toggleX = expandable ? arrowX - toggleWidth - 12.0F : x + width - toggleWidth - 8.0F;
         float textX = x + 12.0F;
         float textWidth = Math.max(20.0F, toggleX - textX - 12.0F);
 
-        nameFont.drawString(trimToWidth(nameFont, module.getName(), textWidth), textX, y + 9.0F, enabled ? TEXT : TEXT_MUTED);
-        descriptionFont.drawString(trimToWidth(descriptionFont, module.getDescription(), textWidth), textX, y + 29.0F, TEXT_DIM);
+        int nameColor = Render2DUtility.mix(TEXT_MUTED, TEXT, Math.max(enabledProgress, hoverProgress * 0.65F));
+        nameFont.drawString(trimToWidth(nameFont, module.getName(), textWidth), textX, y + 9.0F, nameColor);
+        descriptionFont.drawString(trimToWidth(descriptionFont, module.getDescription(), textWidth), textX, y + 29.0F,
+            Render2DUtility.mix(TEXT_DIM, TEXT_SUBTLE, hoverProgress * 0.45F));
 
-        Render2DUtility.drawToggleSwitch(
-            toggleX,
-            y + (MODULE_ROW_HEIGHT - toggleHeight) * 0.5F,
-            toggleWidth,
-            toggleHeight,
-            enabled,
-            ACCENT,
-            TOGGLE_OFF,
-            TEXT
-        );
-        renderChevron(arrowX + arrowAreaWidth * 0.5F, y + MODULE_ROW_HEIGHT * 0.5F, expanded);
+        renderAnimatedToggle(toggleX, y + (MODULE_ROW_HEIGHT - toggleHeight) * 0.5F, toggleWidth, toggleHeight,
+            enabledProgress, hoverProgress);
+        if (expandable) {
+            renderChevron(arrowX + arrowAreaWidth * 0.5F, y + MODULE_ROW_HEIGHT * 0.5F, expandProgress, hoverProgress);
+        }
 
-        if (expanded) {
-            Render2DUtility.drawRect(x + 12.0F, y + MODULE_ROW_HEIGHT, width - 24.0F, 1.0F, DIVIDER);
-            renderExpandedModule(module, x + 12.0F, y + MODULE_ROW_HEIGHT + EXPANDED_TOP_PADDING, width - 24.0F,
-                totalHeight - MODULE_ROW_HEIGHT - EXPANDED_TOP_PADDING - EXPANDED_BOTTOM_PADDING, mouseX, mouseY);
+        float expandedHeight = totalHeight - MODULE_ROW_HEIGHT;
+        if (expandedHeight > 0.5F) {
+            Render2DUtility.drawRect(x + 12.0F, y + MODULE_ROW_HEIGHT, width - 24.0F, 1.0F,
+                Render2DUtility.applyOpacity(DIVIDER, expandProgress));
+            Render2DUtility.withClip(x, y + MODULE_ROW_HEIGHT, width, expandedHeight, () -> {
+                renderExpandedModule(module, x + 12.0F, y + MODULE_ROW_HEIGHT + EXPANDED_TOP_PADDING, width - 24.0F,
+                    Math.max(0.0F, expandedHeight - EXPANDED_TOP_PADDING - EXPANDED_BOTTOM_PADDING), mouseX, mouseY);
+            });
         }
     }
 
-    private void renderChevron(float centerX, float centerY, boolean expanded) {
+    private void renderAnimatedToggle(float x, float y, float width, float height, float enabledProgress, float hoverProgress) {
+        int fillColor = Render2DUtility.mix(TOGGLE_OFF, ACCENT, enabledProgress);
+        if (hoverProgress > 0.0F) {
+            fillColor = Render2DUtility.mix(fillColor, CONTROL_HOVER, hoverProgress * (1.0F - enabledProgress) * 0.45F);
+        }
+
+        Render2DUtility.drawPill(x, y, width, height, fillColor, 0);
+        float padding = Math.max(2.0F, height * 0.125F);
+        float knobRadius = Math.max(1.0F, (height - padding * 2.0F) * 0.5F);
+        float knobX = lerp(x + padding + knobRadius, x + width - padding - knobRadius, enabledProgress);
+        float knobY = y + height * 0.5F;
+        Render2DUtility.drawCircle(knobX, knobY, knobRadius + hoverProgress * 0.5F, TEXT);
+    }
+
+    private void renderChevron(float centerX, float centerY, float expandProgress, float hoverProgress) {
         FontRenderer font = clickGuiFont(14.0F);
         float textWidth = font.getStringWidth(">");
         float textHeight = font.getLineHeight();
-        int color = expanded ? ACCENT : TEXT_SUBTLE;
-        Render2DUtility.withRotation(expanded ? 90.0F : 0.0F, centerX, centerY, () -> {
+        int color = Render2DUtility.mix(TEXT_SUBTLE, ACCENT, Math.max(expandProgress, hoverProgress * 0.35F));
+        Render2DUtility.withRotation(lerp(0.0F, 90.0F, expandProgress), centerX, centerY, () -> {
             font.drawString(">", centerX - textWidth * 0.5F, centerY - textHeight * 0.5F, color);
         });
     }
 
     private void renderExpandedModule(Module module, float x, float y, float width, float height, int mouseX, int mouseY) {
         List<AbstractValue<?>> values = visibleValues(module);
-        FontRenderer smallFont = clickGuiFont(10.0F);
-
-        if (values.isEmpty()) {
-            smallFont.drawString("No settings", x, y + 6.0F, TEXT_DIM);
-            return;
-        }
 
         float rowY = y;
         for (AbstractValue<?> value : values) {
@@ -747,18 +772,24 @@ public class ClickGuiUI extends Screen {
     private List<ValueComponentLayout> buildValueComponentLayouts(Category category, float scrollOffset, float yOffset) {
         List<ValueComponentLayout> layouts = new ArrayList<>();
         for (ModuleRowLayout row : buildModuleRowLayouts(category, scrollOffset, yOffset)) {
-            if (!isExpanded(row.module())) {
+            if (!isExpanded(row.module()) || !canExpandModule(row.module()) || moduleExpandAmount(row.module()) <= 0.05F) {
                 continue;
             }
 
             float componentX = row.x() + 12.0F;
             float componentY = row.y() + MODULE_ROW_HEIGHT + EXPANDED_TOP_PADDING;
             float componentWidth = row.width() - 24.0F;
+            float remainingHeight = row.height() - MODULE_ROW_HEIGHT - EXPANDED_TOP_PADDING - EXPANDED_BOTTOM_PADDING;
             for (AbstractValue<?> value : visibleValues(row.module())) {
+                if (remainingHeight <= 0.0F) {
+                    break;
+                }
+
                 AbstractComponent component = componentFor(value);
                 float componentHeight = component.getHeight();
-                layouts.add(new ValueComponentLayout(component, componentX, componentY, componentWidth, componentHeight));
+                layouts.add(new ValueComponentLayout(component, componentX, componentY, componentWidth, Math.min(componentHeight, remainingHeight)));
                 componentY += componentHeight;
+                remainingHeight -= componentHeight;
             }
         }
         return layouts;
@@ -828,12 +859,12 @@ public class ClickGuiUI extends Screen {
     }
 
     private float moduleRowHeight(Module module) {
-        if (!isExpanded(module)) {
+        List<AbstractValue<?>> values = visibleValues(module);
+        if (values.isEmpty()) {
             return MODULE_ROW_HEIGHT;
         }
 
-        List<AbstractValue<?>> values = visibleValues(module);
-        return MODULE_ROW_HEIGHT + (values.isEmpty() ? EMPTY_EXPANDED_HEIGHT : valuesHeight(values));
+        return MODULE_ROW_HEIGHT + valuesHeight(values) * moduleExpandAmount(module);
     }
 
     private float valuesHeight(List<AbstractValue<?>> values) {
@@ -852,6 +883,10 @@ public class ClickGuiUI extends Screen {
             }
         }
         return values;
+    }
+
+    private boolean canExpandModule(Module module) {
+        return !visibleValues(module).isEmpty();
     }
 
     private AbstractComponent componentFor(AbstractValue<?> value) {
@@ -898,8 +933,25 @@ public class ClickGuiUI extends Screen {
         }
     }
 
+    private void setModuleExpanded(Module module, boolean expanded) {
+        moduleAnimation(module);
+        if (expanded && canExpandModule(module)) {
+            expandedModules.put(module, true);
+        } else {
+            expandedModules.remove(module);
+        }
+    }
+
     private boolean isExpanded(Module module) {
         return expandedModules.getOrDefault(module, false);
+    }
+
+    private float moduleExpandAmount(Module module) {
+        return moduleAnimation(module).expandProgress;
+    }
+
+    private ModuleAnimationState moduleAnimation(Module module) {
+        return moduleAnimations.computeIfAbsent(module, ModuleAnimationState::new);
     }
 
     private void selectCategory(Category category) {
@@ -922,6 +974,16 @@ public class ClickGuiUI extends Screen {
         updateScrollLimit();
     }
 
+    private void updateAnimationFrame() {
+        long now = System.nanoTime();
+        if (lastAnimationFrameNanos == 0L) {
+            animationFrameSeconds = DEFAULT_FRAME_SECONDS;
+        } else {
+            animationFrameSeconds = clamp((now - lastAnimationFrameNanos) / 1_000_000_000.0F, 0.0F, MAX_FRAME_SECONDS);
+        }
+        lastAnimationFrameNanos = now;
+    }
+
     private void updateCategorySwitchAnimation() {
         if (previousCategory == null) {
             categorySwitchProgress = 1.0F;
@@ -935,6 +997,18 @@ public class ClickGuiUI extends Screen {
         }
 
         categorySwitchProgress = easeOutCubic(clamp(rawProgress, 0.0F, 1.0F));
+    }
+
+    private void updateModuleAnimations() {
+        for (Module module : ModuleManager.getModules()) {
+            ModuleAnimationState animation = moduleAnimation(module);
+            boolean expandable = canExpandModule(module);
+            if (!expandable) {
+                expandedModules.remove(module);
+            }
+            animation.expandProgress = animate(animation.expandProgress, expandable && isExpanded(module) ? 1.0F : 0.0F, MODULE_EXPAND_ANIMATION_SPEED);
+            animation.enabledProgress = animate(animation.enabledProgress, module.isEnabled() ? 1.0F : 0.0F, MODULE_TOGGLE_ANIMATION_SPEED);
+        }
     }
 
     private void finishCategorySwitchAnimation() {
@@ -1133,6 +1207,12 @@ public class ClickGuiUI extends Screen {
         return 1.0F - inverse * inverse * inverse;
     }
 
+    private float animate(float current, float target, float speed) {
+        float progress = 1.0F - (float)Math.exp(-Math.max(0.0F, speed) * animationFrameSeconds);
+        float result = lerp(current, target, progress);
+        return Math.abs(result - target) < 0.001F ? target : result;
+    }
+
     private static float lerp(float from, float to, float progress) {
         return from + (to - from) * clamp(progress, 0.0F, 1.0F);
     }
@@ -1181,6 +1261,16 @@ public class ClickGuiUI extends Screen {
         }
 
         return clamp(position, MIN_MARGIN, screenSize - panelSize - MIN_MARGIN);
+    }
+
+    private static final class ModuleAnimationState {
+        private float expandProgress;
+        private float enabledProgress;
+        private float hoverProgress;
+
+        private ModuleAnimationState(Module module) {
+            this.enabledProgress = module.isEnabled() ? 1.0F : 0.0F;
+        }
     }
 
     @Nullable
@@ -1234,5 +1324,15 @@ public class ClickGuiUI extends Screen {
             consumer.addVertexWith2DPose(pose, x1, y1).setUv(1.0F, 1.0F).setColor(0xFFFFFFFF);
             consumer.addVertexWith2DPose(pose, x1, y0).setUv(1.0F, 0.0F).setColor(0xFFFFFFFF);
         }
+    }
+
+    @Override
+    protected void renderBlurredBackground(GuiGraphics guiGraphics) {
+
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+
     }
 }
