@@ -20,6 +20,8 @@ public final class MainUI extends Screen {
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
-        Render2DUtility.drawRect(10, 10, 42, 252, Color.RED.getRGB());
+        Render2DUtility.withGuiGraphics(guiGraphics, () ->
+            Render2DUtility.drawRect(10, 10, 42, 252, Color.RED.getRGB())
+        );
     }
 }

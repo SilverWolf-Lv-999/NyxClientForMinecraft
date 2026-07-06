@@ -1,18 +1,7 @@
 package io.github.seraphina.nyxclient.utility.font;
 
-import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.platform.Window;
 import io.github.seraphina.nyxclient.manager.FontManager;
 import io.github.seraphina.nyxclient.utility.Render2DUtility;
-import io.github.seraphina.nyxclient.utility.render.GL;
-import io.github.seraphina.nyxclient.utility.render.Shader;
-import io.github.seraphina.nyxclient.utility.render.Shaders;
-import net.minecraft.client.Minecraft;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL12;
-import org.lwjgl.opengl.GL13;
-import org.lwjgl.opengl.GL15;
 
 import java.awt.Color;
 import java.awt.Font;
@@ -23,7 +12,6 @@ import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphMetrics;
 import java.awt.font.GlyphVector;
 import java.awt.image.BufferedImage;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -32,10 +20,6 @@ public final class FontRenderer implements AutoCloseable {
     private static final int INITIAL_ATLAS_SIZE = 1024;
     private static final int MAX_ATLAS_SIZE = 4096;
     private static final int GLYPH_PADDING = 2;
-    private static final int FLOATS_PER_VERTEX = 8;
-
-    private static int vao;
-    private static int vbo;
 
     private final Font javaFont;
     private final boolean antialias;
@@ -48,8 +32,6 @@ public final class FontRenderer implements AutoCloseable {
     private int nextX = 1;
     private int nextY = 1;
     private int rowHeight;
-    private int textureId;
-    private boolean atlasDirty = true;
     private boolean closed;
     private final float ascent;
     private final float descent;
@@ -107,7 +89,7 @@ public final class FontRenderer implements AutoCloseable {
             return;
         }
 
-        Render2DUtility.withOpenGL(() -> renderNow(text, x, y, color));
+        Render2DUtility.drawText(text, x, y, lineHeight, color);
     }
 
     public void drawCenteredString(String text, float centerX, float y, int color) {
@@ -165,10 +147,6 @@ public final class FontRenderer implements AutoCloseable {
     @Override
     public synchronized void close() {
         closed = true;
-        if (textureId != 0) {
-            GL11.glDeleteTextures(textureId);
-            textureId = 0;
-        }
         if (atlasGraphics != null) {
             atlasGraphics.dispose();
             atlasGraphics = null;
@@ -178,132 +156,6 @@ public final class FontRenderer implements AutoCloseable {
     }
 
     public static void closeSharedResources() {
-        if (vbo != 0) {
-            GL.deleteBuffer(vbo);
-            vbo = 0;
-        }
-        if (vao != 0) {
-            GL.deleteVertexArray(vao);
-            vao = 0;
-        }
-    }
-
-    private synchronized void renderNow(String text, float x, float y, int color) {
-        if (closed || atlasImage == null) {
-            return;
-        }
-
-        float[] vertices = buildVertices(text, x, y, color);
-        if (vertices.length == 0) {
-            return;
-        }
-
-        ensureSharedResources();
-        ensureTexture();
-
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null) {
-            return;
-        }
-
-        Window window = minecraft.getWindow();
-        float guiWidth = Math.max(1, window.getGuiScaledWidth());
-        float guiHeight = Math.max(1, window.getGuiScaledHeight());
-        if (Shaders.FONT == null) {
-            Shaders.init();
-        }
-
-        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
-        GlStateManager._bindTexture(textureId);
-        Shader shader = Shaders.FONT;
-        shader.bind();
-        shader.set("ScreenSize", guiWidth, guiHeight);
-        shader.set("FontTexture", 0);
-        GL.bindVertexArray(vao);
-        GL.bindVertexBuffer(vbo);
-        GL15.glBufferData(GL15.GL_ARRAY_BUFFER, vertices, GL15.GL_STREAM_DRAW);
-        GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, vertices.length / FLOATS_PER_VERTEX);
-        GL.bindVertexBuffer(0);
-        GL.bindVertexArray(0);
-    }
-
-    private float[] buildVertices(String text, float x, float y, int color) {
-        int vertexFloatCount = visibleGlyphCount(text) * 6 * FLOATS_PER_VERTEX;
-        if (vertexFloatCount == 0) {
-            return new float[0];
-        }
-
-        float[] vertices = new float[vertexFloatCount];
-        int index = 0;
-        float cursorX = x;
-        float baselineY = y + ascent;
-
-        float red = ((color >>> 16) & 0xFF) / 255.0F;
-        float green = ((color >>> 8) & 0xFF) / 255.0F;
-        float blue = (color & 0xFF) / 255.0F;
-        float alpha = ((color >>> 24) & 0xFF) / 255.0F;
-
-        for (int offset = 0; offset < text.length(); ) {
-            int codePoint = text.codePointAt(offset);
-            offset += Character.charCount(codePoint);
-
-            if (codePoint == '\n') {
-                cursorX = x;
-                baselineY += lineHeight;
-                continue;
-            }
-            if (codePoint == '\r') {
-                continue;
-            }
-            if (codePoint == '\t') {
-                cursorX += glyph(' ').advance * 4.0F;
-                continue;
-            }
-
-            Glyph glyph = glyph(codePoint);
-            if (glyph.visible) {
-                float x0 = cursorX + glyph.xOffset;
-                float y0 = baselineY + glyph.yOffset;
-                float x1 = x0 + glyph.width;
-                float y1 = y0 + glyph.height;
-                float u0 = glyph.textureX / (float)atlasSize;
-                float v0 = glyph.textureY / (float)atlasSize;
-                float u1 = (glyph.textureX + glyph.width) / (float)atlasSize;
-                float v1 = (glyph.textureY + glyph.height) / (float)atlasSize;
-
-                index = addVertex(vertices, index, x0, y0, red, green, blue, alpha, u0, v0);
-                index = addVertex(vertices, index, x1, y0, red, green, blue, alpha, u1, v0);
-                index = addVertex(vertices, index, x1, y1, red, green, blue, alpha, u1, v1);
-                index = addVertex(vertices, index, x1, y1, red, green, blue, alpha, u1, v1);
-                index = addVertex(vertices, index, x0, y1, red, green, blue, alpha, u0, v1);
-                index = addVertex(vertices, index, x0, y0, red, green, blue, alpha, u0, v0);
-            }
-
-            cursorX += glyph.advance;
-        }
-
-        if (index == vertices.length) {
-            return vertices;
-        }
-
-        float[] usedVertices = new float[index];
-        System.arraycopy(vertices, 0, usedVertices, 0, index);
-        return usedVertices;
-    }
-
-    private int visibleGlyphCount(String text) {
-        int count = 0;
-        for (int offset = 0; offset < text.length(); ) {
-            int codePoint = text.codePointAt(offset);
-            offset += Character.charCount(codePoint);
-            if (codePoint == '\n' || codePoint == '\r' || codePoint == '\t') {
-                continue;
-            }
-            if (glyph(codePoint).visible) {
-                count++;
-            }
-        }
-        return count;
     }
 
     private Glyph glyph(int codePoint) {
@@ -331,7 +183,6 @@ public final class FontRenderer implements AutoCloseable {
         atlasGraphics.setFont(javaFont);
         atlasGraphics.setColor(Color.WHITE);
         atlasGraphics.drawGlyphVector(vector, slot.x + GLYPH_PADDING - bounds.x, slot.y + GLYPH_PADDING - bounds.y);
-        atlasDirty = true;
 
         return new Glyph(
             slot.x,
@@ -384,30 +235,7 @@ public final class FontRenderer implements AutoCloseable {
         atlasImage = nextImage;
         atlasGraphics = nextGraphics;
         atlasSize = nextSize;
-        atlasDirty = true;
         return true;
-    }
-
-    private void ensureTexture() {
-        if (textureId == 0) {
-            textureId = GL11.glGenTextures();
-            GlStateManager._bindTexture(textureId);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
-            atlasDirty = true;
-        }
-
-        if (!atlasDirty) {
-            return;
-        }
-
-        GlStateManager._bindTexture(textureId);
-        ByteBuffer pixels = imageToRgbaBuffer(atlasImage);
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, atlasSize, atlasSize, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixels);
-        atlasDirty = false;
     }
 
     private static BufferedImage createAtlasImage(int size) {
@@ -424,56 +252,8 @@ public final class FontRenderer implements AutoCloseable {
         return graphics;
     }
 
-    private static ByteBuffer imageToRgbaBuffer(BufferedImage image) {
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int[] argbPixels = new int[width * height];
-        image.getRGB(0, 0, width, height, argbPixels, 0, width);
-
-        ByteBuffer buffer = BufferUtils.createByteBuffer(width * height * 4);
-        for (int argb : argbPixels) {
-            buffer.put((byte)((argb >>> 16) & 0xFF));
-            buffer.put((byte)((argb >>> 8) & 0xFF));
-            buffer.put((byte)(argb & 0xFF));
-            buffer.put((byte)((argb >>> 24) & 0xFF));
-        }
-        buffer.flip();
-        return buffer;
-    }
-
     private static boolean canRender(String text, int color) {
         return text != null && !text.isEmpty() && ((color >>> 24) & 0xFF) != 0;
-    }
-
-    private static int addVertex(float[] vertices, int index, float x, float y, float red, float green, float blue, float alpha, float u, float v) {
-        vertices[index++] = x;
-        vertices[index++] = y;
-        vertices[index++] = red;
-        vertices[index++] = green;
-        vertices[index++] = blue;
-        vertices[index++] = alpha;
-        vertices[index++] = u;
-        vertices[index++] = v;
-        return index;
-    }
-
-    private static void ensureSharedResources() {
-        if (vao != 0 && vbo != 0) {
-            return;
-        }
-
-        vao = GL.genVertexArray();
-        vbo = GL.genBuffer();
-        GL.bindVertexArray(vao);
-        GL.bindVertexBuffer(vbo);
-        GL.enableVertexAttribute(0);
-        GL.vertexAttribute(0, 2, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 0L);
-        GL.enableVertexAttribute(1);
-        GL.vertexAttribute(1, 4, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 2L * Float.BYTES);
-        GL.enableVertexAttribute(2);
-        GL.vertexAttribute(2, 2, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 6L * Float.BYTES);
-        GL.bindVertexBuffer(0);
-        GL.bindVertexArray(0);
     }
 
     private record Glyph(int textureX, int textureY, int width, int height, float xOffset, float yOffset, float advance, boolean visible) {
