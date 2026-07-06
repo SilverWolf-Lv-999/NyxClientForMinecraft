@@ -1,46 +1,51 @@
 package io.github.seraphina.nyxclient.utility.font;
 
-import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.platform.Window;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
 import io.github.seraphina.nyxclient.manager.FontManager;
 import io.github.seraphina.nyxclient.utility.Render2DUtility;
-import io.github.seraphina.nyxclient.utility.render.GL;
-import io.github.seraphina.nyxclient.utility.render.Shader;
-import io.github.seraphina.nyxclient.utility.render.Shaders;
-import net.minecraft.client.Minecraft;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL12;
-import org.lwjgl.opengl.GL13;
-import org.lwjgl.opengl.GL15;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
+import net.minecraft.client.gui.render.TextureSetup;
+import net.minecraft.client.gui.render.state.GuiElementRenderState;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import org.joml.Matrix3x2f;
 
+import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphMetrics;
 import java.awt.font.GlyphVector;
 import java.awt.image.BufferedImage;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class FontRenderer implements AutoCloseable {
     private static final int INITIAL_ATLAS_SIZE = 1024;
     private static final int MAX_ATLAS_SIZE = 4096;
     private static final int GLYPH_PADDING = 2;
-    private static final int FLOATS_PER_VERTEX = 8;
-
-    private static int vao;
-    private static int vbo;
+    private static final float ANTIALIAS_RASTER_SCALE = 2.0F;
+    private static final Color TRANSPARENT_WHITE = new Color(255, 255, 255, 0);
+    private static final AtomicInteger TEXTURE_IDS = new AtomicInteger();
 
     private final Font javaFont;
+    private final Font rasterFont;
     private final boolean antialias;
     private final FontRenderContext fontRenderContext;
+    private final FontRenderContext rasterFontRenderContext;
     private final Map<Integer, Glyph> glyphs = new HashMap<>();
+    private final float rasterScale;
+    private final int rasterPadding;
 
     private BufferedImage atlasImage;
     private Graphics2D atlasGraphics;
@@ -48,9 +53,10 @@ public final class FontRenderer implements AutoCloseable {
     private int nextX = 1;
     private int nextY = 1;
     private int rowHeight;
-    private int textureId;
-    private boolean atlasDirty = true;
     private boolean closed;
+    private DynamicTexture texture;
+    private int textureAtlasSize;
+    private boolean textureDirty = true;
     private final float ascent;
     private final float descent;
     private final float lineHeight;
@@ -63,6 +69,10 @@ public final class FontRenderer implements AutoCloseable {
         this.javaFont = Objects.requireNonNull(javaFont, "javaFont");
         this.antialias = antialias;
         this.fontRenderContext = new FontRenderContext(null, antialias, true);
+        this.rasterFontRenderContext = new FontRenderContext(null, antialias, true);
+        this.rasterScale = antialias ? ANTIALIAS_RASTER_SCALE : 1.0F;
+        this.rasterPadding = Math.max(1, Math.round(GLYPH_PADDING * this.rasterScale));
+        this.rasterFont = this.javaFont.deriveFont(this.javaFont.getSize2D() * this.rasterScale);
         this.atlasSize = INITIAL_ATLAS_SIZE;
         this.atlasImage = createAtlasImage(this.atlasSize);
         this.atlasGraphics = createAtlasGraphics(this.atlasImage);
@@ -107,7 +117,28 @@ public final class FontRenderer implements AutoCloseable {
             return;
         }
 
-        Render2DUtility.withOpenGL(() -> renderNow(text, x, y, color));
+        GuiGraphics graphics = Render2DUtility.currentGuiGraphics();
+        TextLayout layout;
+        synchronized (this) {
+            if (closed) {
+                return;
+            }
+
+            layout = layout(text, x, y);
+            if (layout.quads().length == 0) {
+                return;
+            }
+
+            ensureTexture();
+            graphics.submitGuiElementRenderState(new FontTextRenderState(
+                TextureSetup.singleTexture(texture.getTextureView(), fontSampler()),
+                new Matrix3x2f(graphics.pose()),
+                layout.quads(),
+                color,
+                graphics.peekScissorStack(),
+                layout.bounds()
+            ));
+        }
     }
 
     public void drawCenteredString(String text, float centerX, float y, int color) {
@@ -165,91 +196,44 @@ public final class FontRenderer implements AutoCloseable {
     @Override
     public synchronized void close() {
         closed = true;
-        if (textureId != 0) {
-            GL11.glDeleteTextures(textureId);
-            textureId = 0;
-        }
         if (atlasGraphics != null) {
             atlasGraphics.dispose();
             atlasGraphics = null;
         }
+        if (texture != null) {
+            texture.close();
+            texture = null;
+        }
         atlasImage = null;
         glyphs.clear();
+        textureAtlasSize = 0;
+        textureDirty = false;
     }
 
     public static void closeSharedResources() {
-        if (vbo != 0) {
-            GL.deleteBuffer(vbo);
-            vbo = 0;
-        }
-        if (vao != 0) {
-            GL.deleteVertexArray(vao);
-            vao = 0;
-        }
     }
 
-    private synchronized void renderNow(String text, float x, float y, int color) {
-        if (closed || atlasImage == null) {
-            return;
-        }
-
-        float[] vertices = buildVertices(text, x, y, color);
-        if (vertices.length == 0) {
-            return;
-        }
-
-        ensureSharedResources();
-        ensureTexture();
-
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null) {
-            return;
-        }
-
-        Window window = minecraft.getWindow();
-        float guiWidth = Math.max(1, window.getGuiScaledWidth());
-        float guiHeight = Math.max(1, window.getGuiScaledHeight());
-        if (Shaders.FONT == null) {
-            Shaders.init();
-        }
-
-        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
-        GlStateManager._bindTexture(textureId);
-        Shader shader = Shaders.FONT;
-        shader.bind();
-        shader.set("ScreenSize", guiWidth, guiHeight);
-        shader.set("FontTexture", 0);
-        GL.bindVertexArray(vao);
-        GL.bindVertexBuffer(vbo);
-        GL15.glBufferData(GL15.GL_ARRAY_BUFFER, vertices, GL15.GL_STREAM_DRAW);
-        GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, vertices.length / FLOATS_PER_VERTEX);
-        GL.bindVertexBuffer(0);
-        GL.bindVertexArray(0);
+    private Glyph glyph(int codePoint) {
+        return glyphs.computeIfAbsent(codePoint, this::createGlyph);
     }
 
-    private float[] buildVertices(String text, float x, float y, int color) {
-        int vertexFloatCount = visibleGlyphCount(text) * 6 * FLOATS_PER_VERTEX;
-        if (vertexFloatCount == 0) {
-            return new float[0];
-        }
-
-        float[] vertices = new float[vertexFloatCount];
-        int index = 0;
-        float cursorX = x;
-        float baselineY = y + ascent;
-
-        float red = ((color >>> 16) & 0xFF) / 255.0F;
-        float green = ((color >>> 8) & 0xFF) / 255.0F;
-        float blue = (color & 0xFF) / 255.0F;
-        float alpha = ((color >>> 24) & 0xFF) / 255.0F;
+    private TextLayout layout(String text, float x, float y) {
+        GlyphDraw[] draws = new GlyphDraw[Math.min(text.length(), 256)];
+        int drawCount = 0;
+        float cursorX = 0.0F;
+        float lineY = 0.0F;
+        float minX = Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
 
         for (int offset = 0; offset < text.length(); ) {
             int codePoint = text.codePointAt(offset);
             offset += Character.charCount(codePoint);
 
             if (codePoint == '\n') {
-                cursorX = x;
-                baselineY += lineHeight;
+                cursorX = 0.0F;
+                lineY += lineHeight;
                 continue;
             }
             if (codePoint == '\r') {
@@ -262,84 +246,80 @@ public final class FontRenderer implements AutoCloseable {
 
             Glyph glyph = glyph(codePoint);
             if (glyph.visible) {
-                float x0 = cursorX + glyph.xOffset;
-                float y0 = baselineY + glyph.yOffset;
+                float x0 = x + cursorX + glyph.xOffset;
+                float y0 = y + lineY + ascent + glyph.yOffset;
                 float x1 = x0 + glyph.width;
                 float y1 = y0 + glyph.height;
-                float u0 = glyph.textureX / (float)atlasSize;
-                float v0 = glyph.textureY / (float)atlasSize;
-                float u1 = (glyph.textureX + glyph.width) / (float)atlasSize;
-                float v1 = (glyph.textureY + glyph.height) / (float)atlasSize;
 
-                index = addVertex(vertices, index, x0, y0, red, green, blue, alpha, u0, v0);
-                index = addVertex(vertices, index, x1, y0, red, green, blue, alpha, u1, v0);
-                index = addVertex(vertices, index, x1, y1, red, green, blue, alpha, u1, v1);
-                index = addVertex(vertices, index, x1, y1, red, green, blue, alpha, u1, v1);
-                index = addVertex(vertices, index, x0, y1, red, green, blue, alpha, u0, v1);
-                index = addVertex(vertices, index, x0, y0, red, green, blue, alpha, u0, v0);
+                if (drawCount == draws.length) {
+                    GlyphDraw[] next = new GlyphDraw[draws.length * 2];
+                    System.arraycopy(draws, 0, next, 0, draws.length);
+                    draws = next;
+                }
+                draws[drawCount++] = new GlyphDraw(glyph, x0, y0, x1, y1);
+
+                minX = Math.min(minX, x0);
+                minY = Math.min(minY, y0);
+                maxX = Math.max(maxX, x1);
+                maxY = Math.max(maxY, y1);
             }
 
             cursorX += glyph.advance;
         }
 
-        if (index == vertices.length) {
-            return vertices;
+        GlyphQuad[] visibleQuads = new GlyphQuad[drawCount];
+        for (int i = 0; i < drawCount; i++) {
+            GlyphDraw draw = draws[i];
+            Glyph glyph = draw.glyph;
+            visibleQuads[i] = new GlyphQuad(
+                draw.x0,
+                draw.y0,
+                draw.x1,
+                draw.y1,
+                glyph.textureX / (float)atlasSize,
+                glyph.textureY / (float)atlasSize,
+                (glyph.textureX + glyph.textureWidth) / (float)atlasSize,
+                (glyph.textureY + glyph.textureHeight) / (float)atlasSize
+            );
         }
 
-        float[] usedVertices = new float[index];
-        System.arraycopy(vertices, 0, usedVertices, 0, index);
-        return usedVertices;
-    }
-
-    private int visibleGlyphCount(String text) {
-        int count = 0;
-        for (int offset = 0; offset < text.length(); ) {
-            int codePoint = text.codePointAt(offset);
-            offset += Character.charCount(codePoint);
-            if (codePoint == '\n' || codePoint == '\r' || codePoint == '\t') {
-                continue;
-            }
-            if (glyph(codePoint).visible) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private Glyph glyph(int codePoint) {
-        return glyphs.computeIfAbsent(codePoint, this::createGlyph);
+        Bounds bounds = drawCount == 0 ? null : new Bounds(minX, minY, maxX, maxY);
+        return new TextLayout(visibleQuads, bounds);
     }
 
     private Glyph createGlyph(int codePoint) {
         String value = new String(Character.toChars(codePoint));
-        GlyphVector vector = javaFont.createGlyphVector(fontRenderContext, value);
-        java.awt.Rectangle bounds = vector.getPixelBounds(fontRenderContext, 0.0F, 0.0F);
-        GlyphMetrics metrics = vector.getGlyphMetrics(0);
+        GlyphVector logicalVector = javaFont.createGlyphVector(fontRenderContext, value);
+        GlyphMetrics metrics = logicalVector.getGlyphMetrics(0);
         float advance = Math.max(0.0F, metrics.getAdvanceX());
+        GlyphVector rasterVector = rasterFont.createGlyphVector(rasterFontRenderContext, value);
+        Rectangle rasterBounds = rasterVector.getPixelBounds(rasterFontRenderContext, 0.0F, 0.0F);
 
-        if (bounds.width <= 0 || bounds.height <= 0 || Character.isWhitespace(codePoint)) {
-            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, advance, false);
+        if (rasterBounds.width <= 0 || rasterBounds.height <= 0 || Character.isWhitespace(codePoint)) {
+            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, 0.0F, 0.0F, advance, false);
         }
 
-        int width = bounds.width + GLYPH_PADDING * 2;
-        int height = bounds.height + GLYPH_PADDING * 2;
-        GlyphSlot slot = allocateGlyphSlot(width, height);
+        int textureWidth = rasterBounds.width + rasterPadding * 2;
+        int textureHeight = rasterBounds.height + rasterPadding * 2;
+        GlyphSlot slot = allocateGlyphSlot(textureWidth, textureHeight);
         if (slot == null) {
-            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, advance, false);
+            return new Glyph(0, 0, 0, 0, 0.0F, 0.0F, 0.0F, 0.0F, advance, false);
         }
 
-        atlasGraphics.setFont(javaFont);
+        atlasGraphics.setFont(rasterFont);
         atlasGraphics.setColor(Color.WHITE);
-        atlasGraphics.drawGlyphVector(vector, slot.x + GLYPH_PADDING - bounds.x, slot.y + GLYPH_PADDING - bounds.y);
-        atlasDirty = true;
+        atlasGraphics.drawGlyphVector(rasterVector, slot.x + rasterPadding - rasterBounds.x, slot.y + rasterPadding - rasterBounds.y);
+        textureDirty = true;
 
         return new Glyph(
             slot.x,
             slot.y,
-            width,
-            height,
-            bounds.x - GLYPH_PADDING,
-            bounds.y - GLYPH_PADDING,
+            textureWidth,
+            textureHeight,
+            (rasterBounds.x - rasterPadding) / rasterScale,
+            (rasterBounds.y - rasterPadding) / rasterScale,
+            textureWidth / rasterScale,
+            textureHeight / rasterScale,
             advance,
             true
         );
@@ -384,101 +364,132 @@ public final class FontRenderer implements AutoCloseable {
         atlasImage = nextImage;
         atlasGraphics = nextGraphics;
         atlasSize = nextSize;
-        atlasDirty = true;
+        textureDirty = true;
         return true;
     }
 
     private void ensureTexture() {
-        if (textureId == 0) {
-            textureId = GL11.glGenTextures();
-            GlStateManager._bindTexture(textureId);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
-            atlasDirty = true;
-        }
-
-        if (!atlasDirty) {
+        if (texture != null && textureAtlasSize == atlasSize && !textureDirty) {
             return;
         }
 
-        GlStateManager._bindTexture(textureId);
-        ByteBuffer pixels = imageToRgbaBuffer(atlasImage);
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, atlasSize, atlasSize, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixels);
-        atlasDirty = false;
+        if (texture == null || textureAtlasSize != atlasSize) {
+            if (texture != null) {
+                texture.close();
+            }
+            texture = new DynamicTexture(() -> "nyx-font-atlas-" + TEXTURE_IDS.incrementAndGet(), toNativeImage(atlasImage));
+            textureAtlasSize = atlasSize;
+            textureDirty = false;
+            return;
+        }
+
+        texture.setPixels(toNativeImage(atlasImage));
+        texture.upload();
+        textureDirty = false;
+    }
+
+    private static com.mojang.blaze3d.platform.NativeImage toNativeImage(BufferedImage image) {
+        com.mojang.blaze3d.platform.NativeImage nativeImage = new com.mojang.blaze3d.platform.NativeImage(image.getWidth(), image.getHeight(), true);
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                nativeImage.setPixel(x, y, image.getRGB(x, y));
+            }
+        }
+        return nativeImage;
     }
 
     private static BufferedImage createAtlasImage(int size) {
-        return new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setComposite(AlphaComposite.Src);
+        graphics.setColor(TRANSPARENT_WHITE);
+        graphics.fillRect(0, 0, size, size);
+        graphics.dispose();
+        return image;
     }
 
     private Graphics2D createAtlasGraphics(BufferedImage image) {
         Graphics2D graphics = image.createGraphics();
-        graphics.setFont(javaFont);
+        graphics.setFont(rasterFont);
         graphics.setColor(Color.WHITE);
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, antialias ? RenderingHints.VALUE_ANTIALIAS_ON : RenderingHints.VALUE_ANTIALIAS_OFF);
         graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, antialias ? RenderingHints.VALUE_TEXT_ANTIALIAS_ON : RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
         graphics.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         return graphics;
     }
 
-    private static ByteBuffer imageToRgbaBuffer(BufferedImage image) {
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int[] argbPixels = new int[width * height];
-        image.getRGB(0, 0, width, height, argbPixels, 0, width);
-
-        ByteBuffer buffer = BufferUtils.createByteBuffer(width * height * 4);
-        for (int argb : argbPixels) {
-            buffer.put((byte)((argb >>> 16) & 0xFF));
-            buffer.put((byte)((argb >>> 8) & 0xFF));
-            buffer.put((byte)(argb & 0xFF));
-            buffer.put((byte)((argb >>> 24) & 0xFF));
-        }
-        buffer.flip();
-        return buffer;
+    private GpuSampler fontSampler() {
+        return RenderSystem.getSamplerCache().getClampToEdge(antialias ? FilterMode.LINEAR : FilterMode.NEAREST);
     }
 
     private static boolean canRender(String text, int color) {
         return text != null && !text.isEmpty() && ((color >>> 24) & 0xFF) != 0;
     }
 
-    private static int addVertex(float[] vertices, int index, float x, float y, float red, float green, float blue, float alpha, float u, float v) {
-        vertices[index++] = x;
-        vertices[index++] = y;
-        vertices[index++] = red;
-        vertices[index++] = green;
-        vertices[index++] = blue;
-        vertices[index++] = alpha;
-        vertices[index++] = u;
-        vertices[index++] = v;
-        return index;
+    private static ScreenRectangle boundsFor(Bounds bounds, Matrix3x2f pose, ScreenRectangle scissorArea) {
+        ScreenRectangle rectangle = new ScreenRectangle(
+            floor(bounds.minX),
+            floor(bounds.minY),
+            Math.max(1, ceil(bounds.maxX - bounds.minX)),
+            Math.max(1, ceil(bounds.maxY - bounds.minY))
+        ).transformMaxBounds(pose);
+        return scissorArea == null ? rectangle : scissorArea.intersection(rectangle);
     }
 
-    private static void ensureSharedResources() {
-        if (vao != 0 && vbo != 0) {
-            return;
-        }
-
-        vao = GL.genVertexArray();
-        vbo = GL.genBuffer();
-        GL.bindVertexArray(vao);
-        GL.bindVertexBuffer(vbo);
-        GL.enableVertexAttribute(0);
-        GL.vertexAttribute(0, 2, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 0L);
-        GL.enableVertexAttribute(1);
-        GL.vertexAttribute(1, 4, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 2L * Float.BYTES);
-        GL.enableVertexAttribute(2);
-        GL.vertexAttribute(2, 2, GL11.GL_FLOAT, false, FLOATS_PER_VERTEX * Float.BYTES, 6L * Float.BYTES);
-        GL.bindVertexBuffer(0);
-        GL.bindVertexArray(0);
+    private static int floor(float value) {
+        return (int)Math.floor(value);
     }
 
-    private record Glyph(int textureX, int textureY, int width, int height, float xOffset, float yOffset, float advance, boolean visible) {
+    private static int ceil(float value) {
+        return (int)Math.ceil(value);
+    }
+
+    private record Glyph(int textureX, int textureY, int textureWidth, int textureHeight, float xOffset, float yOffset, float width, float height,
+                         float advance, boolean visible) {
     }
 
     private record GlyphSlot(int x, int y) {
+    }
+
+    private record GlyphDraw(Glyph glyph, float x0, float y0, float x1, float y1) {
+    }
+
+    private record GlyphQuad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1) {
+    }
+
+    private record Bounds(float minX, float minY, float maxX, float maxY) {
+    }
+
+    private record TextLayout(GlyphQuad[] quads, Bounds bounds) {
+    }
+
+    private record FontTextRenderState(
+        TextureSetup textureSetup,
+        Matrix3x2f pose,
+        GlyphQuad[] quads,
+        int color,
+        ScreenRectangle scissorArea,
+        ScreenRectangle bounds
+    ) implements GuiElementRenderState {
+        private FontTextRenderState(TextureSetup textureSetup, Matrix3x2f pose, GlyphQuad[] quads, int color,
+                                    ScreenRectangle scissorArea, Bounds bounds) {
+            this(textureSetup, pose, quads, color, scissorArea, bounds == null ? null : boundsFor(bounds, pose, scissorArea));
+        }
+
+        @Override
+        public com.mojang.blaze3d.pipeline.RenderPipeline pipeline() {
+            return RenderPipelines.GUI_TEXTURED;
+        }
+
+        @Override
+        public void buildVertices(VertexConsumer consumer) {
+            for (GlyphQuad quad : quads) {
+                consumer.addVertexWith2DPose(pose, quad.x0, quad.y0).setUv(quad.u0, quad.v0).setColor(color);
+                consumer.addVertexWith2DPose(pose, quad.x0, quad.y1).setUv(quad.u0, quad.v1).setColor(color);
+                consumer.addVertexWith2DPose(pose, quad.x1, quad.y1).setUv(quad.u1, quad.v1).setColor(color);
+                consumer.addVertexWith2DPose(pose, quad.x1, quad.y0).setUv(quad.u1, quad.v0).setColor(color);
+            }
+        }
     }
 }

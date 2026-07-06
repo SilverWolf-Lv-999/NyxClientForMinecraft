@@ -1,5 +1,6 @@
 package io.github.seraphina.nyxclient.module.client;
 
+import io.github.seraphina.nyxclient.manager.FontManager;
 import io.github.seraphina.nyxclient.module.Category;
 import io.github.seraphina.nyxclient.module.Module;
 import io.github.seraphina.nyxclient.module.ModuleInfo;
@@ -18,6 +19,7 @@ public class ClickGui extends Module {
     @Override
     public void onEnable() {
         super.onEnable();
+        FontManager.initClickGuiFonts();
         if (clickGui == null) {
             clickGui = new ClickGuiUI();
         }
