@@ -43,6 +43,10 @@ public final class Render2DUtility {
     public static void close() {
     }
 
+    public static GuiGraphics currentGuiGraphics() {
+        return currentGraphics();
+    }
+
     public static int rgb(int red, int green, int blue) {
         return rgba(red, green, blue, 255);
     }

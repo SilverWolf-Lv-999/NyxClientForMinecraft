@@ -110,7 +110,7 @@ public class ClickGuiUI extends Screen {
         int moduleCount = ModuleManager.getModules().size();
 
         Render2DUtility.drawRect(0.0F, 0.0F, this.width, GLOBAL_NAV_HEIGHT, SURFACE_BLACK);
-        FontRenderer navFont = appleText(12.0F);
+        FontRenderer navFont = clickGuiFont(12.0F);
         navFont.drawString("Nyx", contentX, centeredTextY(GLOBAL_NAV_HEIGHT, navFont), CANVAS);
 
         if (contentWidth > 520.0F) {
@@ -137,10 +137,10 @@ public class ClickGuiUI extends Screen {
         Render2DUtility.drawRect(0.0F, GLOBAL_NAV_HEIGHT, this.width, SUB_NAV_HEIGHT, FROSTED_PARCHMENT);
         Render2DUtility.drawRect(0.0F, GLOBAL_NAV_HEIGHT + SUB_NAV_HEIGHT - 1.0F, this.width, 1.0F, HAIRLINE);
 
-        FontRenderer subTitleFont = appleDisplay(21.0F);
+        FontRenderer subTitleFont = clickGuiFont(21.0F);
         subTitleFont.drawString("ClickGui", contentX, GLOBAL_NAV_HEIGHT + centeredTextY(SUB_NAV_HEIGHT, subTitleFont), INK);
 
-        FontRenderer buttonFont = appleText(14.0F);
+        FontRenderer buttonFont = clickGuiFont(14.0F);
         String pillText = enabledCount + " Enabled";
         float pillWidth = Math.max(94.0F, buttonFont.getStringWidth(pillText) + 28.0F);
         float pillHeight = 28.0F;
@@ -164,9 +164,9 @@ public class ClickGuiUI extends Screen {
 
     private void renderHero(float x, float y, float width) {
         boolean compact = width < 520.0F;
-        FontRenderer titleFont = appleDisplay(compact ? 30.0F : 34.0F);
-        FontRenderer bodyFont = appleText(17.0F);
-        FontRenderer pillFont = appleText(14.0F);
+        FontRenderer titleFont = clickGuiFont(compact ? 30.0F : 34.0F);
+        FontRenderer bodyFont = clickGuiFont(17.0F);
+        FontRenderer pillFont = clickGuiFont(14.0F);
         int enabledCount = enabledModuleCount();
         int moduleCount = ModuleManager.getModules().size();
 
@@ -190,8 +190,8 @@ public class ClickGuiUI extends Screen {
         float innerX = layout.x() + CARD_PADDING;
         float innerWidth = layout.width() - CARD_PADDING * 2.0F;
         float titleY = layout.y() + CARD_PADDING;
-        FontRenderer titleFont = appleText(17.0F);
-        FontRenderer captionFont = appleText(12.0F);
+        FontRenderer titleFont = clickGuiFont(17.0F);
+        FontRenderer captionFont = clickGuiFont(12.0F);
         String categoryName = categoryLabel(layout.category());
         String countLabel = enabledModuleCount(layout.modules()) + "/" + layout.modules().size();
 
@@ -217,8 +217,8 @@ public class ClickGuiUI extends Screen {
             Render2DUtility.drawOutlineRoundedRect(x, y, width, MODULE_ROW_HEIGHT, MODULE_ROW_RADIUS, 2.0F, ACTION_BLUE);
         }
 
-        FontRenderer nameFont = appleText(15.0F);
-        FontRenderer descriptionFont = appleText(12.0F);
+        FontRenderer nameFont = clickGuiFont(15.0F);
+        FontRenderer descriptionFont = clickGuiFont(12.0F);
         float toggleWidth = 42.0F;
         float toggleHeight = 24.0F;
         float toggleX = x + width - toggleWidth - 14.0F;
@@ -360,12 +360,8 @@ public class ClickGuiUI extends Screen {
         return Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
 
-    private FontRenderer appleDisplay(float size) {
-        return FontManager.getAppleDisplayRenderer(size);
-    }
-
-    private FontRenderer appleText(float size) {
-        return FontManager.getAppleTextRenderer(size);
+    private FontRenderer clickGuiFont(float size) {
+        return FontManager.getClickGuiRenderer(size);
     }
 
     private static String trimToWidth(FontRenderer renderer, String text, float maxWidth) {
