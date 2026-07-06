@@ -12,11 +12,13 @@ public class Client extends Module {
 
     public final EnumValue<Language> LANGUAGE = ValueBuild.enumSetting("language", Language.EN_US, this);
 
-    public Client() {
-        this.registerValue(LANGUAGE);
-    }
-
     public enum Language {
         EN_US,ZH_CN,MINECRAFT_LANGUAGE;
+    }
+
+    @Override
+    public void onEnable() {
+        super.onEnable();
+        this.setEnabled(false);
     }
 }
