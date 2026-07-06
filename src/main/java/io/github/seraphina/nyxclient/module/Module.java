@@ -1,6 +1,7 @@
 package io.github.seraphina.nyxclient.module;
 
 import io.github.seraphina.nyxclient.events.api.EventManager;
+import io.github.seraphina.nyxclient.utility.IMinecraft;
 import io.github.seraphina.nyxclient.utility.LanguageUtility;
 import io.github.seraphina.nyxclient.value.AbstractValue;
 import io.github.seraphina.nyxclient.value.ValueGroup;
@@ -10,7 +11,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-public abstract class Module {
+public abstract class Module implements IMinecraft {
     private final List<AbstractValue<?>> values = new ArrayList<>();
     private final List<ValueGroup> valueGroups = new ArrayList<>();
     boolean enabled;

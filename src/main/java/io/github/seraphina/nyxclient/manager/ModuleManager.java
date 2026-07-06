@@ -1,6 +1,7 @@
 package io.github.seraphina.nyxclient.manager;
 
 import io.github.seraphina.nyxclient.module.Module;
+import io.github.seraphina.nyxclient.module.client.ClickGui;
 import io.github.seraphina.nyxclient.module.movement.Scaffold;
 import io.github.seraphina.nyxclient.module.other.Test;
 import io.github.seraphina.nyxclient.module.Category;
@@ -29,7 +30,7 @@ public final class ModuleManager {
 
         //Client
         registerModule(
-
+                ClickGui.INSTANCE
         );
         //Combat
         registerModule(
