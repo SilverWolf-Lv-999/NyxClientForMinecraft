@@ -6,9 +6,11 @@ import io.github.seraphina.nyxclient.module.client.ClickGui;
 import io.github.seraphina.nyxclient.module.client.Client;
 import io.github.seraphina.nyxclient.module.combat.KillAura;
 import io.github.seraphina.nyxclient.module.movement.BHop;
+import io.github.seraphina.nyxclient.module.movement.LowHop;
 import io.github.seraphina.nyxclient.module.movement.Scaffold;
 import io.github.seraphina.nyxclient.module.movement.Sprint;
 import io.github.seraphina.nyxclient.module.other.Test;
+import io.github.seraphina.nyxclient.module.player.DelayRemover;
 import io.github.seraphina.nyxclient.module.player.FastPlace;
 import io.github.seraphina.nyxclient.module.visual.Cape;
 
@@ -40,6 +42,7 @@ public final class ModuleManager {
         registerModule(
                 Scaffold.INSTANCE,
                 BHop.INSTANCE,
+                LowHop.INSTANCE,
                 Sprint.INSTANCE
         );
         //Other
@@ -48,7 +51,8 @@ public final class ModuleManager {
         );
         //Player
         registerModule(
-                FastPlace.INSTANCE
+                FastPlace.INSTANCE,
+                DelayRemover.INSTANCE
         );
         //Visual
         registerModule(
