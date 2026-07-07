@@ -142,7 +142,7 @@ public final class ConfigManager {
         JsonObject values = new JsonObject();
         for (AbstractValue<?> value : module.getValues()) {
             if (value.isSerializable()) {
-                values.add(value.getName(), value.toJson());
+                values.add(value.getConfigName(), value.toJson());
             }
         }
 
@@ -161,7 +161,7 @@ public final class ConfigManager {
                 : new JsonObject();
 
         for (AbstractValue<?> value : module.getValues()) {
-            JsonElement valueElement = values.get(value.getName());
+            JsonElement valueElement = values.get(value.getConfigName());
             if (valueElement == null) {
                 continue;
             }

@@ -44,6 +44,10 @@ public abstract class AbstractValue<T> {
         return name;
     }
 
+    public String getConfigName() {
+        return name;
+    }
+
     public String getDisplayName() {
         return LanguageUtility.translate(name);
     }
@@ -116,7 +120,6 @@ public abstract class AbstractValue<T> {
 
     public JsonObject toJson() {
         JsonObject object = new JsonObject();
-        object.addProperty("name", name);
         object.addProperty("type", getType());
         object.add("value", writeValue());
         return object;

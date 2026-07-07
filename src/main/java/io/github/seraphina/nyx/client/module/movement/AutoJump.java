@@ -19,8 +19,8 @@ public class AutoJump extends Module {
     private static final double EDGE_PROBE_DEPTH = 0.08;
     private static final double STEP_LOOK_AHEAD = 0.24;
 
-    public final BoolValue edge = ValueBuild.boolSetting("nyxclient.setting.autojump.edge.name", true, this);
-    public final BoolValue step = ValueBuild.boolSetting("nyxclient.setting.autojump.step.name", true, this);
+    public final BoolValue edge = ValueBuild.boolSetting("edge", true, this);
+    public final BoolValue step = ValueBuild.boolSetting("step", true, this);
 
     public AutoJump() {
 

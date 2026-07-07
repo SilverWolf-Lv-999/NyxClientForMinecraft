@@ -20,9 +20,9 @@ import java.util.Locale;
 public class AutoHeal extends Module {
     public static final AutoHeal INSTANCE = new AutoHeal();
 
-    public final BoolValue goldHead = ValueBuild.boolSetting("nyxclient.setting.autoheal.goldhead.name", true, this);
-    public final BoolValue goldApple = ValueBuild.boolSetting("nyxclient.setting.autoheal.goldapple.name", true, this);
-    public final BoolValue triggerWithBlocks = ValueBuild.boolSetting("nyxclient.setting.autoheal.triggerwithblocks.name", true, this);
+    public final BoolValue goldHead = ValueBuild.boolSetting("goldhead", true, this);
+    public final BoolValue goldApple = ValueBuild.boolSetting("goldapple", true, this);
+    public final BoolValue triggerWithBlocks = ValueBuild.boolSetting("triggerwithblocks", true, this);
 
     private ActiveUse activeUse;
     private boolean waitForUseRelease;
