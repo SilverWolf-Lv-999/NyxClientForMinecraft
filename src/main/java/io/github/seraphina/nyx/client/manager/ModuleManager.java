@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.module.movement.Sprint;
 import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.DelayRemover;
 import io.github.seraphina.nyx.client.module.player.FastPlace;
+import io.github.seraphina.nyx.client.module.visual.Animations;
 import io.github.seraphina.nyx.client.module.visual.Cape;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 import io.github.seraphina.nyx.client.module.visual.hud.HUD;
@@ -60,7 +61,8 @@ public final class ModuleManager {
         registerModule(
                 Cape.INSTANCE,
                 NoRenderer.INSTANCE,
-                HUD.INSTANCE
+                HUD.INSTANCE,
+                Animations.INSTANCE
         );
 
         initialized = true;
