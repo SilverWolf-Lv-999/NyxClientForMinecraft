@@ -6,19 +6,25 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.value.ValueBuild;
+import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 
 @ModuleInfo(name = "nyxclient.module.animations.name", description = "nyxclient.module.animations.description", category = Category.VISUAL)
 public class Animations extends Module {
     public static final Animations INSTANCE = new Animations();
 
-    public final DoubleValue value = ValueBuild.doubleValue("scale", 1.0, 0.1, 10.0, 0.1, this);
-    public final DoubleValue xPos = ValueBuild.doubleValue("x pos", 0.0, -10.0, 10.0, 0.01, this);
-    public final DoubleValue yPos = ValueBuild.doubleValue("y pos", 0.0, -10.0, 10.0, 0.01, this);
-    public final DoubleValue zPos = ValueBuild.doubleValue("z pos", 0.0, -10.0, 10.0, 0.01, this);
-    public final DoubleValue xRot = ValueBuild.doubleValue("x rot", 0.0, -180.0, 180.0, 1.0, this);
-    public final DoubleValue yRot = ValueBuild.doubleValue("y rot", 0.0, -180.0, 180.0, 1.0, this);
-    public final DoubleValue zRot = ValueBuild.doubleValue("z rot", 0.0, -180.0, 180.0, 1.0, this);
+    public final BoolValue noEatBobbing = ValueBuild.boolSetting("nyxclient.setting.animations.noeatbobbing.name", false, this);
+    public final DoubleValue value = ValueBuild.doubleValue("nyxclient.setting.animations.scale.name", 1.0, 0.1, 10.0, 0.1, this);
+    public final DoubleValue xPos = ValueBuild.doubleValue("nyxclient.setting.animations.xpos.name", 0.0, -10.0, 10.0, 0.01, this);
+    public final DoubleValue yPos = ValueBuild.doubleValue("nyxclient.setting.animations.ypos.name", 0.0, -10.0, 10.0, 0.01, this);
+    public final DoubleValue zPos = ValueBuild.doubleValue("nyxclient.setting.animations.zpos.name", 0.0, -10.0, 10.0, 0.01, this);
+    public final DoubleValue xRot = ValueBuild.doubleValue("nyxclient.setting.animations.xrot.name", 0.0, -180.0, 180.0, 1.0, this);
+    public final DoubleValue yRot = ValueBuild.doubleValue("nyxclient.setting.animations.yrot.name", 0.0, -180.0, 180.0, 1.0, this);
+    public final DoubleValue zRot = ValueBuild.doubleValue("nyxclient.setting.animations.zrot.name", 0.0, -180.0, 180.0, 1.0, this);
+
+    public boolean shouldDisableEatBobbing() {
+        return isEnabled() && noEatBobbing.getValue();
+    }
 
     @EventTarget
     public void render(RenderItemInHandEvent event) {
