@@ -78,16 +78,16 @@ NyxClient 的功能以 `Module` 为单位组织。一个模块通常需要创建
 在合适的分类目录下创建模块，例如 `module/player/ExampleModule.java`：
 
 ```java
-package io.github.seraphina.nyxclient.module.player;
+package io.github.seraphina.nyx.client.module.player;
 
-import io.github.seraphina.nyxclient.module.Category;
-import io.github.seraphina.nyxclient.module.Module;
-import io.github.seraphina.nyxclient.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.Category;
+import io.github.seraphina.nyx.client.module.Module;
+import io.github.seraphina.nyx.client.module.ModuleInfo;
 
 @ModuleInfo(
-    name = "nyxclient.module.example.name",
-    description = "nyxclient.module.example.description",
-    category = Category.PLAYER
+        name = "nyxclient.module.example.name",
+        description = "nyxclient.module.example.description",
+        category = Category.PLAYER
 )
 public class ExampleModule extends Module {
     public static final ExampleModule INSTANCE = new ExampleModule();
@@ -108,9 +108,9 @@ COMBAT, MOVEMENT, PLAYER, CLIENT, OTHER, VISUAL
 模块设置通过 `ValueBuild` 创建，并会自动加入模块的配置值列表。可用类型包括布尔、整数、小数、枚举、字符串、颜色、按键和按钮。
 
 ```java
-import io.github.seraphina.nyxclient.value.ValueBuild;
-import io.github.seraphina.nyxclient.value.impl.BoolValue;
-import io.github.seraphina.nyxclient.value.impl.IntValue;
+import io.github.seraphina.nyx.client.value.ValueBuild;
+import io.github.seraphina.nyx.client.value.impl.BoolValue;
+import io.github.seraphina.nyx.client.value.impl.IntValue;
 
 public class ExampleModule extends Module {
     public static final ExampleModule INSTANCE = new ExampleModule();
@@ -134,8 +134,8 @@ public class ExampleModule extends Module {
 需要响应游戏行为时，在模块中添加带 `@EventTarget` 的方法。模块启用时会自动注册到事件系统，关闭时会自动注销。
 
 ```java
-import io.github.seraphina.nyxclient.events.api.EventTarget;
-import io.github.seraphina.nyxclient.events.impl.TickEvent;
+import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.impl.TickEvent;
 
 @EventTarget
 public void onTick(TickEvent.Post event) {
@@ -182,7 +182,7 @@ private ExampleModule() {
 在 `ModuleManager.init()` 中导入并注册模块实例：
 
 ```java
-import io.github.seraphina.nyxclient.module.player.ExampleModule;
+import io.github.seraphina.nyx.client.module.player.ExampleModule;
 ```
 
 ```java
