@@ -830,16 +830,16 @@ public class ClickGuiUI extends Screen {
                 continue;
             }
 
-            String title = columns == 1 ? categoryLabel(category) : i == 0 ? "Main" : "Other";
-            float cardHeight = GROUP_PADDING * 2.0F + columnHeights[i];
-            layouts.add(new ModuleColumnLayout(
-                title,
-                columnModuleList,
-                contentX + i * (columnWidth + gap),
-                top,
-                columnWidth,
-                cardHeight
-            ));
+//            String title = columns == 1 ? categoryLabel(category) : i == 0 ? "Main" : "Other";
+//            float cardHeight = GROUP_PADDING * 2.0F + columnHeights[i];
+//            layouts.add(new ModuleColumnLayout(
+//                title,
+//                columnModuleList,
+//                contentX + i * (columnWidth + gap),
+//                top,
+//                columnWidth,
+//                cardHeight
+//            ));
         }
         return layouts;
     }
