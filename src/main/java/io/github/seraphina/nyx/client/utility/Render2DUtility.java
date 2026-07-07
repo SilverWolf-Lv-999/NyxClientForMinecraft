@@ -1,10 +1,20 @@
 package io.github.seraphina.nyx.client.utility;
 
+import com.mojang.blaze3d.opengl.GlStateManager;
+import com.mojang.blaze3d.opengl.GlTexture;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.textures.TextureFormat;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import io.github.seraphina.nyx.client.utility.render.GL;
+import io.github.seraphina.nyx.client.utility.render.Shader;
+import io.github.seraphina.nyx.client.utility.render.Shaders;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -12,16 +22,38 @@ import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.gui.render.state.GuiElementRenderState;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.Identifier;
 import org.joml.Matrix3x2f;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
+import org.lwjgl.opengl.GL13;
+import org.lwjgl.opengl.GL20;
+import org.lwjgl.opengl.GL30;
+import org.lwjgl.opengl.GL32C;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 public final class Render2DUtility {
-    private static final int MIN_SEGMENTS = 12;
+    private static final int MIN_SEGMENTS = 32;
     private static final int MAX_SEGMENTS = 64;
+    private static final float MAX_GAUSSIAN_BLUR_RADIUS = 32.0F;
+    private static final RenderPipeline GUI_TEXTURED_TRIANGLE_FAN = RenderPipeline.builder(RenderPipelines.GUI_TEXTURED_SNIPPET)
+        .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_textured_triangle_fan"))
+        .withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.TRIANGLE_FAN)
+        .build();
+    private static final RenderPipeline GUI_TRIANGLE_STRIP = RenderPipeline.builder(RenderPipelines.GUI_SNIPPET)
+        .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_triangle_strip"))
+        .withCull(false)
+        .withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.TRIANGLE_STRIP)
+        .build();
     private static final ThreadLocal<GuiGraphics> CURRENT_GRAPHICS = new ThreadLocal<>();
+    private static final Map<BlurCacheKey, BlurTarget> GAUSSIAN_BLUR_CACHE = new HashMap<>();
+    private static BlurTarget gaussianBlurScratch;
+    private static int gaussianBlurVao;
 
     private Render2DUtility() {
     }
@@ -44,6 +76,8 @@ public final class Render2DUtility {
     }
 
     public static void close() {
+        closeGaussianBlurResources();
+        Shaders.close();
     }
 
     public static GuiGraphics currentGuiGraphics() {
@@ -145,6 +179,173 @@ public final class Render2DUtility {
         drawTexture(texture, x, y, width, height, u0, v0, u1, v1, color);
     }
 
+    public static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height, float radius) {
+        drawRoundedTexture(texture, x, y, width, height, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height, float radius, int color) {
+        drawRoundedTexture(texture, x, y, width, height, radius, radius, radius, radius, 0.0F, 0.0F, 1.0F, 1.0F, color);
+    }
+
+    public static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height, float radius,
+                                          float u0, float v0, float u1, float v1, int color) {
+        drawRoundedTexture(texture, x, y, width, height, radius, radius, radius, radius, u0, v0, u1, v1, color);
+    }
+
+    public static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                          float topLeftRadius, float topRightRadius, float bottomRightRadius, float bottomLeftRadius,
+                                          float u0, float v0, float u1, float v1, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        float tl = clampRadius(width, height, topLeftRadius);
+        float tr = clampRadius(width, height, topRightRadius);
+        float br = clampRadius(width, height, bottomRightRadius);
+        float bl = clampRadius(width, height, bottomLeftRadius);
+        if (tl <= 0.0F && tr <= 0.0F && br <= 0.0F && bl <= 0.0F) {
+            drawTexture(texture, x, y, width, height, u0, v0, u1, v1, color);
+            return;
+        }
+
+        float[] points = roundedRectFanPoints(x, y, width, height, tl, tr, br, bl);
+        submitTexturedFan(texture, points, textureUvsForPoints(points, x, y, width, height, u0, v0, u1, v1), color);
+    }
+
+    public static void drawGaussianBlur(float x, float y, float width, float height, float blurRadius) {
+        drawGaussianBlurredRect(x, y, width, height, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawGaussianBlur(float x, float y, float width, float height, float blurRadius, int color) {
+        drawGaussianBlurredRect(x, y, width, height, blurRadius, color);
+    }
+
+    public static void drawGaussianBlurredRect(float x, float y, float width, float height, float blurRadius) {
+        drawGaussianBlurredRect(x, y, width, height, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawGaussianBlurredRect(float x, float y, float width, float height, float blurRadius, int color) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+            return;
+        }
+
+        GpuTextureView blurred = gaussianBlurredMainTexture(blurRadius);
+        if (blurred == null) {
+            return;
+        }
+
+        TextureUv uv = mainTargetUv(x, y, width, height, blurred);
+        drawTexture(blurred, x, y, width, height, uv.u0(), uv.v0(), uv.u1(), uv.v1(), color);
+    }
+
+    public static void drawRoundedGaussianBlur(float x, float y, float width, float height, float radius, float blurRadius) {
+        drawRoundedGaussianBlurredRect(x, y, width, height, radius, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawRoundedGaussianBlur(float x, float y, float width, float height, float radius, float blurRadius, int color) {
+        drawRoundedGaussianBlurredRect(x, y, width, height, radius, blurRadius, color);
+    }
+
+    public static void drawRoundedGaussianBlurredRect(float x, float y, float width, float height, float radius, float blurRadius) {
+        drawRoundedGaussianBlurredRect(x, y, width, height, radius, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawRoundedGaussianBlurredRect(float x, float y, float width, float height, float radius, float blurRadius, int color) {
+        drawRoundedGaussianBlurredRect(x, y, width, height, radius, radius, radius, radius, blurRadius, color);
+    }
+
+    public static void drawRoundedGaussianBlurredRect(float x, float y, float width, float height,
+                                                     float topLeftRadius, float topRightRadius, float bottomRightRadius, float bottomLeftRadius,
+                                                     float blurRadius, int color) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+            return;
+        }
+
+        GpuTextureView blurred = gaussianBlurredMainTexture(blurRadius);
+        if (blurred == null) {
+            return;
+        }
+
+        TextureUv uv = mainTargetUv(x, y, width, height, blurred);
+        drawRoundedTexture(blurred, x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius,
+            uv.u0(), uv.v0(), uv.u1(), uv.v1(), color);
+    }
+
+    public static void drawGaussianBlurredCircle(float centerX, float centerY, float radius, float blurRadius) {
+        drawGaussianBlurredCircle(centerX, centerY, radius, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawGaussianBlurredCircle(float centerX, float centerY, float radius, float blurRadius, int color) {
+        if (radius <= 0.0F) {
+            return;
+        }
+        drawGaussianBlurredOval(centerX - radius, centerY - radius, radius * 2.0F, radius * 2.0F, blurRadius, color);
+    }
+
+    public static void drawGaussianBlurredOval(float x, float y, float width, float height, float blurRadius) {
+        drawGaussianBlurredOval(x, y, width, height, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawGaussianBlurredOval(float x, float y, float width, float height, float blurRadius, int color) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+            return;
+        }
+
+        GpuTextureView blurred = gaussianBlurredMainTexture(blurRadius);
+        if (blurred == null) {
+            return;
+        }
+
+        float[] points = ovalFanPoints(x, y, width, height);
+        TextureUv uv = mainTargetUv(x, y, width, height, blurred);
+        submitTexturedFan(blurred, points, textureUvsForPoints(points, x, y, width, height, uv.u0(), uv.v0(), uv.u1(), uv.v1()), color);
+    }
+
+    public static void drawGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height, float blurRadius) {
+        drawGaussianBlurredTexture(texture, x, y, width, height, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height, float blurRadius, int color) {
+        drawGaussianBlurredTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, blurRadius, color);
+    }
+
+    public static void drawGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                  float u0, float v0, float u1, float v1, float blurRadius, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        GpuTextureView blurred = gaussianBlurredTexture(texture, blurRadius);
+        if (blurred == null) {
+            return;
+        }
+        drawTexture(blurred, x, y, width, height, u0, v0, u1, v1, color);
+    }
+
+    public static void drawRoundedGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                        float radius, float blurRadius, int color) {
+        drawRoundedGaussianBlurredTexture(texture, x, y, width, height, radius, radius, radius, radius, blurRadius, color);
+    }
+
+    public static void drawRoundedGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                        float topLeftRadius, float topRightRadius,
+                                                        float bottomRightRadius, float bottomLeftRadius,
+                                                        float blurRadius, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        GpuTextureView blurred = gaussianBlurredTexture(texture, blurRadius);
+        if (blurred == null) {
+            return;
+        }
+        drawRoundedTexture(blurred, x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius,
+            0.0F, 0.0F, 1.0F, 1.0F, color);
+    }
+
     public static void drawRect(float x, float y, float width, float height, int color) {
         if (!canDraw(width, height, color)) {
             return;
@@ -198,10 +399,13 @@ public final class Render2DUtility {
             return;
         }
 
-        float[] boundary = roundedRectBoundaryPoints(x, y, width, height, safeRadius, safeRadius, safeRadius, safeRadius);
-        for (int i = 0; i < boundary.length - 2; i += 2) {
-            drawLine(boundary[i], boundary[i + 1], boundary[i + 2], boundary[i + 3], strokeWidth, color);
+        float stroke = Math.min(strokeWidth, Math.min(width, height) * 0.5F);
+        if (stroke >= Math.min(width, height) * 0.5F) {
+            drawRoundedRect(x, y, width, height, safeRadius, color);
+            return;
         }
+
+        submitStrip(roundedRectStrokeStripPoints(x, y, width, height, safeRadius, stroke), color);
     }
 
     public static void drawCircle(float centerX, float centerY, float radius, int color) {
@@ -273,16 +477,17 @@ public final class Render2DUtility {
         float radiusX = width * 0.5F;
         float radiusY = height * 0.5F;
         int segments = Math.max(2, (int)Math.ceil(Math.abs(sweepAngle) / 360.0F * segmentsForRadius(Math.max(radiusX, radiusY))));
-        float previousX = centerX + (float)Math.cos(Math.toRadians(startAngle)) * radiusX;
-        float previousY = centerY + (float)Math.sin(Math.toRadians(startAngle)) * radiusY;
-        for (int i = 1; i <= segments; i++) {
+        float halfStroke = Math.min(strokeWidth, Math.min(width, height)) * 0.5F;
+        FloatList points = new FloatList((segments + 1) * 4);
+        for (int i = 0; i <= segments; i++) {
             float angle = startAngle + sweepAngle * i / segments;
-            float nextX = centerX + (float)Math.cos(Math.toRadians(angle)) * radiusX;
-            float nextY = centerY + (float)Math.sin(Math.toRadians(angle)) * radiusY;
-            drawLine(previousX, previousY, nextX, nextY, strokeWidth, color);
-            previousX = nextX;
-            previousY = nextY;
+            double radians = Math.toRadians(angle);
+            float cos = (float)Math.cos(radians);
+            float sin = (float)Math.sin(radians);
+            points.add(centerX + cos * (radiusX + halfStroke), centerY + sin * (radiusY + halfStroke));
+            points.add(centerX + cos * Math.max(0.0F, radiusX - halfStroke), centerY + sin * Math.max(0.0F, radiusY - halfStroke));
         }
+        submitStrip(points.toArray(), color);
     }
 
     public static void drawVerticalGradientRect(float x, float y, float width, float height, int topColor, int bottomColor) {
@@ -404,6 +609,28 @@ public final class Render2DUtility {
             drawDropShadow(x, y, width, height, radius, 0.0F, 0.0F, blurRadius, color);
         }
         drawRoundedRect(x, y, width, height, radius, color);
+    }
+
+    public static void drawGaussianBlurredPanel(float x, float y, float width, float height, float radius, float blurRadius,
+                                                int fillColor, float borderWidth, int borderColor) {
+        drawGaussianBlurredPanel(x, y, width, height, radius, blurRadius, 0xFFFFFFFF, fillColor, borderWidth, borderColor);
+    }
+
+    public static void drawGaussianBlurredPanel(float x, float y, float width, float height, float radius, float blurRadius,
+                                                int blurColor, int fillColor, float borderWidth, int borderColor) {
+        if (width <= 0.0F || height <= 0.0F) {
+            return;
+        }
+
+        if (blurRadius > 0.0F && !isTransparent(blurColor)) {
+            drawRoundedGaussianBlurredRect(x, y, width, height, radius, blurRadius, blurColor);
+        }
+        if (!isTransparent(fillColor)) {
+            drawRoundedRect(x, y, width, height, radius, fillColor);
+        }
+        if (borderWidth > 0.0F && !isTransparent(borderColor)) {
+            drawOutlineRoundedRect(x, y, width, height, radius, borderWidth, borderColor);
+        }
     }
 
     public static void drawPill(float x, float y, float width, float height, int fillColor, int borderColor) {
@@ -615,6 +842,202 @@ public final class Render2DUtility {
         ));
     }
 
+    private static void submitStrip(float[] points, int color) {
+        if (points.length < 6 || isTransparent(color)) {
+            return;
+        }
+
+        GuiGraphics graphics = currentGraphics();
+        graphics.submitGuiElementRenderState(new StripRenderState(
+            GUI_TRIANGLE_STRIP,
+            TextureSetup.noTexture(),
+            new Matrix3x2f(graphics.pose()),
+            points,
+            color,
+            graphics.peekScissorStack()
+        ));
+    }
+
+    private static void submitTexturedFan(GpuTextureView texture, float[] points, float[] uvs, int color) {
+        if (points.length < 6 || points.length != uvs.length || isTransparent(color)) {
+            return;
+        }
+
+        GuiGraphics graphics = currentGraphics();
+        graphics.submitGuiElementRenderState(new TexturedFanRenderState(
+            GUI_TEXTURED_TRIANGLE_FAN,
+            TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
+            new Matrix3x2f(graphics.pose()),
+            points,
+            uvs,
+            color,
+            graphics.peekScissorStack()
+        ));
+    }
+
+    @Nullable
+    private static GpuTextureView gaussianBlurredMainTexture(float blurRadius) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            return null;
+        }
+
+        RenderTarget target = minecraft.getMainRenderTarget();
+        if (target == null || target.getColorTextureView() == null) {
+            return null;
+        }
+        return gaussianBlurredTexture(target.getColorTextureView(), blurRadius);
+    }
+
+    @Nullable
+    private static GpuTextureView gaussianBlurredTexture(GpuTextureView source, float blurRadius) {
+        Objects.requireNonNull(source, "source");
+        if (source.isClosed() || source.texture() == null || source.texture().isClosed()) {
+            return null;
+        }
+
+        if (blurRadius <= 0.0F) {
+            return source;
+        }
+
+        int sourceId = glTextureId(source);
+        if (sourceId == 0) {
+            return source;
+        }
+
+        int width = source.getWidth(0);
+        int height = source.getHeight(0);
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+
+        int previousFramebuffer = GlStateManager.getFrameBuffer(GL32C.GL_FRAMEBUFFER);
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+        int previousVertexArray = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+        int previousActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+        int previousTexture0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int[] previousViewport = new int[4];
+        GL11.glGetIntegerv(GL11.GL_VIEWPORT, previousViewport);
+        float[] previousClearColor = new float[4];
+        GL11.glGetFloatv(GL11.GL_COLOR_CLEAR_VALUE, previousClearColor);
+        boolean previousDepthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
+        boolean previousCull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        boolean previousScissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+        GpuTextureView result = source;
+
+        try {
+            float safeRadius = Math.min(MAX_GAUSSIAN_BLUR_RADIUS, Math.max(0.0F, blurRadius));
+            BlurCacheKey key = new BlurCacheKey(sourceId, width, height, Math.round(safeRadius * 100.0F));
+            BlurTarget output = GAUSSIAN_BLUR_CACHE.computeIfAbsent(key, ignored -> new BlurTarget("nyx-gaussian-blur-output"));
+            ensureGaussianBlurTarget(output, width, height);
+            ensureGaussianBlurScratch(width, height);
+
+            Shader shader = gaussianBlurShader();
+            if (shader == null || gaussianBlurScratch == null || gaussianBlurScratch.view == null) {
+                return source;
+            }
+
+            if (gaussianBlurVao == 0) {
+                gaussianBlurVao = GL.genVertexArray();
+            }
+            GL.bindVertexArray(gaussianBlurVao);
+            GL.disableDepth();
+            GL.disableBlend();
+            GL.disableCull();
+            GL.disableScissorTest();
+
+            renderGaussianBlurPass(shader, sourceId, gaussianBlurScratch, width, height, safeRadius, 1.0F, 0.0F);
+            renderGaussianBlurPass(shader, glTextureId(gaussianBlurScratch.view), output, width, height, safeRadius, 0.0F, 1.0F);
+            result = output.view;
+        } finally {
+            GL.bindFramebuffer(previousFramebuffer);
+            GL.viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+            GL.bindVertexArray(previousVertexArray);
+            GL.useProgram(previousProgram);
+            GL.bindTexture(previousTexture0, 0);
+            GlStateManager._activeTexture(previousActiveTexture);
+            GL11.glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+            setCapability(GL11.GL_DEPTH_TEST, previousDepthTest);
+            setCapability(GL11.GL_BLEND, previousBlend);
+            setCapability(GL11.GL_CULL_FACE, previousCull);
+            setCapability(GL11.GL_SCISSOR_TEST, previousScissor);
+        }
+
+        return result;
+    }
+
+    @Nullable
+    private static Shader gaussianBlurShader() {
+        Shaders.init();
+        return Shaders.GAUSSIAN_BLUR;
+    }
+
+    private static void renderGaussianBlurPass(Shader shader, int inputTexture, BlurTarget output, int width, int height,
+                                               float radius, float directionX, float directionY) {
+        GL.bindFramebuffer(output.framebuffer);
+        GL.viewport(0, 0, width, height);
+        GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+        GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+
+        shader.bind();
+        shader.set("InputTexture", 0);
+        shader.set("TexelSize", 1.0F / width, 1.0F / height);
+        shader.set("Direction", directionX, directionY);
+        shader.set("Radius", radius);
+        shader.set("Sigma", Math.max(0.5F, radius * 0.5F));
+
+        configureTextureForBlur(inputTexture);
+        GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+    }
+
+    private static void configureTextureForBlur(int textureId) {
+        GL.bindTexture(textureId, 0);
+        GL.textureParam(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+        GL.textureParam(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+        GL.textureParam(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+        GL.textureParam(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
+    }
+
+    private static void ensureGaussianBlurScratch(int width, int height) {
+        if (gaussianBlurScratch == null) {
+            gaussianBlurScratch = new BlurTarget("nyx-gaussian-blur-scratch");
+        }
+        ensureGaussianBlurTarget(gaussianBlurScratch, width, height);
+    }
+
+    private static void ensureGaussianBlurTarget(BlurTarget target, int width, int height) {
+        if (target.matches(width, height)) {
+            return;
+        }
+        target.resize(width, height);
+    }
+
+    private static void closeGaussianBlurResources() {
+        if (gaussianBlurScratch != null) {
+            gaussianBlurScratch.close();
+            gaussianBlurScratch = null;
+        }
+
+        for (BlurTarget target : GAUSSIAN_BLUR_CACHE.values()) {
+            target.close();
+        }
+        GAUSSIAN_BLUR_CACHE.clear();
+
+        if (gaussianBlurVao != 0) {
+            GL.deleteVertexArray(gaussianBlurVao);
+            gaussianBlurVao = 0;
+        }
+    }
+
+    private static int glTextureId(GpuTextureView texture) {
+        if (texture == null || !(texture.texture() instanceof GlTexture glTexture)) {
+            return 0;
+        }
+        return glTexture.glId();
+    }
+
     private static GuiGraphics currentGraphics() {
         GuiGraphics graphics = CURRENT_GRAPHICS.get();
         if (graphics == null) {
@@ -637,6 +1060,47 @@ public final class Render2DUtility {
         return points.toArray();
     }
 
+    private static float[] ovalFanPoints(float x, float y, float width, float height) {
+        float centerX = x + width * 0.5F;
+        float centerY = y + height * 0.5F;
+        float radiusX = width * 0.5F;
+        float radiusY = height * 0.5F;
+        int segments = segmentsForRadius(Math.max(radiusX, radiusY));
+        FloatList points = new FloatList((segments + 3) * 2);
+        points.add(centerX, centerY);
+        for (int i = 0; i <= segments; i++) {
+            double angle = Math.PI * 2.0D * i / segments;
+            points.add(centerX + (float)Math.cos(angle) * radiusX, centerY + (float)Math.sin(angle) * radiusY);
+        }
+        return points.toArray();
+    }
+
+    private static float[] textureUvsForPoints(float[] points, float x, float y, float width, float height,
+                                               float u0, float v0, float u1, float v1) {
+        float[] uvs = new float[points.length];
+        float safeWidth = Math.max(0.0001F, width);
+        float safeHeight = Math.max(0.0001F, height);
+        for (int i = 0; i < points.length; i += 2) {
+            float localX = clamp01((points[i] - x) / safeWidth);
+            float localY = clamp01((points[i + 1] - y) / safeHeight);
+            uvs[i] = lerp(u0, u1, localX);
+            uvs[i + 1] = lerp(v0, v1, localY);
+        }
+        return uvs;
+    }
+
+    private static TextureUv mainTargetUv(float x, float y, float width, float height, GpuTextureView texture) {
+        Minecraft minecraft = Minecraft.getInstance();
+        float scale = minecraft == null ? 1.0F : Math.max(1, minecraft.getWindow().getGuiScale());
+        float textureWidth = Math.max(1.0F, texture.getWidth(0));
+        float textureHeight = Math.max(1.0F, texture.getHeight(0));
+        float u0 = clamp01(x * scale / textureWidth);
+        float u1 = clamp01((x + width) * scale / textureWidth);
+        float v0 = clamp01(1.0F - y * scale / textureHeight);
+        float v1 = clamp01(1.0F - (y + height) * scale / textureHeight);
+        return new TextureUv(u0, v0, u1, v1);
+    }
+
     private static float[] roundedRectBoundaryPoints(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
                                                      float bottomRightRadius, float bottomLeftRadius) {
         FloatList points = new FloatList(96);
@@ -648,6 +1112,36 @@ public final class Render2DUtility {
         appendCorner(points, x + topLeftRadius, y + topLeftRadius, topLeftRadius, 180.0F, 270.0F, true, x, y);
         appendCorner(points, x + bottomLeftRadius, y + height - bottomLeftRadius, bottomLeftRadius, 270.0F, 360.0F, true, x, y + height);
         points.add(firstX, firstY);
+        return points.toArray();
+    }
+
+    private static float[] roundedRectStrokeStripPoints(float x, float y, float width, float height, float radius, float strokeWidth) {
+        float innerX = x + strokeWidth;
+        float innerY = y + strokeWidth;
+        float innerWidth = Math.max(0.0F, width - strokeWidth * 2.0F);
+        float innerHeight = Math.max(0.0F, height - strokeWidth * 2.0F);
+        float innerRadius = Math.max(0.0F, radius - strokeWidth);
+        FloatList points = new FloatList(128);
+        float firstOuterX = x + width - radius;
+        float firstOuterY = y + height;
+        float firstInnerX = innerX + innerWidth - innerRadius;
+        float firstInnerY = innerY + innerHeight;
+        points.add(firstOuterX, firstOuterY);
+        points.add(firstInnerX, firstInnerY);
+        appendStrokeCorner(points, x + width - radius, y + height - radius,
+            innerX + innerWidth - innerRadius, innerY + innerHeight - innerRadius,
+            radius, innerRadius, 0.0F, 90.0F, false);
+        appendStrokeCorner(points, x + width - radius, y + radius,
+            innerX + innerWidth - innerRadius, innerY + innerRadius,
+            radius, innerRadius, 90.0F, 180.0F, true);
+        appendStrokeCorner(points, x + radius, y + radius,
+            innerX + innerRadius, innerY + innerRadius,
+            radius, innerRadius, 180.0F, 270.0F, true);
+        appendStrokeCorner(points, x + radius, y + height - radius,
+            innerX + innerRadius, innerY + innerHeight - innerRadius,
+            radius, innerRadius, 270.0F, 360.0F, true);
+        points.add(firstOuterX, firstOuterY);
+        points.add(firstInnerX, firstInnerY);
         return points.toArray();
     }
 
@@ -666,6 +1160,20 @@ public final class Render2DUtility {
             float angle = startAngle + (endAngle - startAngle) * i / segments;
             double radians = Math.toRadians(angle);
             points.add(centerX + (float)Math.sin(radians) * radius, centerY + (float)Math.cos(radians) * radius);
+        }
+    }
+
+    private static void appendStrokeCorner(FloatList points, float outerCenterX, float outerCenterY, float innerCenterX, float innerCenterY,
+                                           float outerRadius, float innerRadius, float startAngle, float endAngle, boolean includeStart) {
+        int segments = Math.max(3, segmentsForRadius(outerRadius) / 4);
+        int startIndex = includeStart ? 0 : 1;
+        for (int i = startIndex; i <= segments; i++) {
+            float angle = startAngle + (endAngle - startAngle) * i / segments;
+            double radians = Math.toRadians(angle);
+            float sin = (float)Math.sin(radians);
+            float cos = (float)Math.cos(radians);
+            points.add(outerCenterX + sin * outerRadius, outerCenterY + cos * outerRadius);
+            points.add(innerCenterX + sin * innerRadius, innerCenterY + cos * innerRadius);
         }
     }
 
@@ -729,6 +1237,10 @@ public final class Render2DUtility {
         return Math.max(0.0F, Math.min(1.0F, value));
     }
 
+    private static float lerp(float from, float to, float progress) {
+        return from + (to - from) * progress;
+    }
+
     private static int segmentsForRadius(float radius) {
         return Math.max(MIN_SEGMENTS, Math.min(MAX_SEGMENTS, (int)Math.ceil(Math.max(1.0F, radius) * 0.75F)));
     }
@@ -739,6 +1251,14 @@ public final class Render2DUtility {
 
     private static int ceil(float value) {
         return (int)Math.ceil(value);
+    }
+
+    private static void setCapability(int capability, boolean enabled) {
+        if (enabled) {
+            GL11.glEnable(capability);
+        } else {
+            GL11.glDisable(capability);
+        }
     }
 
     private static int lerpColor(int from, int to, float progress) {
@@ -881,6 +1401,127 @@ public final class Render2DUtility {
                 return this.colors[0];
             }
             return this.colors[Math.min(index, this.colors.length - 1)];
+        }
+    }
+
+    private record StripRenderState(
+        RenderPipeline pipeline,
+        TextureSetup textureSetup,
+        Matrix3x2f pose,
+        float[] points,
+        int color,
+        @Nullable ScreenRectangle scissorArea,
+        @Nullable ScreenRectangle bounds
+    ) implements GuiElementRenderState {
+        private StripRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, int color,
+                                 @Nullable ScreenRectangle scissorArea) {
+            this(pipeline, textureSetup, pose, points, color, scissorArea, boundsFor(points, pose, scissorArea));
+        }
+
+        @Override
+        public void buildVertices(VertexConsumer consumer) {
+            for (int i = 0; i < this.points.length; i += 2) {
+                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setColor(this.color);
+            }
+        }
+    }
+
+    private record TexturedFanRenderState(
+        RenderPipeline pipeline,
+        TextureSetup textureSetup,
+        Matrix3x2f pose,
+        float[] points,
+        float[] uvs,
+        int color,
+        @Nullable ScreenRectangle scissorArea,
+        @Nullable ScreenRectangle bounds
+    ) implements GuiElementRenderState {
+        private TexturedFanRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, float[] uvs,
+                                       int color, @Nullable ScreenRectangle scissorArea) {
+            this(pipeline, textureSetup, pose, points, uvs, color, scissorArea, boundsFor(points, pose, scissorArea));
+        }
+
+        @Override
+        public void buildVertices(VertexConsumer consumer) {
+            for (int i = 0; i < this.points.length; i += 2) {
+                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setUv(this.uvs[i], this.uvs[i + 1]).setColor(this.color);
+            }
+        }
+    }
+
+    private record TextureUv(float u0, float v0, float u1, float v1) {
+    }
+
+    private record BlurCacheKey(int sourceTexture, int width, int height, int radius) {
+    }
+
+    private static final class BlurTarget implements AutoCloseable {
+        private final String label;
+        private int width;
+        private int height;
+        private int framebuffer;
+        @Nullable
+        private GpuTexture texture;
+        @Nullable
+        private GpuTextureView view;
+
+        private BlurTarget(String label) {
+            this.label = label;
+        }
+
+        private boolean matches(int width, int height) {
+            return this.width == width && this.height == height && this.texture != null && !this.texture.isClosed()
+                && this.view != null && !this.view.isClosed() && this.framebuffer != 0;
+        }
+
+        private void resize(int width, int height) {
+            closeTexture();
+
+            if (this.framebuffer == 0) {
+                this.framebuffer = GL.genFramebuffer();
+            }
+
+            int usage = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT;
+            GpuTexture nextTexture = RenderSystem.getDevice().createTexture(this.label, usage, TextureFormat.RGBA8, width, height, 1, 1);
+            GpuTextureView nextView = RenderSystem.getDevice().createTextureView(nextTexture);
+            int previousFramebuffer = GlStateManager.getFrameBuffer(GL32C.GL_FRAMEBUFFER);
+            GL.bindFramebuffer(this.framebuffer);
+            GL.framebufferTexture2D(GL32C.GL_FRAMEBUFFER, GL32C.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, glTextureId(nextView), 0);
+            int status = GL32C.glCheckFramebufferStatus(GL32C.GL_FRAMEBUFFER);
+            GL.bindFramebuffer(previousFramebuffer);
+            if (status != GL32C.GL_FRAMEBUFFER_COMPLETE) {
+                nextView.close();
+                nextTexture.close();
+                throw new IllegalStateException("Gaussian blur framebuffer is incomplete: " + status);
+            }
+
+            configureTextureForBlur(glTextureId(nextView));
+            this.texture = nextTexture;
+            this.view = nextView;
+            this.width = width;
+            this.height = height;
+        }
+
+        private void closeTexture() {
+            if (this.view != null) {
+                this.view.close();
+                this.view = null;
+            }
+            if (this.texture != null) {
+                this.texture.close();
+                this.texture = null;
+            }
+            this.width = 0;
+            this.height = 0;
+        }
+
+        @Override
+        public void close() {
+            closeTexture();
+            if (this.framebuffer != 0) {
+                GL.deleteFramebuffer(this.framebuffer);
+                this.framebuffer = 0;
+            }
         }
     }
 

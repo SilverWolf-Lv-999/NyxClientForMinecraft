@@ -35,10 +35,24 @@ public final class MainUI extends Screen {
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
     private static final float PANEL_ANIMATION_SPEED = 14.0F;
     private static final float SCROLL_STEP = 34.0F;
+    private static final float CENTER_PANEL_MAX_WIDTH = 301.0F;
+    private static final float CENTER_PANEL_MIN_WIDTH = 175.0F;
+    private static final float CENTER_PANEL_MAX_HEIGHT = 312.0F;
+    private static final float CENTER_PANEL_MIN_HEIGHT = 180.0F;
+    private static final float CENTER_PANEL_RADIUS = 18.0F;
+    private static final float CENTER_PANEL_BLUR_RADIUS = 18.0F;
+    private static final float CENTER_PANEL_BORDER_WIDTH = 3.0F;
+    private static final float CENTER_PANEL_TITLE_SIZE = 26.0F;
+    private static final float CENTER_PANEL_TITLE_GAP = 18.0F;
+    private static final String CENTER_PANEL_TITLE = "Nyx Client";
 
     private static final int TEXT = 0xFFFFFFFF;
     private static final int TEXT_MUTED = 0xFFA8AFBE;
     private static final int TEXT_DIM = 0xFF687181;
+    private static final int CENTER_PANEL_TITLE_SHADOW = 0xAA000000;
+    private static final int CENTER_PANEL_BLUR = 0xE6FFFFFF;
+    private static final int CENTER_PANEL_BACKGROUND = 0xB80A0C12;
+    private static final int CENTER_PANEL_BORDER = 0x66FFFFFF;
     private static final int PANEL_BACKGROUND = 0xEE0B0D12;
     private static final int PANEL_BORDER = 0x22FFFFFF;
     private static final int ROW_BACKGROUND = 0x9913161E;
@@ -87,6 +101,7 @@ public final class MainUI extends Screen {
             updateFrameTime();
             updatePanelAnimation();
             renderSelectedBackground();
+            renderCenterPanel();
             renderSettingsPanel(mouseX, mouseY);
             renderSettingsButton(mouseX, mouseY);
         });
@@ -161,6 +176,37 @@ public final class MainUI extends Screen {
         if (selected == null || !selected.render(0.0F, 0.0F, this.width, this.height)) {
             Render2DUtility.drawVerticalGradientRect(0.0F, 0.0F, this.width, this.height, 0xFF10131B, 0xFF05060A);
         }
+    }
+
+    private void renderCenterPanel() {
+        float maxWidth = Math.max(1.0F, Math.min(CENTER_PANEL_MAX_WIDTH, this.width - 32.0F));
+        float minWidth = Math.min(CENTER_PANEL_MIN_WIDTH, maxWidth);
+        float panelWidth = clamp(this.width * 0.336F, minWidth, maxWidth);
+
+        float maxHeight = Math.max(1.0F, Math.min(CENTER_PANEL_MAX_HEIGHT, this.height - 32.0F));
+        float minHeight = Math.min(CENTER_PANEL_MIN_HEIGHT, maxHeight);
+        float panelHeight = clamp(this.height * 0.432F, minHeight, maxHeight);
+
+        float x = (this.width - panelWidth) * 0.5F;
+        float y = (this.height - panelHeight) * 0.5F;
+        Render2DUtility.drawGaussianBlurredPanel(
+            x,
+            y,
+            panelWidth,
+            panelHeight,
+            CENTER_PANEL_RADIUS,
+            CENTER_PANEL_BLUR_RADIUS,
+            CENTER_PANEL_BLUR,
+            CENTER_PANEL_BACKGROUND,
+            CENTER_PANEL_BORDER_WIDTH,
+            CENTER_PANEL_BORDER
+        );
+
+        FontRenderer titleFont = displayFont(CENTER_PANEL_TITLE_SIZE);
+        float titleX = x + (panelWidth - titleFont.getStringWidth(CENTER_PANEL_TITLE)) * 0.5F;
+        float titleY = Math.max(8.0F, y - CENTER_PANEL_TITLE_GAP - CENTER_PANEL_TITLE_SIZE);
+        titleFont.drawString(CENTER_PANEL_TITLE, titleX + 1.0F, titleY + 1.0F, CENTER_PANEL_TITLE_SHADOW);
+        titleFont.drawString(CENTER_PANEL_TITLE, titleX, titleY, TEXT);
     }
 
     private void renderSettingsButton(int mouseX, int mouseY) {
