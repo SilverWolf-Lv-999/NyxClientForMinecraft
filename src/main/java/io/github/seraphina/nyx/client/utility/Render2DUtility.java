@@ -600,25 +600,65 @@ public final class Render2DUtility {
             return;
         }
 
-        drawLayeredDropShadow(x, y, width, height, radius, offsetX, offsetY, blurRadius, color);
+        drawSoftDropShadowFallback(x, y, width, height, radius, offsetX, offsetY, blurRadius, color);
     }
 
-    private static void drawLayeredDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
-                                              float blurRadius, int color) {
-        int steps = Math.max(2, Math.min(10, Math.round(blurRadius / 2.0F)));
-        for (int i = steps; i >= 1; i--) {
-            float progress = i / (float)steps;
-            float spread = blurRadius * progress;
-            int layerColor = applyOpacity(color, (1.0F - progress * 0.85F) / steps);
-            drawRoundedRect(
-                x + offsetX - spread,
-                y + offsetY - spread,
-                width + spread * 2.0F,
-                height + spread * 2.0F,
-                radius + spread,
-                layerColor
-            );
+    private static void drawSoftDropShadowFallback(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
+                                                   float blurRadius, int color) {
+        float safeBlurRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, blurRadius));
+        float safeRadius = clampRadius(width, height, radius);
+        int rings = Math.max(10, Math.min(32, (int)Math.ceil(safeBlurRadius * 1.35F)));
+        int cornerSegments = Math.max(6, segmentsForRadius(safeRadius + safeBlurRadius) / 4);
+
+        submitFan(roundedRectFanPoints(x + offsetX, y + offsetY, width, height, safeRadius, safeRadius, safeRadius, safeRadius),
+            applyOpacity(color, bloomFalloff(0.0F, safeBlurRadius)));
+        for (int i = 0; i < rings; i++) {
+            float innerSpread = safeBlurRadius * i / rings;
+            float outerSpread = safeBlurRadius * (i + 1) / rings;
+            int innerColor = applyOpacity(color, bloomFalloff(innerSpread, safeBlurRadius));
+            int outerColor = applyOpacity(color, bloomFalloff(outerSpread, safeBlurRadius));
+            submitBloomRing(x + offsetX, y + offsetY, width, height, safeRadius, innerSpread, outerSpread, cornerSegments, innerColor, outerColor);
         }
+    }
+
+    private static void submitBloomRing(float x, float y, float width, float height, float radius, float innerSpread, float outerSpread,
+                                        int cornerSegments, int innerColor, int outerColor) {
+        if (isTransparent(innerColor) && isTransparent(outerColor)) {
+            return;
+        }
+
+        float[] inner = roundedRectBloomBoundaryPoints(
+            x - innerSpread,
+            y - innerSpread,
+            width + innerSpread * 2.0F,
+            height + innerSpread * 2.0F,
+            radius + innerSpread,
+            cornerSegments
+        );
+        float[] outer = roundedRectBloomBoundaryPoints(
+            x - outerSpread,
+            y - outerSpread,
+            width + outerSpread * 2.0F,
+            height + outerSpread * 2.0F,
+            radius + outerSpread,
+            cornerSegments
+        );
+
+        int pointCount = Math.min(inner.length, outer.length);
+        FloatList points = new FloatList(pointCount * 2);
+        IntList colors = new IntList(pointCount);
+        for (int i = 0; i < pointCount; i += 2) {
+            points.add(outer[i], outer[i + 1]);
+            colors.add(outerColor);
+            points.add(inner[i], inner[i + 1]);
+            colors.add(innerColor);
+        }
+        submitStrip(points.toArray(), colors.toArray());
+    }
+
+    private static float bloomFalloff(float distance, float blurRadius) {
+        float sigma = Math.max(blurRadius * 0.42F, 0.5F);
+        return 0.42F * (float)Math.exp(-(distance * distance) / (2.0F * sigma * sigma));
     }
 
     public static void drawBlurredRect(float x, float y, float width, float height, float radius, float blurRadius, int color) {
@@ -1457,6 +1497,20 @@ public final class Render2DUtility {
         return points.toArray();
     }
 
+    private static float[] roundedRectBloomBoundaryPoints(float x, float y, float width, float height, float radius, int cornerSegments) {
+        float safeRadius = clampRadius(width, height, radius);
+        FloatList points = new FloatList((cornerSegments * 4 + 5) * 2);
+        float firstX = safeRadius <= 0.0F ? x + width : x + width - safeRadius;
+        float firstY = y + height;
+        points.add(firstX, firstY);
+        appendBloomCorner(points, x + width - safeRadius, y + height - safeRadius, safeRadius, 0.0F, 90.0F, false, x + width, y + height, cornerSegments);
+        appendBloomCorner(points, x + width - safeRadius, y + safeRadius, safeRadius, 90.0F, 180.0F, true, x + width, y, cornerSegments);
+        appendBloomCorner(points, x + safeRadius, y + safeRadius, safeRadius, 180.0F, 270.0F, true, x, y, cornerSegments);
+        appendBloomCorner(points, x + safeRadius, y + height - safeRadius, safeRadius, 270.0F, 360.0F, true, x, y + height, cornerSegments);
+        points.add(firstX, firstY);
+        return points.toArray();
+    }
+
     private static float[] roundedRectStrokeStripPoints(float x, float y, float width, float height, float radius, float strokeWidth) {
         float innerX = x + strokeWidth;
         float innerY = y + strokeWidth;
@@ -1499,6 +1553,21 @@ public final class Render2DUtility {
         int segments = Math.max(3, segmentsForRadius(radius) / 4);
         int startIndex = includeStart ? 0 : 1;
         for (int i = startIndex; i <= segments; i++) {
+            float angle = startAngle + (endAngle - startAngle) * i / segments;
+            double radians = Math.toRadians(angle);
+            points.add(centerX + (float)Math.sin(radians) * radius, centerY + (float)Math.cos(radians) * radius);
+        }
+    }
+
+    private static void appendBloomCorner(FloatList points, float centerX, float centerY, float radius, float startAngle, float endAngle,
+                                          boolean includeStart, float fallbackX, float fallbackY, int segments) {
+        int startIndex = includeStart ? 0 : 1;
+        for (int i = startIndex; i <= segments; i++) {
+            if (radius <= 0.0F) {
+                points.add(fallbackX, fallbackY);
+                continue;
+            }
+
             float angle = startAngle + (endAngle - startAngle) * i / segments;
             double radians = Math.toRadians(angle);
             points.add(centerX + (float)Math.sin(radians) * radius, centerY + (float)Math.cos(radians) * radius);

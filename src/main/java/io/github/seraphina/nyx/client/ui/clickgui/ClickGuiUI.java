@@ -32,8 +32,11 @@ import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
 import static io.github.seraphina.nyx.client.utility.MathUtility.easeOutCubic;
 import static io.github.seraphina.nyx.client.utility.MathUtility.isInsideExclusive;
 import static io.github.seraphina.nyx.client.utility.MathUtility.lerp;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_RIGHT;
+import static org.lwjgl.glfw.GLFW.GLFW_PRESS;
+import static org.lwjgl.glfw.GLFW.glfwGetKey;
 
 public class ClickGuiUI extends Screen {
     private static final float PANEL_WIDTH = 820.0F;
@@ -174,6 +177,13 @@ public class ClickGuiUI extends Screen {
 
         AbstractComponent component = getComponentAt(fixedMouseX, fixedMouseY);
         if (component != null) {
+            if (event.button() == GLFW_MOUSE_BUTTON_LEFT && isLeftShiftDown() && component.value().isSerializable()) {
+                blurComponentsExcept(null);
+                resetValue(component.value());
+                updateScrollLimit();
+                return true;
+            }
+
             blurComponentsExcept(component);
             if (component.mouseClicked(fixedMouseX, fixedMouseY, event.button())) {
                 capturedComponent = component;
@@ -924,6 +934,10 @@ public class ClickGuiUI extends Screen {
         return valueComponents.computeIfAbsent(value, this::createComponent);
     }
 
+    private static <T> void resetValue(AbstractValue<T> value) {
+        value.setValue(value.getDefaultValue());
+    }
+
     private AbstractComponent createComponent(AbstractValue<?> value) {
         if (value instanceof BoolValue boolValue) {
             return new BoolComponent(boolValue);
@@ -1164,6 +1178,11 @@ public class ClickGuiUI extends Screen {
 
     private int guiScale() {
         return this.minecraft == null ? 1 : Math.max(1, this.minecraft.getWindow().getGuiScale());
+    }
+
+    private boolean isLeftShiftDown() {
+        return this.minecraft != null && this.minecraft.getWindow() != null
+            && glfwGetKey(this.minecraft.getWindow().handle(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
     }
 
     private float sidebarPadding() {

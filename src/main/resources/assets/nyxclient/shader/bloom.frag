@@ -22,7 +22,7 @@ float roundedRectDistance(vec2 point, vec2 rectPosition, vec2 rectSize, float ra
 void main() {
     vec2 point = textureCoord * TextureSize;
     float distance = roundedRectDistance(point, Rect.xy, Rect.zw, Radius);
-    float sigma = max(BlurRadius * 0.35, 0.5);
+    float sigma = max(BlurRadius * 0.42, 0.5);
     float outsideDistance = max(distance, 0.0);
     float alpha = exp(-(outsideDistance * outsideDistance) / (2.0 * sigma * sigma));
 
