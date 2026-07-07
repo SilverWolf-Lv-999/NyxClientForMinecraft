@@ -20,6 +20,7 @@ public class NyxClient {
         LOGGER.info("Initializing NyxClient");
         Shaders.init();
         ModuleManager.init();
+        CommandManager.init();
         ConfigManager.init();
         HUDManager.load();
         EventManager.register(this);

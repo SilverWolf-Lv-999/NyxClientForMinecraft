@@ -10,6 +10,7 @@
     "CameraMixin",
     "ChatScreenMixin",
     "ClientPacketListenerMixin",
+    "CommandSuggestionsMixin",
     "ConnectionMixin",
     "ContainerEventHandlerMixin",
     "EntityMixin",
