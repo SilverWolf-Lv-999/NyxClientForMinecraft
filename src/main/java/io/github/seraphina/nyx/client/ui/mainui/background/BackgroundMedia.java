@@ -63,6 +63,7 @@ public final class BackgroundMedia implements AutoCloseable {
     private boolean decoderFailed;
     private long lastFrameNanos;
     private long frameNanos = DEFAULT_FRAME_NANOS;
+    private long resumeTimestampMicros;
 
     private BackgroundMedia(String key, String displayName, @Nullable Path path, boolean builtIn, boolean animated) {
         this.key = key;
@@ -126,6 +127,7 @@ public final class BackgroundMedia implements AutoCloseable {
     }
 
     public void pausePlayback() {
+        rememberPlaybackTimestamp();
         closeDecoder();
         this.decoderStartAttempted = false;
         this.decoderFailed = false;
@@ -195,6 +197,7 @@ public final class BackgroundMedia implements AutoCloseable {
             this.grabber.start();
             this.frameConverter = new Java2DFrameConverter();
             updateFrameInterval();
+            seekToRememberedTimestamp();
             this.decoderFailed = false;
             return true;
         } catch (Exception ignored) {
@@ -217,6 +220,7 @@ public final class BackgroundMedia implements AutoCloseable {
             }
 
             BufferedImage image = this.frameConverter.convert(frame);
+            rememberPlaybackTimestamp();
             return image == null ? null : copyArgb(image);
         } catch (Exception ignored) {
             return null;
@@ -230,10 +234,38 @@ public final class BackgroundMedia implements AutoCloseable {
 
         try {
             this.grabber.setTimestamp(0L);
+            this.resumeTimestampMicros = 0L;
         } catch (Exception ignored) {
             closeDecoder();
             this.decoderStartAttempted = false;
             this.decoderFailed = false;
+            this.resumeTimestampMicros = 0L;
+        }
+    }
+
+    private void rememberPlaybackTimestamp() {
+        if (this.grabber == null) {
+            return;
+        }
+
+        try {
+            long timestamp = this.grabber.getTimestamp();
+            if (timestamp >= 0L) {
+                this.resumeTimestampMicros = timestamp;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void seekToRememberedTimestamp() {
+        if (this.grabber == null || this.resumeTimestampMicros <= 0L) {
+            return;
+        }
+
+        try {
+            this.grabber.setTimestamp(this.resumeTimestampMicros);
+        } catch (Exception ignored) {
+            this.resumeTimestampMicros = 0L;
         }
     }
 

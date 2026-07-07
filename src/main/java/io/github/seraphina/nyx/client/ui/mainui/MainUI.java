@@ -77,16 +77,13 @@ public final class MainUI extends Screen {
 
     private static String rememberedSelectedKey = BackgroundLibrary.DEFAULT_KEY;
     private static boolean backgroundCacheLoaded;
+    private static boolean sharedSettingsOpen;
+    private static float sharedSettingsPanelProgress;
+    private static float sharedPanelScroll;
+    private static float sharedMaxPanelScroll;
 
-    private final List<BackgroundMedia> backgrounds = BACKGROUND_CACHE;
     private final List<MainUIButton> mainButtons = new ArrayList<>();
 
-    private String selectedKey = rememberedSelectedKey;
-    private int selectedIndex;
-    private boolean settingsOpen;
-    private float settingsPanelProgress;
-    private float panelScroll;
-    private float maxPanelScroll;
     private long lastFrameNanos;
     private float frameSeconds = DEFAULT_FRAME_SECONDS;
     private MainUIButton multiplayerButton;
@@ -99,7 +96,7 @@ public final class MainUI extends Screen {
     protected void init() {
         super.init();
         ensureBackgroundCacheLoaded();
-        syncSelectedBackground();
+        syncSharedSelectedBackground();
         initMainButtons();
         this.lastFrameNanos = 0L;
     }
@@ -107,20 +104,18 @@ public final class MainUI extends Screen {
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         if (!isActiveScreen()) {
-            pauseBackgroundPlayback();
+            pauseSharedBackgroundPlayback();
             return;
         }
 
         Render2DUtility.withGuiGraphics(guiGraphics, () -> {
             updateFrameTime();
-            updatePanelAnimation();
             renderSelectedBackground();
             renderCenterPanel();
             layoutMainButtons();
             updateMainButtonStates();
             super.render(guiGraphics, mouseX, mouseY, partialTick);
-            renderSettingsPanel(mouseX, mouseY);
-            renderSettingsButton(mouseX, mouseY);
+            renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
         });
     }
 
@@ -130,21 +125,7 @@ public final class MainUI extends Screen {
             return super.mouseClicked(event, doubleClick);
         }
 
-        if (isInside(event.x(), event.y(), settingsButtonX(), settingsButtonY(), SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE)) {
-            this.settingsOpen = !this.settingsOpen;
-            if (this.settingsOpen) {
-                ensureBackgroundCacheLoaded();
-            }
-            return true;
-        }
-
-        if (isSettingsPanelVisible()) {
-            if (isInside(event.x(), event.y(), panelX(), 0.0F, panelWidth(), this.height)) {
-                int row = backgroundRowAt(event.x(), event.y());
-                if (row >= 0 && row < this.backgrounds.size()) {
-                    selectBackground(row);
-                }
-            }
+        if (mouseClickedSharedBackgroundSelector(event, this.width, this.height)) {
             return true;
         }
 
@@ -153,8 +134,7 @@ public final class MainUI extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (isSettingsPanelVisible() && isInside(mouseX, mouseY, panelX(), PANEL_HEADER_HEIGHT, panelWidth(), this.height - PANEL_HEADER_HEIGHT)) {
-            this.panelScroll = clamp(this.panelScroll - (float)scrollY * SCROLL_STEP, 0.0F, this.maxPanelScroll);
+        if (mouseScrolledSharedBackgroundSelector(mouseX, mouseY, scrollY, this.width, this.height)) {
             return true;
         }
 
@@ -163,8 +143,7 @@ public final class MainUI extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.isEscape() && this.settingsOpen) {
-            this.settingsOpen = false;
+        if (event.isEscape() && closeSharedBackgroundSelector()) {
             return true;
         }
 
@@ -183,10 +162,8 @@ public final class MainUI extends Screen {
 
     @Override
     public void removed() {
-        this.settingsOpen = false;
-        this.settingsPanelProgress = 0.0F;
         this.lastFrameNanos = 0L;
-        pauseBackgroundPlayback();
+        pauseSharedBackgroundPlayback();
         super.removed();
     }
 
@@ -307,31 +284,88 @@ public final class MainUI extends Screen {
         }
     }
 
-    private void renderSettingsButton(int mouseX, int mouseY) {
-        float x = settingsButtonX();
+    public static void renderSharedBackgroundSelector(float width, float height, int mouseX, int mouseY, float frameSeconds) {
+        ensureBackgroundCacheLoaded();
+        syncSharedSelectedBackground();
+        updateSharedPanelAnimation(frameSeconds);
+        renderSettingsPanel(width, height, mouseX, mouseY);
+        renderSettingsButton(width, mouseX, mouseY);
+    }
+
+    public static boolean mouseClickedSharedBackgroundSelector(MouseButtonEvent event, float width, float height) {
+        if (event.button() != GLFW_MOUSE_BUTTON_LEFT) {
+            return false;
+        }
+
+        ensureBackgroundCacheLoaded();
+        syncSharedSelectedBackground();
+        if (isInside(event.x(), event.y(), settingsButtonX(width), settingsButtonY(), SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE)) {
+            sharedSettingsOpen = !sharedSettingsOpen;
+            return true;
+        }
+
+        if (isSettingsPanelVisible()) {
+            if (isInside(event.x(), event.y(), panelX(width), 0.0F, panelWidth(width), height)) {
+                int row = backgroundRowAt(event.x(), event.y(), width);
+                if (row >= 0 && row < BACKGROUND_CACHE.size()) {
+                    selectBackground(row);
+                }
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    public static boolean mouseScrolledSharedBackgroundSelector(double mouseX, double mouseY, double scrollY, float width, float height) {
+        if (!isSettingsPanelVisible()) {
+            return false;
+        }
+
+        float listHeight = Math.max(0.0F, height - PANEL_HEADER_HEIGHT - PANEL_PADDING);
+        updatePanelScrollLimit(listHeight);
+        if (isInside(mouseX, mouseY, panelX(width), PANEL_HEADER_HEIGHT, panelWidth(width), height - PANEL_HEADER_HEIGHT)) {
+            sharedPanelScroll = clamp(sharedPanelScroll - (float)scrollY * SCROLL_STEP, 0.0F, sharedMaxPanelScroll);
+            return true;
+        }
+
+        return false;
+    }
+
+    public static boolean closeSharedBackgroundSelector() {
+        if (!sharedSettingsOpen) {
+            return false;
+        }
+
+        sharedSettingsOpen = false;
+        return true;
+    }
+
+    private static void renderSettingsButton(float width, int mouseX, int mouseY) {
+        float x = settingsButtonX(width);
         float y = settingsButtonY();
         boolean hovered = isInside(mouseX, mouseY, x, y, SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE);
-        int fill = Render2DUtility.mix(CONTROL_BACKGROUND, CONTROL_HOVER, hovered || this.settingsOpen ? 1.0F : 0.0F);
+        int fill = Render2DUtility.mix(CONTROL_BACKGROUND, CONTROL_HOVER, hovered || sharedSettingsOpen ? 1.0F : 0.0F);
 
         Render2DUtility.drawDropShadow(x, y, SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE, 8.0F, 0.0F, 5.0F, 10.0F, 0x66000000);
         Render2DUtility.drawRoundedRect(x, y, SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE, 8.0F, fill);
         Render2DUtility.drawOutlineRoundedRect(x, y, SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE, 8.0F, 1.0F, PANEL_BORDER);
-        drawResourceTexture(SETTINGS_ICON, x + 8.0F, y + 8.0F, 18.0F, 18.0F, this.settingsOpen ? 0xFFFFFFFF : 0xFFE2E6EF);
+        drawResourceTexture(SETTINGS_ICON, x + 8.0F, y + 8.0F, 18.0F, 18.0F, sharedSettingsOpen ? 0xFFFFFFFF : 0xFFE2E6EF);
     }
 
-    private void renderSettingsPanel(int mouseX, int mouseY) {
+    private static void renderSettingsPanel(float width, float height, int mouseX, int mouseY) {
         if (!isSettingsPanelVisible()) {
             return;
         }
 
-        float progress = easeOutCubic(this.settingsPanelProgress);
-        float panelWidth = panelWidth();
-        float panelX = this.width - panelWidth * progress;
+        float progress = easeOutCubic(sharedSettingsPanelProgress);
+        float panelWidth = panelWidth(width);
+        float panelX = width - panelWidth * progress;
         float visibleAlpha = clamp(progress, 0.0F, 1.0F);
-        Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, Render2DUtility.applyOpacity(0x66000000, visibleAlpha * 0.65F));
-        Render2DUtility.drawDropShadow(panelX, 0.0F, panelWidth, this.height, 0.0F, -12.0F, 0.0F, 24.0F, 0x7A000000);
-        Render2DUtility.drawRect(panelX, 0.0F, panelWidth, this.height, Render2DUtility.applyOpacity(PANEL_BACKGROUND, visibleAlpha));
-        Render2DUtility.drawRect(panelX, 0.0F, 1.0F, this.height, Render2DUtility.applyOpacity(PANEL_BORDER, visibleAlpha));
+        Render2DUtility.drawRect(0.0F, 0.0F, width, height, Render2DUtility.applyOpacity(0x66000000, visibleAlpha * 0.65F));
+        Render2DUtility.drawDropShadow(panelX, 0.0F, panelWidth, height, 0.0F, -12.0F, 0.0F, 24.0F, 0x7A000000);
+        Render2DUtility.drawRect(panelX, 0.0F, panelWidth, height, Render2DUtility.applyOpacity(PANEL_BACKGROUND, visibleAlpha));
+        Render2DUtility.drawRect(panelX, 0.0F, 1.0F, height, Render2DUtility.applyOpacity(PANEL_BORDER, visibleAlpha));
 
         float titleX = panelX + PANEL_PADDING;
         FontRenderer titleFont = displayFont(17.0F);
@@ -345,24 +379,24 @@ public final class MainUI extends Screen {
         );
 
         float listTop = PANEL_HEADER_HEIGHT;
-        float listHeight = Math.max(0.0F, this.height - listTop - PANEL_PADDING);
+        float listHeight = Math.max(0.0F, height - listTop - PANEL_PADDING);
         updatePanelScrollLimit(listHeight);
-        Render2DUtility.withClip(panelX, listTop, panelWidth, listHeight, () -> renderBackgroundRows(panelX, listTop, panelWidth, mouseX, mouseY, visibleAlpha));
+        Render2DUtility.withClip(panelX, listTop, panelWidth, listHeight, () -> renderBackgroundRows(panelX, listTop, panelWidth, height, mouseX, mouseY, visibleAlpha));
     }
 
-    private void renderBackgroundRows(float panelX, float listTop, float panelWidth, int mouseX, int mouseY, float alpha) {
+    private static void renderBackgroundRows(float panelX, float listTop, float panelWidth, float screenHeight, int mouseX, int mouseY, float alpha) {
         float rowX = panelX + PANEL_PADDING;
         float rowWidth = panelWidth - PANEL_PADDING * 2.0F;
         FontRenderer nameFont = textFont(11.0F);
         FontRenderer metaFont = textFont(9.0F);
-        for (int i = 0; i < this.backgrounds.size(); i++) {
+        for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
             float rowY = rowY(listTop, i);
-            if (rowY > this.height || rowY + ROW_HEIGHT < listTop) {
+            if (rowY > screenHeight || rowY + ROW_HEIGHT < listTop) {
                 continue;
             }
 
-            BackgroundMedia background = this.backgrounds.get(i);
-            boolean selected = i == this.selectedIndex;
+            BackgroundMedia background = BACKGROUND_CACHE.get(i);
+            boolean selected = background.key().equals(rememberedSelectedKey);
             boolean hovered = isInside(mouseX, mouseY, rowX, rowY, rowWidth, ROW_HEIGHT);
             int fill = selected ? ROW_SELECTED : Render2DUtility.mix(ROW_BACKGROUND, ROW_HOVER, hovered ? 1.0F : 0.0F);
 
@@ -397,70 +431,47 @@ public final class MainUI extends Screen {
 
         backgroundCacheLoaded = true;
         BACKGROUND_CACHE.addAll(BackgroundLibrary.load());
+        syncSharedSelectedBackground();
     }
 
     private static BackgroundMedia selectedSharedBackground() {
+        syncSharedSelectedBackground();
         if (BACKGROUND_CACHE.isEmpty()) {
             return null;
         }
 
-        int index = 0;
-        for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
-            if (BACKGROUND_CACHE.get(i).key().equals(rememberedSelectedKey)) {
-                index = i;
-                break;
-            }
-        }
-        return BACKGROUND_CACHE.get(index);
+        int index = indexOfBackground(rememberedSelectedKey);
+        return BACKGROUND_CACHE.get(Math.max(0, index));
     }
 
-    private void syncSelectedBackground() {
-        String keyToKeep = this.selectedKey == null ? rememberedSelectedKey : this.selectedKey;
-        this.selectedIndex = indexOfBackground(keyToKeep);
-        if (this.selectedIndex < 0) {
-            this.selectedIndex = 0;
-        }
-        this.selectedKey = this.backgrounds.isEmpty() ? BackgroundLibrary.DEFAULT_KEY : this.backgrounds.get(this.selectedIndex).key();
-        rememberedSelectedKey = this.selectedKey;
-        this.panelScroll = 0.0F;
-    }
-
-    private void selectBackground(int index) {
-        if (index < 0 || index >= this.backgrounds.size()) {
+    private static void syncSharedSelectedBackground() {
+        if (BACKGROUND_CACHE.isEmpty()) {
+            rememberedSelectedKey = BackgroundLibrary.DEFAULT_KEY;
+            sharedPanelScroll = 0.0F;
+            sharedMaxPanelScroll = 0.0F;
             return;
         }
 
-        this.selectedIndex = index;
-        this.selectedKey = this.backgrounds.get(index).key();
-        rememberedSelectedKey = this.selectedKey;
+        if (indexOfBackground(rememberedSelectedKey) < 0) {
+            rememberedSelectedKey = BACKGROUND_CACHE.get(0).key();
+        }
     }
 
-    private int indexOfBackground(String key) {
-        for (int i = 0; i < this.backgrounds.size(); i++) {
-            if (this.backgrounds.get(i).key().equals(key)) {
+    private static void selectBackground(int index) {
+        if (index < 0 || index >= BACKGROUND_CACHE.size()) {
+            return;
+        }
+
+        rememberedSelectedKey = BACKGROUND_CACHE.get(index).key();
+    }
+
+    private static int indexOfBackground(String key) {
+        for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
+            if (BACKGROUND_CACHE.get(i).key().equals(key)) {
                 return i;
             }
         }
         return -1;
-    }
-
-    private BackgroundMedia selectedBackground() {
-        if (this.backgrounds.isEmpty()) {
-            ensureBackgroundCacheLoaded();
-            syncSelectedBackground();
-        }
-        if (this.backgrounds.isEmpty()) {
-            return null;
-        }
-
-        this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, this.backgrounds.size() - 1));
-        return this.backgrounds.get(this.selectedIndex);
-    }
-
-    private void pauseBackgroundPlayback() {
-        for (BackgroundMedia background : this.backgrounds) {
-            background.pausePlayback();
-        }
     }
 
     private void updateFrameTime() {
@@ -473,21 +484,21 @@ public final class MainUI extends Screen {
         this.lastFrameNanos = now;
     }
 
-    private void updatePanelAnimation() {
-        this.settingsPanelProgress = animate(this.settingsPanelProgress, this.settingsOpen ? 1.0F : 0.0F, PANEL_ANIMATION_SPEED);
+    private static void updateSharedPanelAnimation(float frameSeconds) {
+        sharedSettingsPanelProgress = animate(sharedSettingsPanelProgress, sharedSettingsOpen ? 1.0F : 0.0F, PANEL_ANIMATION_SPEED, frameSeconds);
     }
 
-    private void updatePanelScrollLimit(float listHeight) {
-        float contentHeight = this.backgrounds.size() * (ROW_HEIGHT + ROW_GAP) - ROW_GAP;
-        this.maxPanelScroll = Math.max(0.0F, contentHeight - listHeight);
-        this.panelScroll = clamp(this.panelScroll, 0.0F, this.maxPanelScroll);
+    private static void updatePanelScrollLimit(float listHeight) {
+        float contentHeight = BACKGROUND_CACHE.size() * (ROW_HEIGHT + ROW_GAP) - ROW_GAP;
+        sharedMaxPanelScroll = Math.max(0.0F, contentHeight - listHeight);
+        sharedPanelScroll = clamp(sharedPanelScroll, 0.0F, sharedMaxPanelScroll);
     }
 
-    private int backgroundRowAt(double mouseX, double mouseY) {
-        float panelX = panelX();
+    private static int backgroundRowAt(double mouseX, double mouseY, float screenWidth) {
+        float panelX = panelX(screenWidth);
         float rowX = panelX + PANEL_PADDING;
-        float rowWidth = panelWidth() - PANEL_PADDING * 2.0F;
-        for (int i = 0; i < this.backgrounds.size(); i++) {
+        float rowWidth = panelWidth(screenWidth) - PANEL_PADDING * 2.0F;
+        for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
             float rowY = rowY(PANEL_HEADER_HEIGHT, i);
             if (isInside(mouseX, mouseY, rowX, rowY, rowWidth, ROW_HEIGHT)) {
                 return i;
@@ -496,12 +507,12 @@ public final class MainUI extends Screen {
         return -1;
     }
 
-    private float rowY(float listTop, int index) {
-        return listTop + index * (ROW_HEIGHT + ROW_GAP) - this.panelScroll;
+    private static float rowY(float listTop, int index) {
+        return listTop + index * (ROW_HEIGHT + ROW_GAP) - sharedPanelScroll;
     }
 
-    private boolean isSettingsPanelVisible() {
-        return this.settingsOpen || this.settingsPanelProgress > 0.001F;
+    private static boolean isSettingsPanelVisible() {
+        return sharedSettingsOpen || sharedSettingsPanelProgress > 0.001F;
     }
 
     private boolean isActiveScreen() {
@@ -509,11 +520,11 @@ public final class MainUI extends Screen {
         return minecraft != null && minecraft.screen == this;
     }
 
-    private float settingsButtonX() {
-        return this.width - SETTINGS_BUTTON_MARGIN - SETTINGS_BUTTON_SIZE;
+    private static float settingsButtonX(float screenWidth) {
+        return screenWidth - SETTINGS_BUTTON_MARGIN - SETTINGS_BUTTON_SIZE;
     }
 
-    private float settingsButtonY() {
+    private static float settingsButtonY() {
         return SETTINGS_BUTTON_MARGIN;
     }
 
@@ -534,17 +545,17 @@ public final class MainUI extends Screen {
         );
     }
 
-    private float panelWidth() {
-        float upper = Math.max(120.0F, Math.min(PANEL_MAX_WIDTH, this.width - 24.0F));
+    private static float panelWidth(float screenWidth) {
+        float upper = Math.max(120.0F, Math.min(PANEL_MAX_WIDTH, screenWidth - 24.0F));
         float lower = Math.min(PANEL_MIN_WIDTH, upper);
-        return clamp(this.width * 0.78F, lower, upper);
+        return clamp(screenWidth * 0.78F, lower, upper);
     }
 
-    private float panelX() {
-        return this.width - panelWidth() * easeOutCubic(this.settingsPanelProgress);
+    private static float panelX(float screenWidth) {
+        return screenWidth - panelWidth(screenWidth) * easeOutCubic(sharedSettingsPanelProgress);
     }
 
-    private void drawResourceTexture(Identifier resource, float x, float y, float width, float height, int color) {
+    private static void drawResourceTexture(Identifier resource, float x, float y, float width, float height, int color) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null) {
             return;
@@ -553,15 +564,15 @@ public final class MainUI extends Screen {
         Render2DUtility.drawTexture(minecraft.getTextureManager().getTexture(resource).getTextureView(), x, y, width, height, color);
     }
 
-    private FontRenderer displayFont(float size) {
+    private static FontRenderer displayFont(float size) {
         return FontManager.getAppleDisplayRenderer(size);
     }
 
-    private FontRenderer textFont(float size) {
+    private static FontRenderer textFont(float size) {
         return FontManager.getAppleTextRenderer(size);
     }
 
-    private String trimToWidth(FontRenderer renderer, String text, float maxWidth) {
+    private static String trimToWidth(FontRenderer renderer, String text, float maxWidth) {
         if (maxWidth <= 0.0F) {
             return "";
         }
@@ -581,12 +592,12 @@ public final class MainUI extends Screen {
         return text.substring(0, Math.max(0, end)) + suffix;
     }
 
-    private float animate(float current, float target, float speed) {
+    private static float animate(float current, float target, float speed, float frameSeconds) {
         if (current == target) {
             return current;
         }
 
-        float step = Math.min(1.0F, this.frameSeconds * speed);
+        float step = Math.min(1.0F, Math.max(0.0F, frameSeconds) * speed);
         float next = current + (target - current) * step;
         return Math.abs(target - next) < 0.001F ? target : next;
     }

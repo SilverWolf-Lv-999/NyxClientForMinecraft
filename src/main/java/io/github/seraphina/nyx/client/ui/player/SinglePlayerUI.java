@@ -174,6 +174,7 @@ public final class SinglePlayerUI extends Screen {
             renderTitles(mainPanel, currentPanel);
             layoutActionButtons(targetPanel);
             renderActionButtons(mouseX, mouseY);
+            MainUI.renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
         });
     }
 
@@ -181,6 +182,10 @@ public final class SinglePlayerUI extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() != GLFW_MOUSE_BUTTON_LEFT || this.switchingBack) {
             return super.mouseClicked(event, doubleClick);
+        }
+
+        if (MainUI.mouseClickedSharedBackgroundSelector(event, this.width, this.height)) {
+            return true;
         }
 
         if (isInteractive()) {
@@ -209,6 +214,10 @@ public final class SinglePlayerUI extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (MainUI.mouseScrolledSharedBackgroundSelector(mouseX, mouseY, scrollY, this.width, this.height)) {
+            return true;
+        }
+
         if (isInteractive() && isInsideList(mouseX, mouseY)) {
             this.scroll = clamp(this.scroll - (float)scrollY * SCROLL_STEP, 0.0F, this.maxScroll);
             return true;
@@ -219,6 +228,10 @@ public final class SinglePlayerUI extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (event.isEscape() && MainUI.closeSharedBackgroundSelector()) {
+            return true;
+        }
+
         if (event.isEscape()) {
             beginBackTransition();
             return true;
@@ -592,9 +605,10 @@ public final class SinglePlayerUI extends Screen {
         }
 
         boolean backFace = Render2DUtility.isVerticalFlipBackFace(degrees);
+        boolean canBlurSurface = flipProgress <= 0.001F || flipProgress >= 0.999F;
         float faceAlpha = easeOutCubic(clamp((projectionScale - FLIP_EDGE_MIN_SCALE) / (1.0F - FLIP_EDGE_MIN_SCALE), 0.0F, 1.0F));
         Render2DUtility.withVerticalFlip(degrees, panel.centerX(), panel.centerY(), FLIP_EDGE_MIN_SCALE, () -> {
-            renderPanelSurface(panel);
+            renderPanelSurface(panel, canBlurSurface);
             renderFlipShade(panel, degrees);
             if (backFace) {
                 renderWorldArea(panel, mouseX, mouseY, faceAlpha);
@@ -604,19 +618,25 @@ public final class SinglePlayerUI extends Screen {
         });
     }
 
-    private void renderPanelSurface(PanelBounds panel) {
-        Render2DUtility.drawGaussianBlurredPanel(
-            panel.x,
-            panel.y,
-            panel.width,
-            panel.height,
-            PANEL_RADIUS,
-            PANEL_BLUR_RADIUS,
-            PANEL_BLUR,
-            PANEL_BACKGROUND,
-            PANEL_BORDER_WIDTH,
-            PANEL_BORDER
-        );
+    private void renderPanelSurface(PanelBounds panel, boolean blurSurface) {
+        if (blurSurface) {
+            Render2DUtility.drawGaussianBlurredPanel(
+                panel.x,
+                panel.y,
+                panel.width,
+                panel.height,
+                PANEL_RADIUS,
+                PANEL_BLUR_RADIUS,
+                PANEL_BLUR,
+                PANEL_BACKGROUND,
+                PANEL_BORDER_WIDTH,
+                PANEL_BORDER
+            );
+            return;
+        }
+
+        Render2DUtility.drawRoundedRect(panel.x, panel.y, panel.width, panel.height, PANEL_RADIUS, PANEL_BACKGROUND);
+        Render2DUtility.drawOutlineRoundedRect(panel.x, panel.y, panel.width, panel.height, PANEL_RADIUS, PANEL_BORDER_WIDTH, PANEL_BORDER);
     }
 
     private void renderFlipShade(PanelBounds panel, float degrees) {
