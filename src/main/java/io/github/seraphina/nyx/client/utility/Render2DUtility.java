@@ -40,6 +40,7 @@ import java.util.Objects;
 public final class Render2DUtility {
     private static final int MIN_SEGMENTS = 32;
     private static final int MAX_SEGMENTS = 64;
+    private static final float ANTIALIAS_PIXELS = 1.25F;
     private static final float MAX_GAUSSIAN_BLUR_RADIUS = 32.0F;
     private static final RenderPipeline GUI_TEXTURED_TRIANGLE_FAN = RenderPipeline.builder(RenderPipelines.GUI_TEXTURED_SNIPPET)
         .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_textured_triangle_fan"))
@@ -385,7 +386,7 @@ public final class Render2DUtility {
             return;
         }
 
-        submitFan(roundedRectFanPoints(x, y, width, height, tl, tr, br, bl), color);
+        drawAntialiasedRoundedRect(x, y, width, height, tl, tr, br, bl, color);
     }
 
     public static void drawOutlineRoundedRect(float x, float y, float width, float height, float radius, float strokeWidth, int color) {
@@ -429,18 +430,7 @@ public final class Render2DUtility {
             return;
         }
 
-        float centerX = x + width * 0.5F;
-        float centerY = y + height * 0.5F;
-        float radiusX = width * 0.5F;
-        float radiusY = height * 0.5F;
-        int segments = segmentsForRadius(Math.max(radiusX, radiusY));
-        FloatList points = new FloatList((segments + 3) * 2);
-        points.add(centerX, centerY);
-        for (int i = 0; i <= segments; i++) {
-            double angle = Math.PI * 2.0D * i / segments;
-            points.add(centerX + (float)Math.cos(angle) * radiusX, centerY + (float)Math.sin(angle) * radiusY);
-        }
-        submitFan(points.toArray(), color);
+        drawAntialiasedOval(x, y, width, height, color);
     }
 
     public static void drawLine(float startX, float startY, float endX, float endY, float strokeWidth, int color) {
@@ -546,12 +536,30 @@ public final class Render2DUtility {
         }
 
         Gradient gradient = Gradient.of(colors, positions);
-        float[] points = roundedRectFanPoints(x, y, width, height, safeRadius, safeRadius, safeRadius, safeRadius);
+        float aa = antialiasSize(width, height);
+        if (aa <= 0.0F) {
+            float[] points = roundedRectFanPoints(x, y, width, height, safeRadius, safeRadius, safeRadius, safeRadius);
+            int[] pointColors = new int[points.length / 2];
+            for (int i = 0; i < pointColors.length; i++) {
+                pointColors[i] = gradient.colorAt(projectGradient(points[i * 2], points[i * 2 + 1], startX, startY, endX, endY));
+            }
+            submitFan(points, pointColors);
+            return;
+        }
+
+        float innerX = x + aa;
+        float innerY = y + aa;
+        float innerWidth = Math.max(0.0F, width - aa * 2.0F);
+        float innerHeight = Math.max(0.0F, height - aa * 2.0F);
+        float innerRadius = clampRadius(innerWidth, innerHeight, safeRadius - aa);
+        float[] points = roundedRectFanPoints(innerX, innerY, innerWidth, innerHeight, innerRadius, innerRadius, innerRadius, innerRadius);
         int[] pointColors = new int[points.length / 2];
         for (int i = 0; i < pointColors.length; i++) {
             pointColors[i] = gradient.colorAt(projectGradient(points[i * 2], points[i * 2 + 1], startX, startY, endX, endY));
         }
         submitFan(points, pointColors);
+        submitAntialiasedRoundedRectGradientEdge(x, y, width, height, safeRadius, safeRadius, safeRadius, safeRadius, aa, gradient,
+            startX, startY, endX, endY);
     }
 
     public static void drawRadialGradientCircle(float centerX, float centerY, float radius, int innerColor, int outerColor) {
@@ -859,7 +867,11 @@ public final class Render2DUtility {
     }
 
     private static void submitStrip(float[] points, int color) {
-        if (points.length < 6 || isTransparent(color)) {
+        submitStrip(points, new int[] {color});
+    }
+
+    private static void submitStrip(float[] points, int[] colors) {
+        if (points.length < 6 || colors.length == 0 || allTransparent(colors)) {
             return;
         }
 
@@ -869,7 +881,7 @@ public final class Render2DUtility {
             TextureSetup.noTexture(),
             new Matrix3x2f(graphics.pose()),
             points,
-            color,
+            colors,
             graphics.peekScissorStack()
         ));
     }
@@ -1067,6 +1079,186 @@ public final class Render2DUtility {
         return minecraft == null ? null : minecraft.font;
     }
 
+    private static void drawAntialiasedRoundedRect(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
+                                                   float bottomRightRadius, float bottomLeftRadius, int color) {
+        float aa = antialiasSize(width, height);
+        if (aa <= 0.0F) {
+            submitFan(roundedRectFanPoints(x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius), color);
+            return;
+        }
+
+        float innerX = x + aa;
+        float innerY = y + aa;
+        float innerWidth = Math.max(0.0F, width - aa * 2.0F);
+        float innerHeight = Math.max(0.0F, height - aa * 2.0F);
+        float innerTopLeftRadius = clampRadius(innerWidth, innerHeight, topLeftRadius - aa);
+        float innerTopRightRadius = clampRadius(innerWidth, innerHeight, topRightRadius - aa);
+        float innerBottomRightRadius = clampRadius(innerWidth, innerHeight, bottomRightRadius - aa);
+        float innerBottomLeftRadius = clampRadius(innerWidth, innerHeight, bottomLeftRadius - aa);
+
+        submitFan(roundedRectFanPoints(innerX, innerY, innerWidth, innerHeight,
+            innerTopLeftRadius, innerTopRightRadius, innerBottomRightRadius, innerBottomLeftRadius), color);
+        submitAntialiasedRoundedRectEdge(x, y, width, height,
+            topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius, aa,
+            (pointX, pointY, opacity) -> applyOpacity(color, opacity));
+    }
+
+    private static void drawAntialiasedOval(float x, float y, float width, float height, int color) {
+        float aa = antialiasSize(width, height);
+        if (aa <= 0.0F) {
+            submitFan(ovalFanPoints(x, y, width, height), color);
+            return;
+        }
+
+        submitFan(ovalFanPoints(x + aa, y + aa, Math.max(0.0F, width - aa * 2.0F), Math.max(0.0F, height - aa * 2.0F)), color);
+        submitAntialiasedOvalEdge(x, y, width, height, aa, (pointX, pointY, opacity) -> applyOpacity(color, opacity));
+    }
+
+    private static void submitAntialiasedRoundedRectGradientEdge(float x, float y, float width, float height,
+                                                                 float topLeftRadius, float topRightRadius,
+                                                                 float bottomRightRadius, float bottomLeftRadius,
+                                                                 float aa, Gradient gradient,
+                                                                 float startX, float startY, float endX, float endY) {
+        submitAntialiasedRoundedRectEdge(x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius, aa,
+            (pointX, pointY, opacity) -> applyOpacity(gradient.colorAt(projectGradient(pointX, pointY, startX, startY, endX, endY)), opacity));
+    }
+
+    private static void submitAntialiasedRoundedRectEdge(float x, float y, float width, float height,
+                                                         float topLeftRadius, float topRightRadius,
+                                                         float bottomRightRadius, float bottomLeftRadius,
+                                                         float aa, AlphaColorProvider colorProvider) {
+        if (aa <= 0.0F) {
+            return;
+        }
+
+        float innerX = x + aa;
+        float innerY = y + aa;
+        float innerWidth = Math.max(0.0F, width - aa * 2.0F);
+        float innerHeight = Math.max(0.0F, height - aa * 2.0F);
+        float innerTopLeftRadius = clampRadius(innerWidth, innerHeight, topLeftRadius - aa);
+        float innerTopRightRadius = clampRadius(innerWidth, innerHeight, topRightRadius - aa);
+        float innerBottomRightRadius = clampRadius(innerWidth, innerHeight, bottomRightRadius - aa);
+        float innerBottomLeftRadius = clampRadius(innerWidth, innerHeight, bottomLeftRadius - aa);
+
+        FloatList points = new FloatList(192);
+        IntList colors = new IntList(96);
+
+        float firstOuterX = bottomRightRadius <= 0.0F ? x + width : x + width - bottomRightRadius;
+        float firstOuterY = y + height;
+        float firstInnerX = innerBottomRightRadius <= 0.0F ? innerX + innerWidth : innerX + innerWidth - innerBottomRightRadius;
+        float firstInnerY = innerY + innerHeight;
+        addAntialiasPair(points, colors, firstOuterX, firstOuterY, firstInnerX, firstInnerY, colorProvider);
+        appendAntialiasedCorner(points, colors,
+            x + width - bottomRightRadius, y + height - bottomRightRadius,
+            innerX + innerWidth - innerBottomRightRadius, innerY + innerHeight - innerBottomRightRadius,
+            bottomRightRadius, innerBottomRightRadius, 0.0F, 90.0F, false,
+            x + width, y + height, innerX + innerWidth, innerY + innerHeight, colorProvider);
+        appendAntialiasedCorner(points, colors,
+            x + width - topRightRadius, y + topRightRadius,
+            innerX + innerWidth - innerTopRightRadius, innerY + innerTopRightRadius,
+            topRightRadius, innerTopRightRadius, 90.0F, 180.0F, true,
+            x + width, y, innerX + innerWidth, innerY, colorProvider);
+        appendAntialiasedCorner(points, colors,
+            x + topLeftRadius, y + topLeftRadius,
+            innerX + innerTopLeftRadius, innerY + innerTopLeftRadius,
+            topLeftRadius, innerTopLeftRadius, 180.0F, 270.0F, true,
+            x, y, innerX, innerY, colorProvider);
+        appendAntialiasedCorner(points, colors,
+            x + bottomLeftRadius, y + height - bottomLeftRadius,
+            innerX + innerBottomLeftRadius, innerY + innerHeight - innerBottomLeftRadius,
+            bottomLeftRadius, innerBottomLeftRadius, 270.0F, 360.0F, true,
+            x, y + height, innerX, innerY + innerHeight, colorProvider);
+        addAntialiasPair(points, colors, firstOuterX, firstOuterY, firstInnerX, firstInnerY, colorProvider);
+
+        submitStrip(points.toArray(), colors.toArray());
+    }
+
+    private static void submitAntialiasedOvalEdge(float x, float y, float width, float height, float aa, AlphaColorProvider colorProvider) {
+        if (aa <= 0.0F) {
+            return;
+        }
+
+        float centerX = x + width * 0.5F;
+        float centerY = y + height * 0.5F;
+        float outerRadiusX = width * 0.5F;
+        float outerRadiusY = height * 0.5F;
+        float innerRadiusX = Math.max(0.0F, outerRadiusX - aa);
+        float innerRadiusY = Math.max(0.0F, outerRadiusY - aa);
+        int segments = segmentsForRadius(Math.max(outerRadiusX, outerRadiusY));
+        FloatList points = new FloatList((segments + 1) * 4);
+        IntList colors = new IntList((segments + 1) * 2);
+        for (int i = 0; i <= segments; i++) {
+            double angle = Math.PI * 2.0D * i / segments;
+            float cos = (float)Math.cos(angle);
+            float sin = (float)Math.sin(angle);
+            addAntialiasPair(points, colors,
+                centerX + cos * outerRadiusX, centerY + sin * outerRadiusY,
+                centerX + cos * innerRadiusX, centerY + sin * innerRadiusY,
+                colorProvider);
+        }
+        submitStrip(points.toArray(), colors.toArray());
+    }
+
+    private static void appendAntialiasedCorner(FloatList points, IntList colors,
+                                                float outerCenterX, float outerCenterY,
+                                                float innerCenterX, float innerCenterY,
+                                                float outerRadius, float innerRadius,
+                                                float startAngle, float endAngle, boolean includeStart,
+                                                float outerFallbackX, float outerFallbackY,
+                                                float innerFallbackX, float innerFallbackY,
+                                                AlphaColorProvider colorProvider) {
+        if (outerRadius <= 0.0F) {
+            if (includeStart) {
+                addAntialiasPair(points, colors, outerFallbackX, outerFallbackY, innerFallbackX, innerFallbackY, colorProvider);
+            }
+            return;
+        }
+
+        int segments = Math.max(3, segmentsForRadius(outerRadius) / 4);
+        int startIndex = includeStart ? 0 : 1;
+        for (int i = startIndex; i <= segments; i++) {
+            float angle = startAngle + (endAngle - startAngle) * i / segments;
+            double radians = Math.toRadians(angle);
+            float sin = (float)Math.sin(radians);
+            float cos = (float)Math.cos(radians);
+            addAntialiasPair(points, colors,
+                outerCenterX + sin * outerRadius, outerCenterY + cos * outerRadius,
+                innerCenterX + sin * innerRadius, innerCenterY + cos * innerRadius,
+                colorProvider);
+        }
+    }
+
+    private static void addAntialiasPair(FloatList points, IntList colors,
+                                         float outerX, float outerY, float innerX, float innerY,
+                                         AlphaColorProvider colorProvider) {
+        points.add(outerX, outerY);
+        colors.add(colorProvider.colorAt(outerX, outerY, 0.0F));
+        points.add(innerX, innerY);
+        colors.add(colorProvider.colorAt(innerX, innerY, 1.0F));
+    }
+
+    private static float antialiasSize(float width, float height) {
+        float maxSize = Math.min(width, height) * 0.5F - 0.001F;
+        if (maxSize <= 0.0F) {
+            return 0.0F;
+        }
+        return Math.min(localAntialiasSize(), maxSize);
+    }
+
+    private static float localAntialiasSize() {
+        Minecraft minecraft = Minecraft.getInstance();
+        float guiScale = minecraft == null ? 1.0F : Math.max(1.0F, (float)minecraft.getWindow().getGuiScale());
+        float transformScale = 1.0F;
+        GuiGraphics graphics = CURRENT_GRAPHICS.get();
+        if (graphics != null) {
+            Matrix3x2f pose = new Matrix3x2f(graphics.pose());
+            float scaleX = (float)Math.sqrt(pose.m00() * pose.m00() + pose.m01() * pose.m01());
+            float scaleY = (float)Math.sqrt(pose.m10() * pose.m10() + pose.m11() * pose.m11());
+            transformScale = Math.max(0.0001F, (scaleX + scaleY) * 0.5F);
+        }
+        return ANTIALIAS_PIXELS / Math.max(0.0001F, guiScale * transformScale);
+    }
+
     private static float[] roundedRectFanPoints(float x, float y, float width, float height, float topLeftRadius, float topRightRadius,
                                                 float bottomRightRadius, float bottomLeftRadius) {
         float[] boundary = roundedRectBoundaryPoints(x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius);
@@ -1239,6 +1431,15 @@ public final class Render2DUtility {
 
     private static boolean isTransparent(int color) {
         return ((color >>> 24) & 0xFF) == 0;
+    }
+
+    private static boolean allTransparent(int[] colors) {
+        for (int color : colors) {
+            if (!isTransparent(color)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static float clampRadius(float width, float height, float radius) {
@@ -1425,20 +1626,27 @@ public final class Render2DUtility {
         TextureSetup textureSetup,
         Matrix3x2f pose,
         float[] points,
-        int color,
+        int[] colors,
         @Nullable ScreenRectangle scissorArea,
         @Nullable ScreenRectangle bounds
     ) implements GuiElementRenderState {
-        private StripRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, int color,
+        private StripRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, int[] colors,
                                  @Nullable ScreenRectangle scissorArea) {
-            this(pipeline, textureSetup, pose, points, color, scissorArea, boundsFor(points, pose, scissorArea));
+            this(pipeline, textureSetup, pose, points, colors, scissorArea, boundsFor(points, pose, scissorArea));
         }
 
         @Override
         public void buildVertices(VertexConsumer consumer) {
             for (int i = 0; i < this.points.length; i += 2) {
-                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setColor(this.color);
+                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setColor(colorAt(i / 2));
             }
+        }
+
+        private int colorAt(int index) {
+            if (this.colors.length == 1) {
+                return this.colors[0];
+            }
+            return this.colors[Math.min(index, this.colors.length - 1)];
         }
     }
 
@@ -1581,6 +1789,11 @@ public final class Render2DUtility {
         }
     }
 
+    @FunctionalInterface
+    private interface AlphaColorProvider {
+        int colorAt(float x, float y, float opacity);
+    }
+
     private static final class FloatList {
         private float[] values;
         private int size;
@@ -1606,6 +1819,31 @@ public final class Render2DUtility {
         }
 
         private float[] toArray() {
+            return Arrays.copyOf(this.values, this.size);
+        }
+
+        private void ensureCapacity(int capacity) {
+            if (capacity <= this.values.length) {
+                return;
+            }
+            this.values = Arrays.copyOf(this.values, Math.max(capacity, this.values.length * 2));
+        }
+    }
+
+    private static final class IntList {
+        private int[] values;
+        private int size;
+
+        private IntList(int capacity) {
+            this.values = new int[Math.max(1, capacity)];
+        }
+
+        private void add(int value) {
+            ensureCapacity(this.size + 1);
+            this.values[this.size++] = value;
+        }
+
+        private int[] toArray() {
             return Arrays.copyOf(this.values, this.size);
         }
 

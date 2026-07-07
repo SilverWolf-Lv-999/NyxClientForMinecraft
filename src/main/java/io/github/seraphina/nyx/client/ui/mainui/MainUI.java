@@ -1,26 +1,35 @@
 package io.github.seraphina.nyx.client.ui.mainui;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.PathManager;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundMedia;
 import io.github.seraphina.nyx.client.ui.mainui.button.MainUIButton;
+import io.github.seraphina.nyx.client.ui.player.MutiPlayerUI;
 import io.github.seraphina.nyx.client.ui.player.SinglePlayerUI;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
+import io.github.seraphina.nyx.client.utility.web.MicrosoftUtility;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
-import net.minecraft.client.gui.screens.multiplayer.SafetyScreen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
+import java.awt.AlphaComposite;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
@@ -56,6 +65,18 @@ public final class MainUI extends Screen {
     private static final float CENTER_BUTTON_MIN_GAP = 7.0F;
     private static final float CENTER_BUTTON_MAX_INSET = 32.0F;
     private static final float CENTER_BUTTON_MIN_INSET = 18.0F;
+    private static final float USER_CARD_SCALE = 0.7F;
+    private static final float USER_CARD_MARGIN = 14.0F;
+    private static final float USER_CARD_MAX_WIDTH = 236.0F * USER_CARD_SCALE;
+    private static final float USER_CARD_MIN_WIDTH = 154.0F * USER_CARD_SCALE;
+    private static final float USER_CARD_HEIGHT = 54.0F * USER_CARD_SCALE;
+    private static final float USER_CARD_RADIUS = 12.0F * USER_CARD_SCALE;
+    private static final float USER_CARD_BLUR_RADIUS = 12.0F * USER_CARD_SCALE;
+    private static final float USER_CARD_PADDING = 10.0F * USER_CARD_SCALE;
+    private static final float USER_AVATAR_SIZE = 34.0F * USER_CARD_SCALE;
+    private static final float USER_NAME_GAP = 12.0F * USER_CARD_SCALE;
+    private static final float USER_NAME_SIZE = 12.0F * USER_CARD_SCALE;
+    private static final float AVATAR_TEXTURE_SIZE = 64.0F;
 
     private static final int TEXT = 0xFFFFFFFF;
     private static final int TEXT_MUTED = 0xFFA8AFBE;
@@ -72,8 +93,14 @@ public final class MainUI extends Screen {
     private static final int CONTROL_BACKGROUND = 0xAA0E1118;
     private static final int CONTROL_HOVER = 0xD7191D28;
     private static final int ACCENT = 0xFF3D81F7;
+    private static final int USER_CARD_BLUR = 0xE6FFFFFF;
+    private static final int USER_CARD_BACKGROUND = 0xB80A0C12;
+    private static final int USER_CARD_BORDER = 0x2EFFFFFF;
+    private static final int USER_CARD_SHADOW = 0x66000000;
+    private static final int USER_NAME_SHADOW = 0xAA000000;
 
     private static final List<BackgroundMedia> BACKGROUND_CACHE = new ArrayList<>();
+    private static final AtomicInteger AVATAR_TEXTURE_IDS = new AtomicInteger();
 
     private static String rememberedSelectedKey = BackgroundLibrary.DEFAULT_KEY;
     private static boolean backgroundCacheLoaded;
@@ -83,6 +110,11 @@ public final class MainUI extends Screen {
     private static float sharedMaxPanelScroll;
 
     private final List<MainUIButton> mainButtons = new ArrayList<>();
+    private static boolean sharedWindowsUserNameLoaded;
+    private static boolean sharedWindowsAvatarImageLoaded;
+    private static String sharedWindowsUserName;
+    private static BufferedImage sharedWindowsAvatarImage;
+    private static DynamicTexture sharedWindowsAvatarTexture;
 
     private long lastFrameNanos;
     private float frameSeconds = DEFAULT_FRAME_SECONDS;
@@ -111,6 +143,7 @@ public final class MainUI extends Screen {
         Render2DUtility.withGuiGraphics(guiGraphics, () -> {
             updateFrameTime();
             renderSelectedBackground();
+            renderUserCard();
             renderCenterPanel();
             layoutMainButtons();
             updateMainButtonStates();
@@ -164,6 +197,7 @@ public final class MainUI extends Screen {
     public void removed() {
         this.lastFrameNanos = 0L;
         pauseSharedBackgroundPlayback();
+        closeWindowsAvatarTexture();
         super.removed();
     }
 
@@ -205,6 +239,98 @@ public final class MainUI extends Screen {
         float titleY = Math.max(8.0F, panel.y() - CENTER_PANEL_TITLE_GAP - CENTER_PANEL_TITLE_SIZE);
         titleFont.drawString(CENTER_PANEL_TITLE, titleX + 1.0F, titleY + 1.0F, CENTER_PANEL_TITLE_SHADOW);
         titleFont.drawString(CENTER_PANEL_TITLE, titleX, titleY, TEXT);
+    }
+
+    private void renderUserCard() {
+        renderSharedUserCard(this.width, this.height, 0.0F, 1.0F);
+    }
+
+    public static void renderSharedUserCard(float screenWidth, float screenHeight, float offsetX, float alpha) {
+        if (alpha <= 0.001F) {
+            return;
+        }
+
+        float x = USER_CARD_MARGIN + offsetX;
+        float y = USER_CARD_MARGIN;
+        float width = sharedUserCardWidth(screenWidth);
+        float height = Math.min(USER_CARD_HEIGHT, Math.max(1.0F, screenHeight - USER_CARD_MARGIN * 2.0F));
+        int shadowColor = Render2DUtility.applyOpacity(USER_CARD_SHADOW, alpha);
+        int blurColor = Render2DUtility.applyOpacity(USER_CARD_BLUR, alpha);
+        int backgroundColor = Render2DUtility.applyOpacity(USER_CARD_BACKGROUND, alpha);
+        int borderColor = Render2DUtility.applyOpacity(USER_CARD_BORDER, alpha);
+
+        Render2DUtility.drawDropShadow(x, y, width, height, USER_CARD_RADIUS, 0.0F, 3.5F, 8.4F, shadowColor);
+        Render2DUtility.drawGaussianBlurredPanel(
+            x,
+            y,
+            width,
+            height,
+            USER_CARD_RADIUS,
+            USER_CARD_BLUR_RADIUS,
+            blurColor,
+            backgroundColor,
+            1.0F,
+            borderColor
+        );
+
+        float avatarSize = Math.min(USER_AVATAR_SIZE, Math.max(1.0F, height - USER_CARD_PADDING * 2.0F));
+        float avatarX = x + USER_CARD_PADDING;
+        float avatarY = y + (height - avatarSize) * 0.5F;
+        renderWindowsAvatar(avatarX, avatarY, avatarSize, alpha);
+
+        FontRenderer nameFont = textFont(USER_NAME_SIZE);
+        String windowsUserName = sharedWindowsUserName();
+        String safeName = windowsUserName == null || windowsUserName.isBlank() ? "Windows User" : windowsUserName;
+        float textX = avatarX + avatarSize + USER_NAME_GAP;
+        float textWidth = Math.max(1.0F, x + width - USER_CARD_PADDING - textX);
+        float textY = y + (height - nameFont.getLineHeight()) * 0.5F;
+        String text = trimToWidth(nameFont, safeName, textWidth);
+        nameFont.drawString(text, textX + 1.0F, textY + 1.0F, Render2DUtility.applyOpacity(USER_NAME_SHADOW, alpha));
+        nameFont.drawString(text, textX, textY, Render2DUtility.applyOpacity(TEXT, alpha));
+    }
+
+    private static void renderWindowsAvatar(float x, float y, float size, float alpha) {
+        if (sharedWindowsAvatarImage() != null) {
+            ensureWindowsAvatarTexture();
+        }
+
+        float centerX = x + size * 0.5F;
+        float centerY = y + size * 0.5F;
+        float radius = size * 0.5F;
+        int borderColor = Render2DUtility.applyOpacity(USER_CARD_BORDER, alpha);
+        if (sharedWindowsAvatarTexture != null) {
+            Render2DUtility.drawRoundedTexture(sharedWindowsAvatarTexture.getTextureView(), x, y, size, size, radius,
+                Render2DUtility.applyOpacity(0xFFFFFFFF, alpha));
+            Render2DUtility.drawOutlineCircle(centerX, centerY, radius, 1.0F, borderColor);
+            return;
+        }
+
+        Render2DUtility.drawCircle(centerX, centerY, radius, Render2DUtility.applyOpacity(CONTROL_HOVER, alpha));
+        Render2DUtility.drawOutlineCircle(centerX, centerY, radius, 1.0F, borderColor);
+        FontRenderer font = textFont(14.0F * USER_CARD_SCALE);
+        String windowsUserName = sharedWindowsUserName();
+        String initial = windowsUserName == null || windowsUserName.isBlank() ? "U" : windowsUserName.substring(0, 1).toUpperCase(Locale.ROOT);
+        font.drawCenteredString(initial, centerX, y + (size - font.getLineHeight()) * 0.5F,
+            Render2DUtility.applyOpacity(TEXT_MUTED, alpha));
+    }
+
+    private static void ensureWindowsAvatarTexture() {
+        BufferedImage avatarImage = sharedWindowsAvatarImage();
+        if (sharedWindowsAvatarTexture != null || avatarImage == null) {
+            return;
+        }
+
+        sharedWindowsAvatarTexture = new DynamicTexture(
+            () -> "nyx-mainui-avatar-" + AVATAR_TEXTURE_IDS.incrementAndGet(),
+            toNativeImage(avatarImage)
+        );
+    }
+
+    private static void closeWindowsAvatarTexture() {
+        if (sharedWindowsAvatarTexture != null) {
+            sharedWindowsAvatarTexture.close();
+            sharedWindowsAvatarTexture = null;
+        }
     }
 
     private void initMainButtons() {
@@ -266,8 +392,7 @@ public final class MainUI extends Screen {
             return;
         }
 
-        Screen screen = minecraft.options.skipMultiplayerWarning ? new JoinMultiplayerScreen(this) : new SafetyScreen(this);
-        minecraft.setScreen(screen);
+        MutiPlayerUI.open(this);
     }
 
     private void openOptions() {
@@ -545,6 +670,14 @@ public final class MainUI extends Screen {
         );
     }
 
+    public static float sharedUserCardWidth(float screenWidth) {
+        float settingsSafeMax = settingsButtonX(screenWidth) - USER_CARD_MARGIN - 8.0F;
+        float screenSafeMax = screenWidth - USER_CARD_MARGIN * 2.0F;
+        float maxWidth = Math.max(1.0F, Math.min(USER_CARD_MAX_WIDTH, Math.min(settingsSafeMax, screenSafeMax)));
+        float minWidth = Math.min(USER_CARD_MIN_WIDTH, maxWidth);
+        return clamp(screenWidth * 0.34F, minWidth, maxWidth);
+    }
+
     private static float panelWidth(float screenWidth) {
         float upper = Math.max(120.0F, Math.min(PANEL_MAX_WIDTH, screenWidth - 24.0F));
         float lower = Math.min(PANEL_MIN_WIDTH, upper);
@@ -613,6 +746,94 @@ public final class MainUI extends Screen {
 
     private static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
         return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
+    }
+
+    private static String loadWindowsUserName() {
+        try {
+            String userName = MicrosoftUtility.getCurrentComputerUserName();
+            if (userName == null || userName.isBlank()) {
+                userName = MicrosoftUtility.getCurrentWindowsAccountName();
+            }
+            return formatWindowsUserName(userName);
+        } catch (RuntimeException ignored) {
+            return "Windows User";
+        }
+    }
+
+    private static String sharedWindowsUserName() {
+        if (!sharedWindowsUserNameLoaded) {
+            sharedWindowsUserNameLoaded = true;
+            sharedWindowsUserName = loadWindowsUserName();
+        }
+
+        return sharedWindowsUserName;
+    }
+
+    private static BufferedImage sharedWindowsAvatarImage() {
+        if (!sharedWindowsAvatarImageLoaded) {
+            sharedWindowsAvatarImageLoaded = true;
+            sharedWindowsAvatarImage = loadWindowsAvatarImage();
+        }
+
+        return sharedWindowsAvatarImage;
+    }
+
+    private static String formatWindowsUserName(String userName) {
+        if (userName == null || userName.isBlank()) {
+            return "Windows User";
+        }
+
+        String displayName = userName.strip();
+        int separator = Math.max(displayName.lastIndexOf('\\'), displayName.lastIndexOf('/'));
+        if (separator >= 0 && separator + 1 < displayName.length()) {
+            displayName = displayName.substring(separator + 1);
+        }
+        if (displayName.isBlank()) {
+            return "Windows User";
+        }
+
+        return displayName.substring(0, 1).toUpperCase(Locale.ROOT) + displayName.substring(1);
+    }
+
+    private static BufferedImage loadWindowsAvatarImage() {
+        try {
+            return MicrosoftUtility.getCurrentMicrosoftAccountAvatarImage()
+                .map(image -> circularImage(image, Math.round(AVATAR_TEXTURE_SIZE)))
+                .orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static BufferedImage circularImage(BufferedImage source, int size) {
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setComposite(AlphaComposite.Clear);
+            graphics.fillRect(0, 0, size, size);
+            graphics.setComposite(AlphaComposite.SrcOver);
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            graphics.setClip(new Ellipse2D.Float(0.0F, 0.0F, size, size));
+
+            int sourceSize = Math.min(source.getWidth(), source.getHeight());
+            int sourceX = (source.getWidth() - sourceSize) / 2;
+            int sourceY = (source.getHeight() - sourceSize) / 2;
+            graphics.drawImage(source, 0, 0, size, size, sourceX, sourceY, sourceX + sourceSize, sourceY + sourceSize, null);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
+    }
+
+    private static NativeImage toNativeImage(BufferedImage image) {
+        NativeImage nativeImage = new NativeImage(image.getWidth(), image.getHeight(), true);
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                nativeImage.setPixel(x, y, image.getRGB(x, y));
+            }
+        }
+        return nativeImage;
     }
 
     private record CenterPanelBounds(float x, float y, float width, float height) {

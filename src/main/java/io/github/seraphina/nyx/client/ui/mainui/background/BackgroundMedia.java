@@ -25,7 +25,7 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_LOG_WARNING;
 public final class BackgroundMedia implements AutoCloseable {
     private static final Identifier DEFAULT_BACKGROUND = Identifier.fromNamespaceAndPath(
         "nyxclient",
-        "ui/background/background.jpg"
+        "ui/background/background.png"
     );
     private static final AtomicInteger TEXTURE_IDS = new AtomicInteger();
     private static final int THUMBNAIL_WIDTH = 192;

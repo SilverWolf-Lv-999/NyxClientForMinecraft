@@ -165,6 +165,7 @@ public final class SinglePlayerUI extends Screen {
 
             MainUI.renderSharedBackground(this.width, this.height);
             Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, Render2DUtility.applyOpacity(0x66000000, 0.32F * transitionProgress));
+            renderUserCardTransition();
 
             PanelBounds mainPanel = mainPanelBounds();
             PanelBounds targetPanel = targetPanelBounds();
@@ -858,6 +859,32 @@ public final class SinglePlayerUI extends Screen {
             1.5F,
             Render2DUtility.applyOpacity(0x66FFFFFF, alpha)
         );
+    }
+
+    private void renderUserCardTransition() {
+        float cardWidth = MainUI.sharedUserCardWidth(this.width);
+        float hiddenOffset = -cardWidth - 28.0F;
+        float offsetX;
+        float alpha;
+
+        if (this.exiting) {
+            float progress = phase(0.0F, 0.42F, 1.0F - this.transitionProgress);
+            float eased = easeOutBack(progress);
+            offsetX = lerp(hiddenOffset, 0.0F, eased);
+            alpha = clamp(progress * 1.4F, 0.0F, 1.0F);
+        } else {
+            float progress = phase(0.0F, 0.42F, this.transitionProgress);
+            if (progress <= 0.22F) {
+                offsetX = lerp(0.0F, 12.0F, easeOutCubic(progress / 0.22F));
+            } else {
+                offsetX = lerp(12.0F, hiddenOffset, easeInCubic((progress - 0.22F) / 0.78F));
+            }
+            alpha = 1.0F - easeOutCubic(phase(0.52F, 1.0F, progress));
+        }
+
+        if (alpha > 0.001F) {
+            MainUI.renderSharedUserCard(this.width, this.height, offsetX, alpha);
+        }
     }
 
     private void layoutActionButtons(PanelBounds panel) {
