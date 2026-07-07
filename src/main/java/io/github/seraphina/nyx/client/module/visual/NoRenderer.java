@@ -13,4 +13,6 @@ public class NoRenderer extends Module {
     public final BoolValue nohurtcamera = ValueBuild.boolSetting("nohurtcamera", false, this);
 
     public final BoolValue noview = ValueBuild.boolSetting("noview", false, this);
+
+    public final BoolValue noparticles = ValueBuild.boolSetting("noparticles", false, this);
 }
