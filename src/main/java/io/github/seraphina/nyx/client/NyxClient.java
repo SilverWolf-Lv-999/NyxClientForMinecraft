@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client;
 
+import io.github.seraphina.nyx.client.alt.AltManager;
 import io.github.seraphina.nyx.client.events.api.EventManager;
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
@@ -22,6 +23,7 @@ public class NyxClient {
         ModuleManager.init();
         CommandManager.init();
         ConfigManager.init();
+        AltManager.init();
         HUDManager.load();
         EventManager.register(this);
         EventManager.register(KeyManager.INSTANCE);
@@ -36,9 +38,7 @@ public class NyxClient {
 
     @EventTarget
     public static void setScreen(SetScreenEvent event) {
-        if (event.getScreen() instanceof TitleScreen) {
+        if (event.getScreen() instanceof TitleScreen || event.getScreen() instanceof JoinMultiplayerScreen)
             event.setScreen(new MainUI());
-        }
-        if (event.getScreen() instanceof JoinMultiplayerScreen) event.setCancelled(true);
     }
 }

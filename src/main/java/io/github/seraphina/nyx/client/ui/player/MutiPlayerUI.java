@@ -127,7 +127,7 @@ public final class MutiPlayerUI extends Screen {
 
     private static final String MAIN_TITLE = "Nyx Client";
     private static final String MULTIPLAYER_TITLE = "Muti Player";
-    private static final String[] MAIN_BUTTON_LABELS = {"Single Player", "Muti Player", "Option", "Exit"};
+    private static final String[] MAIN_BUTTON_LABELS = {"Single Player", "Muti Player", "Alt Manager", "Option", "Exit"};
     private static final Component CANT_RESOLVE_TEXT = Component.translatable("multiplayer.status.cannot_resolve").withStyle(ChatFormatting.RED);
     private static final Component CANT_CONNECT_TEXT = Component.translatable("multiplayer.status.cannot_connect").withStyle(ChatFormatting.RED);
 

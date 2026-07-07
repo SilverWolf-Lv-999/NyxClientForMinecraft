@@ -133,7 +133,7 @@ public final class SinglePlayerUI extends Screen {
 
     private static final String MAIN_TITLE = "Nyx Client";
     private static final String SINGLE_TITLE = "Single Player";
-    private static final String[] MAIN_BUTTON_LABELS = {"Single Player", "Muti Player", "Option", "Exit"};
+    private static final String[] MAIN_BUTTON_LABELS = {"Single Player", "Muti Player", "Alt Manager", "Option", "Exit"};
 
     private final Screen lastScreen;
     private final List<WorldEntry> entries = new ArrayList<>();

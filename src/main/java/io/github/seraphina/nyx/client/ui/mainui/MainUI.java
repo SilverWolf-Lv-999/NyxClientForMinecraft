@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.ui.mainui;
 import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.PathManager;
+import io.github.seraphina.nyx.client.ui.alt.AltManagerScreen;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundMedia;
 import io.github.seraphina.nyx.client.ui.mainui.button.MainUIButton;
@@ -344,6 +345,7 @@ public final class MainUI extends Screen {
         this.multiplayerButton = null;
         addMainButton("Single Player", this::openSinglePlayer);
         this.multiplayerButton = addMainButton("Muti Player", this::openMultiplayer);
+        addMainButton("Alt Manager", this::openAltManager);
         addMainButton("Option", this::openOptions);
         addMainButton("Exit", this::exitGame);
         layoutMainButtons();
@@ -399,6 +401,10 @@ public final class MainUI extends Screen {
         }
 
         MutiPlayerUI.open(this);
+    }
+
+    private void openAltManager() {
+        AltManagerScreen.open(this);
     }
 
     private void openOptions() {

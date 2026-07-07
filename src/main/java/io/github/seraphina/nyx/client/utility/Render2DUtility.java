@@ -21,8 +21,10 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.gui.render.state.GuiElementRenderState;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.player.PlayerSkin;
 import org.joml.Matrix3x2f;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
@@ -43,6 +45,12 @@ public final class Render2DUtility {
     private static final float ANTIALIAS_PIXELS = 1.25F;
     private static final float MAX_GAUSSIAN_BLUR_RADIUS = 32.0F;
     private static final float MAX_BLOOM_RADIUS = 64.0F;
+    private static final float SKIN_HEAD_U = 8.0F;
+    private static final float SKIN_HEAD_V = 8.0F;
+    private static final float SKIN_HAT_U = 40.0F;
+    private static final float SKIN_HAT_V = 8.0F;
+    private static final float SKIN_FACE_SIZE = 8.0F;
+    private static final float SKIN_TEXTURE_SIZE = 64.0F;
     private static final RenderPipeline GUI_TEXTURED_TRIANGLE_FAN = RenderPipeline.builder(RenderPipelines.GUI_TEXTURED_SNIPPET)
         .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_textured_triangle_fan"))
         .withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.TRIANGLE_FAN)
@@ -123,6 +131,11 @@ public final class Render2DUtility {
 
     public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height,
                                    float u0, float v0, float u1, float v1, int color) {
+        drawTexture(texture, x, y, width, height, u0, v0, u1, v1, FilterMode.LINEAR, color);
+    }
+
+    private static void drawTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                    float u0, float v0, float u1, float v1, FilterMode filterMode, int color) {
         Objects.requireNonNull(texture, "texture");
         if (!canDraw(width, height, color)) {
             return;
@@ -131,7 +144,7 @@ public final class Render2DUtility {
         GuiGraphics graphics = currentGraphics();
         graphics.submitGuiElementRenderState(new TextureRenderState(
             RenderPipelines.GUI_TEXTURED,
-            TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
+            TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(filterMode)),
             new Matrix3x2f(graphics.pose()),
             x,
             y,
@@ -200,6 +213,13 @@ public final class Render2DUtility {
     public static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height,
                                           float topLeftRadius, float topRightRadius, float bottomRightRadius, float bottomLeftRadius,
                                           float u0, float v0, float u1, float v1, int color) {
+        drawRoundedTexture(texture, x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius,
+            u0, v0, u1, v1, FilterMode.LINEAR, color);
+    }
+
+    private static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                           float topLeftRadius, float topRightRadius, float bottomRightRadius, float bottomLeftRadius,
+                                           float u0, float v0, float u1, float v1, FilterMode filterMode, int color) {
         Objects.requireNonNull(texture, "texture");
         if (!canDraw(width, height, color)) {
             return;
@@ -210,12 +230,114 @@ public final class Render2DUtility {
         float br = clampRadius(width, height, bottomRightRadius);
         float bl = clampRadius(width, height, bottomLeftRadius);
         if (tl <= 0.0F && tr <= 0.0F && br <= 0.0F && bl <= 0.0F) {
-            drawTexture(texture, x, y, width, height, u0, v0, u1, v1, color);
+            drawTexture(texture, x, y, width, height, u0, v0, u1, v1, filterMode, color);
             return;
         }
 
         float[] points = roundedRectFanPoints(x, y, width, height, tl, tr, br, bl);
-        submitTexturedFan(texture, points, textureUvsForPoints(points, x, y, width, height, u0, v0, u1, v1), color);
+        submitTexturedFan(texture, points, textureUvsForPoints(points, x, y, width, height, u0, v0, u1, v1), filterMode, color);
+    }
+
+    public static void drawPlayerHead(float x, float y, float size, float radius) {
+        drawPlayerHead(x, y, size, size, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(float x, float y, float size, float radius, int color) {
+        drawPlayerHead(x, y, size, size, radius, color);
+    }
+
+    public static void drawPlayerHead(float x, float y, float width, float height, float radius) {
+        drawPlayerHead(x, y, width, height, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(float x, float y, float width, float height, float radius, int color) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) {
+            return;
+        }
+        drawPlayerHead(minecraft.player, x, y, width, height, radius, color);
+    }
+
+    public static void drawPlayerHead(AbstractClientPlayer player, float x, float y, float size, float radius) {
+        drawPlayerHead(player, x, y, size, size, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(AbstractClientPlayer player, float x, float y, float size, float radius, int color) {
+        drawPlayerHead(player, x, y, size, size, radius, color);
+    }
+
+    public static void drawPlayerHead(AbstractClientPlayer player, float x, float y, float width, float height, float radius) {
+        drawPlayerHead(player, x, y, width, height, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(AbstractClientPlayer player, float x, float y, float width, float height, float radius, int color) {
+        if (player == null) {
+            return;
+        }
+        drawPlayerHead(player.getSkin(), x, y, width, height, radius, color);
+    }
+
+    public static void drawPlayerHead(PlayerSkin skin, float x, float y, float size, float radius) {
+        drawPlayerHead(skin, x, y, size, size, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(PlayerSkin skin, float x, float y, float size, float radius, int color) {
+        drawPlayerHead(skin, x, y, size, size, radius, color);
+    }
+
+    public static void drawPlayerHead(PlayerSkin skin, float x, float y, float width, float height, float radius) {
+        drawPlayerHead(skin, x, y, width, height, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(PlayerSkin skin, float x, float y, float width, float height, float radius, int color) {
+        if (skin == null) {
+            return;
+        }
+        drawPlayerHead(skin.body().texturePath(), x, y, width, height, radius, color);
+    }
+
+    public static void drawPlayerHead(Identifier skinTexture, float x, float y, float size, float radius) {
+        drawPlayerHead(skinTexture, x, y, size, size, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(Identifier skinTexture, float x, float y, float size, float radius, int color) {
+        drawPlayerHead(skinTexture, x, y, size, size, radius, color);
+    }
+
+    public static void drawPlayerHead(Identifier skinTexture, float x, float y, float width, float height, float radius) {
+        drawPlayerHead(skinTexture, x, y, width, height, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(Identifier skinTexture, float x, float y, float width, float height, float radius, int color) {
+        if (skinTexture == null || !canDraw(width, height, color)) {
+            return;
+        }
+
+        GpuTextureView texture = Minecraft.getInstance().getTextureManager().getTexture(skinTexture).getTextureView();
+        drawPlayerHead(texture, x, y, width, height, radius, color);
+    }
+
+    public static void drawPlayerHead(GpuTextureView skinTexture, float x, float y, float size, float radius) {
+        drawPlayerHead(skinTexture, x, y, size, size, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(GpuTextureView skinTexture, float x, float y, float size, float radius, int color) {
+        drawPlayerHead(skinTexture, x, y, size, size, radius, color);
+    }
+
+    public static void drawPlayerHead(GpuTextureView skinTexture, float x, float y, float width, float height, float radius) {
+        drawPlayerHead(skinTexture, x, y, width, height, radius, 0xFFFFFFFF);
+    }
+
+    public static void drawPlayerHead(GpuTextureView skinTexture, float x, float y, float width, float height, float radius, int color) {
+        if (skinTexture == null || !canDraw(width, height, color)) {
+            return;
+        }
+
+        drawRoundedTextureRegion(skinTexture, x, y, width, height, radius, SKIN_HEAD_U, SKIN_HEAD_V, SKIN_FACE_SIZE, SKIN_FACE_SIZE,
+            SKIN_TEXTURE_SIZE, SKIN_TEXTURE_SIZE, FilterMode.NEAREST, color);
+        drawRoundedTextureRegion(skinTexture, x, y, width, height, radius, SKIN_HAT_U, SKIN_HAT_V, SKIN_FACE_SIZE, SKIN_FACE_SIZE,
+            SKIN_TEXTURE_SIZE, SKIN_TEXTURE_SIZE, FilterMode.NEAREST, color);
     }
 
     public static void drawGaussianBlur(float x, float y, float width, float height, float blurRadius) {
@@ -304,7 +426,8 @@ public final class Render2DUtility {
 
         float[] points = ovalFanPoints(x, y, width, height);
         TextureUv uv = mainTargetUv(x, y, width, height, blurred);
-        submitTexturedFan(blurred, points, textureUvsForPoints(points, x, y, width, height, uv.u0(), uv.v0(), uv.u1(), uv.v1()), color);
+        submitTexturedFan(blurred, points, textureUvsForPoints(points, x, y, width, height, uv.u0(), uv.v0(), uv.u1(), uv.v1()),
+            FilterMode.LINEAR, color);
     }
 
     public static void drawGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height, float blurRadius) {
@@ -939,7 +1062,7 @@ public final class Render2DUtility {
         ));
     }
 
-    private static void submitTexturedFan(GpuTextureView texture, float[] points, float[] uvs, int color) {
+    private static void submitTexturedFan(GpuTextureView texture, float[] points, float[] uvs, FilterMode filterMode, int color) {
         if (points.length < 6 || points.length != uvs.length || isTransparent(color)) {
             return;
         }
@@ -947,13 +1070,39 @@ public final class Render2DUtility {
         GuiGraphics graphics = currentGraphics();
         graphics.submitGuiElementRenderState(new TexturedFanRenderState(
             GUI_TEXTURED_TRIANGLE_FAN,
-            TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
+            TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(filterMode)),
             new Matrix3x2f(graphics.pose()),
             points,
             uvs,
             color,
             graphics.peekScissorStack()
         ));
+    }
+
+    private static void drawRoundedTextureRegion(GpuTextureView texture, float x, float y, float width, float height, float radius,
+                                                 float sourceX, float sourceY, float sourceWidth, float sourceHeight,
+                                                 float textureWidth, float textureHeight, FilterMode filterMode, int color) {
+        if (sourceWidth <= 0.0F || sourceHeight <= 0.0F || textureWidth <= 0.0F || textureHeight <= 0.0F) {
+            return;
+        }
+
+        drawRoundedTexture(
+            texture,
+            x,
+            y,
+            width,
+            height,
+            radius,
+            radius,
+            radius,
+            radius,
+            sourceX / textureWidth,
+            sourceY / textureHeight,
+            (sourceX + sourceWidth) / textureWidth,
+            (sourceY + sourceHeight) / textureHeight,
+            filterMode,
+            color
+        );
     }
 
     private static boolean drawBloomShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
