@@ -7,6 +7,9 @@ import io.github.seraphina.nyx.client.value.AbstractValue;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 
+import static io.github.seraphina.nyx.client.utility.MathUtility.animateExp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.isInsideExclusive;
+
 public abstract class AbstractComponent {
     public static final float ROW_HEIGHT = 30.0F;
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
@@ -116,9 +119,7 @@ public abstract class AbstractComponent {
             return target;
         }
 
-        float progress = 1.0F - (float)Math.exp(-Math.max(0.0F, speed) * frameSeconds);
-        float result = lerp(current, target, progress);
-        return Math.abs(result - target) < 0.001F ? target : result;
+        return animateExp(current, target, speed, frameSeconds);
     }
 
     protected float frameSeconds() {
@@ -155,15 +156,15 @@ public abstract class AbstractComponent {
     }
 
     protected static float lerp(float from, float to, float progress) {
-        return from + (to - from) * clamp(progress, 0.0F, 1.0F);
+        return io.github.seraphina.nyx.client.utility.MathUtility.lerp(from, to, progress);
     }
 
     protected static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
-        return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+        return isInsideExclusive(mouseX, mouseY, x, y, width, height);
     }
 
     protected static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
+        return io.github.seraphina.nyx.client.utility.MathUtility.clamp(value, min, max);
     }
 
     private void updateAnimationFrame() {

@@ -12,6 +12,9 @@ import net.minecraft.network.chat.Component;
 
 import java.util.Objects;
 
+import static io.github.seraphina.nyx.client.utility.MathUtility.animateExp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
+
 public final class MainUIButton extends AbstractButton {
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
@@ -49,7 +52,7 @@ public final class MainUIButton extends AbstractButton {
         updateAnimationFrame();
 
         boolean highlighted = this.active && this.isHoveredOrFocused();
-        this.hoverProgress = animate(this.hoverProgress, highlighted ? 1.0F : 0.0F, 16.0F);
+        this.hoverProgress = animateExp(this.hoverProgress, highlighted ? 1.0F : 0.0F, 16.0F, this.frameSeconds);
 
         float x = getX();
         float y = getY();
@@ -99,12 +102,6 @@ public final class MainUIButton extends AbstractButton {
         this.lastRenderNanos = now;
     }
 
-    private float animate(float current, float target, float speed) {
-        float progress = 1.0F - (float)Math.exp(-Math.max(0.0F, speed) * this.frameSeconds);
-        float result = current + (target - current) * progress;
-        return Math.abs(result - target) < 0.001F ? target : result;
-    }
-
     private static String trimToWidth(FontRenderer renderer, String text, float maxWidth) {
         if (text == null || text.isEmpty() || maxWidth <= 0.0F) {
             return "";
@@ -124,9 +121,5 @@ public final class MainUIButton extends AbstractButton {
             end--;
         }
         return text.substring(0, Math.max(0, end)) + suffix;
-    }
-
-    private static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
     }
 }

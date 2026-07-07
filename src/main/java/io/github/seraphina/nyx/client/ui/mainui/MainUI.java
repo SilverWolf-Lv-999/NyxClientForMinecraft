@@ -31,6 +31,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static io.github.seraphina.nyx.client.utility.MathUtility.animateLinear;
+import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.easeOutCubic;
+import static io.github.seraphina.nyx.client.utility.MathUtility.isInside;
+import static io.github.seraphina.nyx.client.utility.MathUtility.stackedContentHeight;
+import static io.github.seraphina.nyx.client.utility.MathUtility.stackedItemY;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
 public final class MainUI extends Screen {
@@ -515,7 +521,7 @@ public final class MainUI extends Screen {
         FontRenderer nameFont = textFont(11.0F);
         FontRenderer metaFont = textFont(9.0F);
         for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
-            float rowY = rowY(listTop, i);
+            float rowY = stackedItemY(listTop, i, ROW_HEIGHT, ROW_GAP, sharedPanelScroll);
             if (rowY > screenHeight || rowY + ROW_HEIGHT < listTop) {
                 continue;
             }
@@ -610,11 +616,11 @@ public final class MainUI extends Screen {
     }
 
     private static void updateSharedPanelAnimation(float frameSeconds) {
-        sharedSettingsPanelProgress = animate(sharedSettingsPanelProgress, sharedSettingsOpen ? 1.0F : 0.0F, PANEL_ANIMATION_SPEED, frameSeconds);
+        sharedSettingsPanelProgress = animateLinear(sharedSettingsPanelProgress, sharedSettingsOpen ? 1.0F : 0.0F, PANEL_ANIMATION_SPEED, frameSeconds);
     }
 
     private static void updatePanelScrollLimit(float listHeight) {
-        float contentHeight = BACKGROUND_CACHE.size() * (ROW_HEIGHT + ROW_GAP) - ROW_GAP;
+        float contentHeight = stackedContentHeight(BACKGROUND_CACHE.size(), ROW_HEIGHT, ROW_GAP);
         sharedMaxPanelScroll = Math.max(0.0F, contentHeight - listHeight);
         sharedPanelScroll = clamp(sharedPanelScroll, 0.0F, sharedMaxPanelScroll);
     }
@@ -624,16 +630,12 @@ public final class MainUI extends Screen {
         float rowX = panelX + PANEL_PADDING;
         float rowWidth = panelWidth(screenWidth) - PANEL_PADDING * 2.0F;
         for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
-            float rowY = rowY(PANEL_HEADER_HEIGHT, i);
+            float rowY = stackedItemY(PANEL_HEADER_HEIGHT, i, ROW_HEIGHT, ROW_GAP, sharedPanelScroll);
             if (isInside(mouseX, mouseY, rowX, rowY, rowWidth, ROW_HEIGHT)) {
                 return i;
             }
         }
         return -1;
-    }
-
-    private static float rowY(float listTop, int index) {
-        return listTop + index * (ROW_HEIGHT + ROW_GAP) - sharedPanelScroll;
     }
 
     private static boolean isSettingsPanelVisible() {
@@ -723,29 +725,6 @@ public final class MainUI extends Screen {
             end--;
         }
         return text.substring(0, Math.max(0, end)) + suffix;
-    }
-
-    private static float animate(float current, float target, float speed, float frameSeconds) {
-        if (current == target) {
-            return current;
-        }
-
-        float step = Math.min(1.0F, Math.max(0.0F, frameSeconds) * speed);
-        float next = current + (target - current) * step;
-        return Math.abs(target - next) < 0.001F ? target : next;
-    }
-
-    private static float easeOutCubic(float value) {
-        float inverse = 1.0F - clamp(value, 0.0F, 1.0F);
-        return 1.0F - inverse * inverse * inverse;
-    }
-
-    private static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
-        return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
     }
 
     private static String loadWindowsUserName() {

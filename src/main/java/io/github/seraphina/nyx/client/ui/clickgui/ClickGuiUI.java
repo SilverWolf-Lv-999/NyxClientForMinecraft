@@ -35,6 +35,11 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static io.github.seraphina.nyx.client.utility.MathUtility.animateExp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.easeOutCubic;
+import static io.github.seraphina.nyx.client.utility.MathUtility.isInsideExclusive;
+import static io.github.seraphina.nyx.client.utility.MathUtility.lerp;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_RIGHT;
 
@@ -265,7 +270,7 @@ public class ClickGuiUI extends Screen {
             return true;
         }
 
-        if (maxScroll <= 0.0F || !isInside(fixedMouseX, fixedMouseY, mainX(), panelY + HEADER_HEIGHT, mainWidth(), panelHeight - HEADER_HEIGHT)) {
+        if (maxScroll <= 0.0F || !isInsideExclusive(fixedMouseX, fixedMouseY, mainX(), panelY + HEADER_HEIGHT, mainWidth(), panelHeight - HEADER_HEIGHT)) {
             return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
         }
 
@@ -390,7 +395,7 @@ public class ClickGuiUI extends Screen {
     }
 
     private void renderCategoryNavItem(Category category, float sidebarX, float y, float width, float pad, int mouseX, int mouseY) {
-        boolean hovered = isInside(mouseX, mouseY, sidebarX, y, width, NAV_ITEM_HEIGHT);
+        boolean hovered = isInsideExclusive(mouseX, mouseY, sidebarX, y, width, NAV_ITEM_HEIGHT);
         float activeAmount = categoryActiveAmount(category);
 
         if (hovered && activeAmount < 0.1F) {
@@ -536,9 +541,9 @@ public class ClickGuiUI extends Screen {
     }
 
     private void renderModuleRow(Module module, float x, float y, float width, float totalHeight, int mouseX, int mouseY) {
-        boolean hovered = isInside(mouseX, mouseY, x, y, width, MODULE_ROW_HEIGHT);
+        boolean hovered = isInsideExclusive(mouseX, mouseY, x, y, width, MODULE_ROW_HEIGHT);
         ModuleAnimationState animation = moduleAnimation(module);
-        animation.hoverProgress = animate(animation.hoverProgress, hovered ? 1.0F : 0.0F, MODULE_HOVER_ANIMATION_SPEED);
+        animation.hoverProgress = animateExp(animation.hoverProgress, hovered ? 1.0F : 0.0F, MODULE_HOVER_ANIMATION_SPEED, animationFrameSeconds);
         float hoverProgress = animation.hoverProgress;
         float enabledProgress = animation.enabledProgress;
         float expandProgress = animation.expandProgress;
@@ -709,12 +714,12 @@ public class ClickGuiUI extends Screen {
     }
 
     private ModuleRowLayout getModuleRowAt(double mouseX, double mouseY) {
-        if (!isInside(mouseX, mouseY, mainX(), panelY + HEADER_HEIGHT, mainWidth(), panelHeight - HEADER_HEIGHT)) {
+        if (!isInsideExclusive(mouseX, mouseY, mainX(), panelY + HEADER_HEIGHT, mainWidth(), panelHeight - HEADER_HEIGHT)) {
             return null;
         }
 
         for (ModuleRowLayout row : buildModuleRowLayouts(selectedCategory, scroll, incomingCategoryContentOffset())) {
-            if (isInside(mouseX, mouseY, row.x(), row.y(), row.width(), MODULE_ROW_HEIGHT)) {
+            if (isInsideExclusive(mouseX, mouseY, row.x(), row.y(), row.width(), MODULE_ROW_HEIGHT)) {
                 return row;
             }
         }
@@ -723,12 +728,12 @@ public class ClickGuiUI extends Screen {
 
     @Nullable
     private AbstractComponent getComponentAt(double mouseX, double mouseY) {
-        if (!isInside(mouseX, mouseY, mainX(), panelY + HEADER_HEIGHT, mainWidth(), panelHeight - HEADER_HEIGHT)) {
+        if (!isInsideExclusive(mouseX, mouseY, mainX(), panelY + HEADER_HEIGHT, mainWidth(), panelHeight - HEADER_HEIGHT)) {
             return null;
         }
 
         for (ValueComponentLayout layout : buildValueComponentLayouts(selectedCategory, scroll, incomingCategoryContentOffset())) {
-            if (isInside(mouseX, mouseY, layout.x(), layout.y(), layout.width(), layout.height())) {
+            if (isInsideExclusive(mouseX, mouseY, layout.x(), layout.y(), layout.width(), layout.height())) {
                 layout.component().setBounds(layout.x(), layout.y(), layout.width());
                 return layout.component();
             }
@@ -744,7 +749,7 @@ public class ClickGuiUI extends Screen {
             if (ModuleManager.getModules(category).isEmpty()) {
                 continue;
             }
-            if (isInside(mouseX, mouseY, panelX, navY, sidebarWidth, NAV_ITEM_HEIGHT)) {
+            if (isInsideExclusive(mouseX, mouseY, panelX, navY, sidebarWidth, NAV_ITEM_HEIGHT)) {
                 return category;
             }
             navY += NAV_ITEM_HEIGHT + 4.0F;
@@ -1006,8 +1011,8 @@ public class ClickGuiUI extends Screen {
             if (!expandable) {
                 expandedModules.remove(module);
             }
-            animation.expandProgress = animate(animation.expandProgress, expandable && isExpanded(module) ? 1.0F : 0.0F, MODULE_EXPAND_ANIMATION_SPEED);
-            animation.enabledProgress = animate(animation.enabledProgress, module.isEnabled() ? 1.0F : 0.0F, MODULE_TOGGLE_ANIMATION_SPEED);
+            animation.expandProgress = animateExp(animation.expandProgress, expandable && isExpanded(module) ? 1.0F : 0.0F, MODULE_EXPAND_ANIMATION_SPEED, animationFrameSeconds);
+            animation.enabledProgress = animateExp(animation.enabledProgress, module.isEnabled() ? 1.0F : 0.0F, MODULE_TOGGLE_ANIMATION_SPEED, animationFrameSeconds);
         }
     }
 
@@ -1108,7 +1113,7 @@ public class ClickGuiUI extends Screen {
     }
 
     private boolean isInsideDragArea(double mouseX, double mouseY) {
-        return isInside(mouseX, mouseY, panelX, panelY, panelWidth, HEADER_HEIGHT);
+        return isInsideExclusive(mouseX, mouseY, panelX, panelY, panelWidth, HEADER_HEIGHT);
     }
 
     private float fixedMouseX(double mouseX) {
@@ -1202,21 +1207,6 @@ public class ClickGuiUI extends Screen {
         return column;
     }
 
-    private static float easeOutCubic(float value) {
-        float inverse = 1.0F - clamp(value, 0.0F, 1.0F);
-        return 1.0F - inverse * inverse * inverse;
-    }
-
-    private float animate(float current, float target, float speed) {
-        float progress = 1.0F - (float)Math.exp(-Math.max(0.0F, speed) * animationFrameSeconds);
-        float result = lerp(current, target, progress);
-        return Math.abs(result - target) < 0.001F ? target : result;
-    }
-
-    private static float lerp(float from, float to, float progress) {
-        return from + (to - from) * clamp(progress, 0.0F, 1.0F);
-    }
-
     private static String categoryLabel(Category category) {
         String value = category.name().toLowerCase(Locale.ROOT);
         return Character.toUpperCase(value.charAt(0)) + value.substring(1);
@@ -1245,14 +1235,6 @@ public class ClickGuiUI extends Screen {
 
     private static float centeredTextY(float height, FontRenderer renderer) {
         return (height - renderer.getLineHeight()) * 0.5F;
-    }
-
-    private static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
-        return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
-    }
-
-    private static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
     }
 
     private static float clampPanelAxis(float position, float panelSize, float screenSize) {

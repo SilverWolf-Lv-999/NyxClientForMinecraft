@@ -7,6 +7,7 @@ import io.github.seraphina.nyx.client.manager.*;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
 import io.github.seraphina.nyx.client.utility.render.Shaders;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -35,5 +36,6 @@ public class NyxClient {
         if (event.getScreen() instanceof TitleScreen) {
             event.setScreen(new MainUI());
         }
+        if (event.getScreen() instanceof JoinMultiplayerScreen) event.setCancelled(true);
     }
 }

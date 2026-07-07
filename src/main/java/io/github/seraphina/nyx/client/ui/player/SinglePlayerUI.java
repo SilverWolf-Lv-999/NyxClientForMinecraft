@@ -58,6 +58,17 @@ import java.util.concurrent.CompletionException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
+import static io.github.seraphina.nyx.client.utility.MathUtility.animateExp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.easeInCubic;
+import static io.github.seraphina.nyx.client.utility.MathUtility.easeInOutCubic;
+import static io.github.seraphina.nyx.client.utility.MathUtility.easeOutBack;
+import static io.github.seraphina.nyx.client.utility.MathUtility.easeOutCubic;
+import static io.github.seraphina.nyx.client.utility.MathUtility.isInside;
+import static io.github.seraphina.nyx.client.utility.MathUtility.lerp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.phase;
+import static io.github.seraphina.nyx.client.utility.MathUtility.stackedContentHeight;
+import static io.github.seraphina.nyx.client.utility.MathUtility.stackedItemY;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
 public final class SinglePlayerUI extends Screen {
@@ -191,7 +202,7 @@ public final class SinglePlayerUI extends Screen {
 
         if (isInteractive()) {
             for (ActionButton button : this.actionButtons) {
-                if (button.active() && button.isInside(event.x(), event.y())) {
+                if (button.active() && button.contains(event.x(), event.y())) {
                     playClickSound();
                     button.action.run();
                     return true;
@@ -770,7 +781,7 @@ public final class SinglePlayerUI extends Screen {
         FontRenderer metaFont = textFont(9.0F);
         FontRenderer infoFont = textFont(9.0F);
         for (int i = 0; i < this.entries.size(); i++) {
-            float rowY = rowY(listY, i);
+            float rowY = stackedItemY(listY, i, ROW_HEIGHT, ROW_GAP, this.scroll);
             if (rowY > listY + listHeight || rowY + ROW_HEIGHT < listY) {
                 continue;
             }
@@ -848,7 +859,7 @@ public final class SinglePlayerUI extends Screen {
             return;
         }
 
-        float contentHeight = contentHeight();
+        float contentHeight = stackedContentHeight(this.entries.size(), ROW_HEIGHT, ROW_GAP);
         float barHeight = clamp(listHeight * (listHeight / Math.max(listHeight, contentHeight)), 24.0F, listHeight);
         float barY = listY + (listHeight - barHeight) * (this.scroll / this.maxScroll);
         Render2DUtility.drawRoundedRect(
@@ -939,8 +950,8 @@ public final class SinglePlayerUI extends Screen {
 
     private void renderActionButton(ActionButton button, int mouseX, int mouseY, float alpha, float scale) {
         boolean active = button.active();
-        boolean hovered = isInteractive() && active && button.isInside(mouseX, mouseY);
-        button.hoverProgress = animate(button.hoverProgress, hovered ? 1.0F : 0.0F, HOVER_SPEED);
+        boolean hovered = isInteractive() && active && button.contains(mouseX, mouseY);
+        button.hoverProgress = animateExp(button.hoverProgress, hovered ? 1.0F : 0.0F, HOVER_SPEED, this.frameSeconds);
 
         float opacity = alpha * (active ? 1.0F : 0.48F);
         int fill = Render2DUtility.mix(CONTROL_BACKGROUND, CONTROL_HOVER, button.hoverProgress);
@@ -984,7 +995,7 @@ public final class SinglePlayerUI extends Screen {
         }
 
         for (int i = 0; i < this.entries.size(); i++) {
-            float rowY = rowY(listY, i);
+            float rowY = stackedItemY(listY, i, ROW_HEIGHT, ROW_GAP, this.scroll);
             if (isInside(mouseX, mouseY, listX, rowY, listWidth, ROW_HEIGHT)) {
                 return i;
             }
@@ -1001,20 +1012,9 @@ public final class SinglePlayerUI extends Screen {
         return isInside(mouseX, mouseY, listX, listY, listWidth, listHeight);
     }
 
-    private float rowY(float listY, int index) {
-        return listY + index * (ROW_HEIGHT + ROW_GAP) - this.scroll;
-    }
-
     private void updateScrollLimit(float listHeight) {
-        this.maxScroll = Math.max(0.0F, contentHeight() - listHeight);
+        this.maxScroll = Math.max(0.0F, stackedContentHeight(this.entries.size(), ROW_HEIGHT, ROW_GAP) - listHeight);
         this.scroll = clamp(this.scroll, 0.0F, this.maxScroll);
-    }
-
-    private float contentHeight() {
-        if (this.entries.isEmpty()) {
-            return 0.0F;
-        }
-        return this.entries.size() * (ROW_HEIGHT + ROW_GAP) - ROW_GAP;
     }
 
     private PanelBounds mainPanelBounds() {
@@ -1098,53 +1098,6 @@ public final class SinglePlayerUI extends Screen {
             end--;
         }
         return text.substring(0, Math.max(0, end)) + suffix;
-    }
-
-    private float animate(float current, float target, float speed) {
-        float progress = 1.0F - (float)Math.exp(-Math.max(0.0F, speed) * this.frameSeconds);
-        float result = current + (target - current) * progress;
-        return Math.abs(result - target) < 0.001F ? target : result;
-    }
-
-    private static float phase(float start, float end, float value) {
-        if (end <= start) {
-            return value >= end ? 1.0F : 0.0F;
-        }
-        return clamp((value - start) / (end - start), 0.0F, 1.0F);
-    }
-
-    private static float easeOutCubic(float value) {
-        float inverse = 1.0F - clamp(value, 0.0F, 1.0F);
-        return 1.0F - inverse * inverse * inverse;
-    }
-
-    private static float easeInCubic(float value) {
-        float safe = clamp(value, 0.0F, 1.0F);
-        return safe * safe * safe;
-    }
-
-    private static float easeInOutCubic(float value) {
-        float safe = clamp(value, 0.0F, 1.0F);
-        return safe < 0.5F ? 4.0F * safe * safe * safe : 1.0F - (float)Math.pow(-2.0F * safe + 2.0F, 3.0F) * 0.5F;
-    }
-
-    private static float easeOutBack(float value) {
-        float safe = clamp(value, 0.0F, 1.0F);
-        float c1 = 1.70158F;
-        float c3 = c1 + 1.0F;
-        return 1.0F + c3 * (float)Math.pow(safe - 1.0F, 3.0F) + c1 * (float)Math.pow(safe - 1.0F, 2.0F);
-    }
-
-    private static float lerp(float from, float to, float progress) {
-        return from + (to - from) * clamp(progress, 0.0F, 1.0F);
-    }
-
-    private static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
-        return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
     }
 
     @Override
@@ -1254,8 +1207,8 @@ public final class SinglePlayerUI extends Screen {
             return this.active.getAsBoolean();
         }
 
-        private boolean isInside(double mouseX, double mouseY) {
-            return SinglePlayerUI.isInside(mouseX, mouseY, this.x, this.y, this.width, this.height);
+        private boolean contains(double mouseX, double mouseY) {
+            return isInside(mouseX, mouseY, this.x, this.y, this.width, this.height);
         }
 
         private float centerX() {
