@@ -6,7 +6,6 @@ import io.github.seraphina.nyx.client.module.client.ClickGui;
 import io.github.seraphina.nyx.client.module.client.Client;
 import io.github.seraphina.nyx.client.module.combat.KillAura;
 import io.github.seraphina.nyx.client.module.movement.BHop;
-import io.github.seraphina.nyx.client.module.movement.LowHop;
 import io.github.seraphina.nyx.client.module.movement.Scaffold;
 import io.github.seraphina.nyx.client.module.movement.Sprint;
 import io.github.seraphina.nyx.client.module.other.Test;
@@ -45,7 +44,6 @@ public final class ModuleManager {
         registerModule(
                 Scaffold.INSTANCE,
                 BHop.INSTANCE,
-                LowHop.INSTANCE,
                 Sprint.INSTANCE
         );
         //Other
