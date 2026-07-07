@@ -28,8 +28,7 @@ public final class WatermarkComponent implements UIComponent {
     @Override
     public void render(GuiGraphics graphics, float partialTicks, float scale) {
         FontRenderer titleFont = FontManager.getAppleDisplayRenderer(13.0F);
-        FontRenderer subFont = FontManager.getAppleTextRenderer(9.0F);
-        float width = width(titleFont, subFont);
+        float width = width(titleFont);
 
         Render2DUtility.drawDropShadow(0.0F, 0.0F, width, HEIGHT, 6.0F, 0.0F, 0.0F, 10.0F, 0x80000000);
         Render2DUtility.drawRoundedRect(0.0F, 0.0F, width, HEIGHT, 6.0F, 0xCC0C0D11);
@@ -39,19 +38,17 @@ public final class WatermarkComponent implements UIComponent {
         float titleY = (HEIGHT - titleFont.getLineHeight()) * 0.5F - 0.5F;
         float titleX = HORIZONTAL_PADDING + 5.0F;
         titleFont.drawString(NyxClient.CLIENT_NAME, titleX, titleY, 0xFFFFFFFF);
-        subFont.drawString("Nyx", titleX + titleFont.getStringWidth(NyxClient.CLIENT_NAME) + GAP, titleY + 3.0F, 0xFFA0A5B5);
     }
 
     @Override
     public AABB getBoundingBox() {
-        return new AABB(0.0D, 0.0D, 0.0D, width(FontManager.getAppleDisplayRenderer(13.0F), FontManager.getAppleTextRenderer(9.0F)), HEIGHT, 1.0D);
+        return new AABB(0.0D, 0.0D, 0.0D, width(FontManager.getAppleDisplayRenderer(13.0F)), HEIGHT, 1.0D);
     }
 
-    private float width(FontRenderer titleFont, FontRenderer subFont) {
+    private float width(FontRenderer titleFont) {
         return HORIZONTAL_PADDING * 2.0F
                 + 5.0F
                 + titleFont.getStringWidth(NyxClient.CLIENT_NAME)
-                + GAP
-                + subFont.getStringWidth("Nyx");
+                + GAP;
     }
 }
