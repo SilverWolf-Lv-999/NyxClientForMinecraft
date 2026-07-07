@@ -1,0 +1,22 @@
+package io.github.seraphina.nyx.client.mixins;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import io.github.seraphina.nyx.client.module.visual.NoRenderer;
+import net.minecraft.client.renderer.GameRenderer;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(GameRenderer.class)
+public abstract class GameRendererMixin {
+    @Inject(method = "bobHurt", at = @At("HEAD"), cancellable = true)
+    private void bobHurt(PoseStack poseStack, float partialTicks, CallbackInfo ci) {
+        if (NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.nohurtcamera.getValue()) ci.cancel();
+    }
+
+    @Inject(method = "bobView", at = @At("HEAD"), cancellable = true)
+    private void bobView(PoseStack poseStack, float partialTicks, CallbackInfo ci) {
+        if (NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.noview.getValue()) ci.cancel(); {}
+    }
+}

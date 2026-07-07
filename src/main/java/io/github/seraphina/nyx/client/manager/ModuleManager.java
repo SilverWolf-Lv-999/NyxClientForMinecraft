@@ -13,6 +13,7 @@ import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.DelayRemover;
 import io.github.seraphina.nyx.client.module.player.FastPlace;
 import io.github.seraphina.nyx.client.module.visual.Cape;
+import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -56,7 +57,8 @@ public final class ModuleManager {
         );
         //Visual
         registerModule(
-                Cape.INSTANCE
+                Cape.INSTANCE,
+                NoRenderer.INSTANCE
         );
 
         initialized = true;

@@ -7,9 +7,11 @@
   ],
   "client": [
     "BlockCollisionsMixin",
+    "CameraMixin",
     "ClientPacketListenerMixin",
     "ConnectionMixin",
     "EntityMixin",
+    "GameRendererMixin",
     "GuiMixin",
     "ItemMixin",
     "KeyboardHandlerMixin",

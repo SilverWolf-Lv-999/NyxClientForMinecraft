@@ -1,0 +1,16 @@
+package io.github.seraphina.nyx.client.module.visual;
+
+import io.github.seraphina.nyx.client.module.Category;
+import io.github.seraphina.nyx.client.module.Module;
+import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.value.ValueBuild;
+import io.github.seraphina.nyx.client.value.impl.BoolValue;
+
+@ModuleInfo(name = "nyxclient.module.norenderer.name", description = "nyxclient.module.norenderer.description", category = Category.VISUAL)
+public class NoRenderer extends Module {
+    public static final NoRenderer INSTANCE = new NoRenderer();
+
+    public final BoolValue nohurtcamera = ValueBuild.boolSetting("nohurtcamera", false, this);
+
+    public final BoolValue noview = ValueBuild.boolSetting("noview", false, this);
+}
