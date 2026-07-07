@@ -27,12 +27,15 @@ public class BHop extends Module {
     public void onStrafe(StrafeEvent event) {
         if (mc.player.onGround()) airTime = 0;
         else airTime++;
+        var dist = Math.sqrt(mc.player.getDeltaMovement().x * mc.player.getDeltaMovement().x + mc.player.getDeltaMovement().z * mc.player.getDeltaMovement().z);
         if (MovingUtility.isMoving()) {
-            if (mc.player.onGround()) mc.player.jumpFromGround();
-            MovingUtility.strafe(2.080000024124555f);
+            if (mc.player.onGround()) {
+                mc.player.jumpFromGround();
+            }
+            if (dist < 0.212412) MovingUtility.strafe(2.563452314f);
+            if (airTime == 1) MovingUtility.strafe(2.563452314f);
         }
         if (lowhop.getValue()) {
-            var dist = Math.sqrt(mc.player.getDeltaMovement().x * mc.player.getDeltaMovement().x + mc.player.getDeltaMovement().z * mc.player.getDeltaMovement().z);
             if (dist > 0.265) MovingUtility.strafe(1.950000012412532f);
             if (airTime < 8) {
                 if (airTime % 2 == 0) mc.player.addDeltaMovement(new Vec3(0.0, -0.1, 0.0));
