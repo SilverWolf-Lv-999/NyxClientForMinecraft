@@ -6,10 +6,11 @@
   "mixins": [
   ],
   "client": [
-    "OptionScreenMixin",
     "BlockCollisionsMixin",
     "CameraMixin",
+    "ChatScreenMixin",
     "ClientPacketListenerMixin",
+    "ContainerEventHandlerMixin",
     "ConnectionMixin",
     "EntityMixin",
     "GameRendererMixin",
@@ -23,6 +24,7 @@
     "MinecraftMixin",
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
+    "OptionScreenMixin",
     "PlayerMixin"
   ],
   "injectors": {

@@ -14,6 +14,7 @@ import io.github.seraphina.nyx.client.module.player.DelayRemover;
 import io.github.seraphina.nyx.client.module.player.FastPlace;
 import io.github.seraphina.nyx.client.module.visual.Cape;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
+import io.github.seraphina.nyx.client.module.visual.hud.HUD;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -58,7 +59,8 @@ public final class ModuleManager {
         //Visual
         registerModule(
                 Cape.INSTANCE,
-                NoRenderer.INSTANCE
+                NoRenderer.INSTANCE,
+                HUD.INSTANCE
         );
 
         initialized = true;

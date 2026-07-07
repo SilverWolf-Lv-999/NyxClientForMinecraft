@@ -21,6 +21,7 @@ public class NyxClient {
         Shaders.init();
         ModuleManager.init();
         ConfigManager.init();
+        HUDManager.load();
         EventManager.register(this);
         EventManager.register(KeyManager.INSTANCE);
         RotationManager.INSTANCE.getClass();
