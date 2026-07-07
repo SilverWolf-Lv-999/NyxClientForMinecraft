@@ -14,6 +14,7 @@ public class NyxClient {
     public static final NyxClient INSTANCE = new NyxClient();
     public static final String CLIENT_NAME = "Nyx";
     public static final Logger LOGGER = LogManager.getLogger(CLIENT_NAME);
+
     public void init() {
         LOGGER.info("Initializing NyxClient");
         Shaders.init();

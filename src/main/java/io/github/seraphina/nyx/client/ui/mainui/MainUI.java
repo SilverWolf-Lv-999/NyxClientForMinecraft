@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.manager.PathManager;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundMedia;
 import io.github.seraphina.nyx.client.ui.mainui.button.MainUIButton;
+import io.github.seraphina.nyx.client.ui.player.SinglePlayerUI;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import net.minecraft.client.Minecraft;
@@ -13,7 +14,6 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.client.gui.screens.multiplayer.SafetyScreen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
-import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -98,7 +98,7 @@ public final class MainUI extends Screen {
     @Override
     protected void init() {
         super.init();
-        ensureBackgroundsLoaded();
+        ensureBackgroundCacheLoaded();
         syncSelectedBackground();
         initMainButtons();
         this.lastFrameNanos = 0L;
@@ -133,7 +133,7 @@ public final class MainUI extends Screen {
         if (isInside(event.x(), event.y(), settingsButtonX(), settingsButtonY(), SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE)) {
             this.settingsOpen = !this.settingsOpen;
             if (this.settingsOpen) {
-                ensureBackgroundsLoaded();
+                ensureBackgroundCacheLoaded();
             }
             return true;
         }
@@ -190,11 +190,22 @@ public final class MainUI extends Screen {
         super.removed();
     }
 
-    private void renderSelectedBackground() {
-        BackgroundMedia selected = selectedBackground();
-        if (selected == null || !selected.render(0.0F, 0.0F, this.width, this.height)) {
-            Render2DUtility.drawVerticalGradientRect(0.0F, 0.0F, this.width, this.height, 0xFF10131B, 0xFF05060A);
+    public static void renderSharedBackground(float width, float height) {
+        ensureBackgroundCacheLoaded();
+        BackgroundMedia selected = selectedSharedBackground();
+        if (selected == null || !selected.render(0.0F, 0.0F, width, height)) {
+            Render2DUtility.drawVerticalGradientRect(0.0F, 0.0F, width, height, 0xFF10131B, 0xFF05060A);
         }
+    }
+
+    public static void pauseSharedBackgroundPlayback() {
+        for (BackgroundMedia background : BACKGROUND_CACHE) {
+            background.pausePlayback();
+        }
+    }
+
+    private void renderSelectedBackground() {
+        renderSharedBackground(this.width, this.height);
     }
 
     private void renderCenterPanel() {
@@ -268,7 +279,7 @@ public final class MainUI extends Screen {
     private void openSinglePlayer() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft != null) {
-            minecraft.setScreen(new SelectWorldScreen(this));
+            minecraft.setScreen(new SinglePlayerUI(this));
         }
     }
 
@@ -379,13 +390,28 @@ public final class MainUI extends Screen {
         }
     }
 
-    private void ensureBackgroundsLoaded() {
+    private static void ensureBackgroundCacheLoaded() {
         if (backgroundCacheLoaded) {
             return;
         }
 
         backgroundCacheLoaded = true;
-        this.backgrounds.addAll(BackgroundLibrary.load());
+        BACKGROUND_CACHE.addAll(BackgroundLibrary.load());
+    }
+
+    private static BackgroundMedia selectedSharedBackground() {
+        if (BACKGROUND_CACHE.isEmpty()) {
+            return null;
+        }
+
+        int index = 0;
+        for (int i = 0; i < BACKGROUND_CACHE.size(); i++) {
+            if (BACKGROUND_CACHE.get(i).key().equals(rememberedSelectedKey)) {
+                index = i;
+                break;
+            }
+        }
+        return BACKGROUND_CACHE.get(index);
     }
 
     private void syncSelectedBackground() {
@@ -420,7 +446,7 @@ public final class MainUI extends Screen {
 
     private BackgroundMedia selectedBackground() {
         if (this.backgrounds.isEmpty()) {
-            ensureBackgroundsLoaded();
+            ensureBackgroundCacheLoaded();
             syncSelectedBackground();
         }
         if (this.backgrounds.isEmpty()) {

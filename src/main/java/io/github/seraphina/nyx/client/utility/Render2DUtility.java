@@ -790,6 +790,22 @@ public final class Render2DUtility {
         }
     }
 
+    public static void withVerticalFlip(float degrees, float pivotX, float pivotY, float minScale, Runnable action) {
+        withScale(Math.max(Math.max(0.0F, minScale), verticalFlipScale(degrees)), 1.0F, pivotX, pivotY, action);
+    }
+
+    public static float verticalFlipScale(float degrees) {
+        return Math.abs((float)Math.cos(Math.toRadians(degrees)));
+    }
+
+    public static boolean isVerticalFlipBackFace(float degrees) {
+        float normalized = degrees % 360.0F;
+        if (normalized < 0.0F) {
+            normalized += 360.0F;
+        }
+        return normalized > 90.0F && normalized < 270.0F;
+    }
+
     public static void withRotation(float degrees, float pivotX, float pivotY, Runnable action) {
         Objects.requireNonNull(action, "action");
         GuiGraphics graphics = currentGraphics();
