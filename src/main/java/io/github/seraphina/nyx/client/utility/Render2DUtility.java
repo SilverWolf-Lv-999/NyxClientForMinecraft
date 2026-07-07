@@ -42,6 +42,7 @@ public final class Render2DUtility {
     private static final int MAX_SEGMENTS = 64;
     private static final float ANTIALIAS_PIXELS = 1.25F;
     private static final float MAX_GAUSSIAN_BLUR_RADIUS = 32.0F;
+    private static final float MAX_BLOOM_RADIUS = 64.0F;
     private static final RenderPipeline GUI_TEXTURED_TRIANGLE_FAN = RenderPipeline.builder(RenderPipelines.GUI_TEXTURED_SNIPPET)
         .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_textured_triangle_fan"))
         .withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.TRIANGLE_FAN)
@@ -53,8 +54,10 @@ public final class Render2DUtility {
         .build();
     private static final ThreadLocal<GuiGraphics> CURRENT_GRAPHICS = new ThreadLocal<>();
     private static final Map<BlurCacheKey, BlurTarget> GAUSSIAN_BLUR_CACHE = new HashMap<>();
+    private static final Map<BloomCacheKey, BlurTarget> BLOOM_CACHE = new HashMap<>();
     private static BlurTarget gaussianBlurScratch;
     private static int gaussianBlurVao;
+    private static int bloomVao;
 
     private Render2DUtility() {
     }
@@ -78,6 +81,7 @@ public final class Render2DUtility {
 
     public static void close() {
         closeGaussianBlurResources();
+        closeBloomResources();
         Shaders.close();
     }
 
@@ -592,6 +596,15 @@ public final class Render2DUtility {
             return;
         }
 
+        if (drawBloomShadow(x, y, width, height, radius, offsetX, offsetY, blurRadius, color)) {
+            return;
+        }
+
+        drawLayeredDropShadow(x, y, width, height, radius, offsetX, offsetY, blurRadius, color);
+    }
+
+    private static void drawLayeredDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
+                                              float blurRadius, int color) {
         int steps = Math.max(2, Math.min(10, Math.round(blurRadius / 2.0F)));
         for (int i = steps; i >= 1; i--) {
             float progress = i / (float)steps;
@@ -903,6 +916,115 @@ public final class Render2DUtility {
         ));
     }
 
+    private static boolean drawBloomShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
+                                           float blurRadius, int color) {
+        float safeBlurRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, blurRadius));
+        int padding = Math.max(1, (int)Math.ceil(safeBlurRadius));
+        int textureWidth = Math.max(1, (int)Math.ceil(width + padding * 2.0F));
+        int textureHeight = Math.max(1, (int)Math.ceil(height + padding * 2.0F));
+
+        BloomCacheKey key = new BloomCacheKey(
+            Math.round(width * 100.0F),
+            Math.round(height * 100.0F),
+            Math.round(clampRadius(width, height, radius) * 100.0F),
+            Math.round(safeBlurRadius * 100.0F),
+            padding,
+            textureWidth,
+            textureHeight
+        );
+        BlurTarget target = BLOOM_CACHE.get(key);
+        if (target == null) {
+            target = new BlurTarget("nyx-bloom-mask");
+            try {
+                if (!renderBloomMask(target, textureWidth, textureHeight, padding, padding, width, height, radius, safeBlurRadius)) {
+                    target.close();
+                    return false;
+                }
+                BLOOM_CACHE.put(key, target);
+            } catch (RuntimeException exception) {
+                target.close();
+                return false;
+            }
+        }
+
+        if (target.view == null || target.view.isClosed()) {
+            BLOOM_CACHE.remove(key);
+            target.close();
+            return false;
+        }
+
+        drawTexture(target.view, x + offsetX - padding, y + offsetY - padding, textureWidth, textureHeight, color);
+        return true;
+    }
+
+    private static boolean renderBloomMask(BlurTarget target, int textureWidth, int textureHeight, float rectX, float rectY,
+                                           float rectWidth, float rectHeight, float radius, float blurRadius) {
+        ensureGaussianBlurTarget(target, textureWidth, textureHeight);
+
+        Shader shader = bloomShader();
+        if (shader == null || target.framebuffer == 0) {
+            return false;
+        }
+
+        int previousFramebuffer = GlStateManager.getFrameBuffer(GL32C.GL_FRAMEBUFFER);
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+        int previousVertexArray = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+        int previousActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+        int previousTexture0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int[] previousViewport = new int[4];
+        GL11.glGetIntegerv(GL11.GL_VIEWPORT, previousViewport);
+        float[] previousClearColor = new float[4];
+        GL11.glGetFloatv(GL11.GL_COLOR_CLEAR_VALUE, previousClearColor);
+        boolean previousDepthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
+        boolean previousCull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        boolean previousScissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+
+        try {
+            if (bloomVao == 0) {
+                bloomVao = GL.genVertexArray();
+            }
+
+            GL.bindFramebuffer(target.framebuffer);
+            GL.viewport(0, 0, textureWidth, textureHeight);
+            GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+            GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+            GL.bindVertexArray(bloomVao);
+            GL.disableDepth();
+            GL.disableBlend();
+            GL.disableCull();
+            GL.disableScissorTest();
+
+            shader.bind();
+            shader.set("TextureSize", textureWidth, textureHeight);
+            shader.set("Rect", rectX, rectY, rectWidth, rectHeight);
+            shader.set("Radius", clampRadius(rectWidth, rectHeight, radius));
+            shader.set("BlurRadius", blurRadius);
+            GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+        } finally {
+            GL.bindFramebuffer(previousFramebuffer);
+            GL.viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+            GL.bindVertexArray(previousVertexArray);
+            GL.useProgram(previousProgram);
+            GL.bindTexture(previousTexture0, 0);
+            GlStateManager._activeTexture(previousActiveTexture);
+            GL11.glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+            setCapability(GL11.GL_DEPTH_TEST, previousDepthTest);
+            setCapability(GL11.GL_BLEND, previousBlend);
+            setCapability(GL11.GL_CULL_FACE, previousCull);
+            setCapability(GL11.GL_SCISSOR_TEST, previousScissor);
+        }
+
+        return target.view != null && !target.view.isClosed();
+    }
+
+    @Nullable
+    private static Shader bloomShader() {
+        Shaders.init();
+        return Shaders.BLOOM;
+    }
+
     @Nullable
     private static GpuTextureView gaussianBlurredMainTexture(float blurRadius) {
         Minecraft minecraft = Minecraft.getInstance();
@@ -1056,6 +1178,18 @@ public final class Render2DUtility {
         if (gaussianBlurVao != 0) {
             GL.deleteVertexArray(gaussianBlurVao);
             gaussianBlurVao = 0;
+        }
+    }
+
+    private static void closeBloomResources() {
+        for (BlurTarget target : BLOOM_CACHE.values()) {
+            target.close();
+        }
+        BLOOM_CACHE.clear();
+
+        if (bloomVao != 0) {
+            GL.deleteVertexArray(bloomVao);
+            bloomVao = 0;
         }
     }
 
@@ -1677,6 +1811,9 @@ public final class Render2DUtility {
     }
 
     private record BlurCacheKey(int sourceTexture, int width, int height, int radius) {
+    }
+
+    private record BloomCacheKey(int width, int height, int radius, int blurRadius, int padding, int textureWidth, int textureHeight) {
     }
 
     private static final class BlurTarget implements AutoCloseable {

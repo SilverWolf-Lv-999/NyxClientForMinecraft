@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.utility.render;
 public final class Shaders {
    public static Shader FONT;
    public static Shader GAUSSIAN_BLUR;
+   public static Shader BLOOM;
 
    private Shaders() {
    }
@@ -14,6 +15,9 @@ public final class Shaders {
       if (GAUSSIAN_BLUR == null) {
          GAUSSIAN_BLUR = new Shader("gaussian_blur.vert", "gaussian_blur.frag");
       }
+      if (BLOOM == null) {
+         BLOOM = new Shader("bloom.vert", "bloom.frag");
+      }
    }
 
    public static void close() {
@@ -24,6 +28,10 @@ public final class Shaders {
       if (GAUSSIAN_BLUR != null) {
          GAUSSIAN_BLUR.close();
          GAUSSIAN_BLUR = null;
+      }
+      if (BLOOM != null) {
+         BLOOM.close();
+         BLOOM = null;
       }
 
    }

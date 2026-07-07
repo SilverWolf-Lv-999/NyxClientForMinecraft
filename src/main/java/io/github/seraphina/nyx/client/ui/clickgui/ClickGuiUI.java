@@ -1,9 +1,6 @@
 package io.github.seraphina.nyx.client.ui.clickgui;
 
 import com.mojang.blaze3d.platform.NativeImage;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.FilterMode;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.ModuleManager;
 import io.github.seraphina.nyx.client.module.Category;
@@ -15,22 +12,17 @@ import io.github.seraphina.nyx.client.utility.web.MicrosoftUtility;
 import io.github.seraphina.nyx.client.value.AbstractValue;
 import io.github.seraphina.nyx.client.value.impl.*;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.navigation.ScreenRectangle;
-import net.minecraft.client.gui.render.TextureSetup;
-import net.minecraft.client.gui.render.state.GuiElementRenderState;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
-import org.joml.Matrix3x2f;
 
 import javax.annotation.Nullable;
 import java.awt.*;
-import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.WritableRaster;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -65,7 +57,8 @@ public class ClickGuiUI extends Screen {
     private static final float EXPANDED_BOTTOM_PADDING = 8.0F;
     private static final float BOTTOM_PADDING = 28.0F;
     private static final float SCROLL_STEP = 34.0F;
-    private static final float AVATAR_TEXTURE_SIZE = 64.0F;
+    private static final int AVATAR_TEXTURE_SIZE = 128;
+    private static final int AVATAR_SUPERSAMPLE = 4;
     private static final long CATEGORY_SWITCH_ANIMATION_NANOS = 260_000_000L;
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
@@ -635,16 +628,7 @@ public class ClickGuiUI extends Screen {
         }
 
         if (avatarTexture != null) {
-            GuiGraphics graphics = Render2DUtility.currentGuiGraphics();
-            graphics.submitGuiElementRenderState(new AvatarTextureRenderState(
-                TextureSetup.singleTexture(avatarTexture.getTextureView(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)),
-                new Matrix3x2f(graphics.pose()),
-                x,
-                y,
-                x + size,
-                y + size,
-                graphics.peekScissorStack()
-            ));
+            Render2DUtility.drawTexture(avatarTexture.getTextureView(), x, y, size, size);
             Render2DUtility.drawOutlineCircle(x + size * 0.5F, y + size * 0.5F, size * 0.5F, 1.0F, BORDER);
             return;
         }
@@ -675,7 +659,7 @@ public class ClickGuiUI extends Screen {
     private static BufferedImage loadAvatarImage() {
         try {
             return MicrosoftUtility.getCurrentMicrosoftAccountAvatarImage()
-                .map(image -> circularImage(image, Math.round(AVATAR_TEXTURE_SIZE)))
+                .map(image -> circularImage(image, AVATAR_TEXTURE_SIZE))
                 .orElse(null);
         } catch (RuntimeException ignored) {
             return null;
@@ -683,24 +667,66 @@ public class ClickGuiUI extends Screen {
     }
 
     private static BufferedImage circularImage(BufferedImage source, int size) {
-        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        int safeSize = Math.max(1, size);
+        int supersampledSize = safeSize * AVATAR_SUPERSAMPLE;
+        BufferedImage image = new BufferedImage(supersampledSize, supersampledSize, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
         try {
-            graphics.setComposite(AlphaComposite.Clear);
-            graphics.fillRect(0, 0, size, size);
-            graphics.setComposite(AlphaComposite.SrcOver);
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            graphics.setClip(new Ellipse2D.Float(0.0F, 0.0F, size, size));
+            applyAvatarRenderingHints(graphics);
 
             int sourceSize = Math.min(source.getWidth(), source.getHeight());
             int sourceX = (source.getWidth() - sourceSize) / 2;
             int sourceY = (source.getHeight() - sourceSize) / 2;
-            graphics.drawImage(source, 0, 0, size, size, sourceX, sourceY, sourceX + sourceSize, sourceY + sourceSize, null);
+            graphics.drawImage(source, 0, 0, supersampledSize, supersampledSize,
+                sourceX, sourceY, sourceX + sourceSize, sourceY + sourceSize, null);
+        } finally {
+            graphics.dispose();
+        }
+
+        applyCircleAlphaMask(image);
+        return scaleAvatarImage(image, safeSize);
+    }
+
+    private static void applyCircleAlphaMask(BufferedImage image) {
+        int size = image.getWidth();
+        BufferedImage mask = new BufferedImage(size, size, BufferedImage.TYPE_BYTE_GRAY);
+        Graphics2D graphics = mask.createGraphics();
+        try {
+            applyAvatarRenderingHints(graphics);
+            graphics.setColor(Color.WHITE);
+            graphics.fillOval(0, 0, size, size);
+        } finally {
+            graphics.dispose();
+        }
+
+        WritableRaster alpha = image.getAlphaRaster();
+        WritableRaster maskRaster = mask.getRaster();
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int maskedAlpha = alpha.getSample(x, y, 0) * maskRaster.getSample(x, y, 0) / 255;
+                alpha.setSample(x, y, 0, maskedAlpha);
+            }
+        }
+    }
+
+    private static BufferedImage scaleAvatarImage(BufferedImage source, int size) {
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            applyAvatarRenderingHints(graphics);
+            graphics.drawImage(source, 0, 0, size, size, null);
         } finally {
             graphics.dispose();
         }
         return image;
+    }
+
+    private static void applyAvatarRenderingHints(Graphics2D graphics) {
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        graphics.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        graphics.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
     }
 
     private static NativeImage toNativeImage(BufferedImage image) {
@@ -1255,21 +1281,6 @@ public class ClickGuiUI extends Screen {
         }
     }
 
-    @Nullable
-    private static ScreenRectangle boundsFor(float x0, float y0, float x1, float y1, Matrix3x2f pose, @Nullable ScreenRectangle scissorArea) {
-        float minX = Math.min(x0, x1);
-        float maxX = Math.max(x0, x1);
-        float minY = Math.min(y0, y1);
-        float maxY = Math.max(y0, y1);
-        ScreenRectangle bounds = new ScreenRectangle(
-            (int)Math.floor(minX),
-            (int)Math.floor(minY),
-            Math.max(1, (int)Math.ceil(maxX - minX)),
-            Math.max(1, (int)Math.ceil(maxY - minY))
-        ).transformMaxBounds(pose);
-        return scissorArea == null ? bounds : scissorArea.intersection(bounds);
-    }
-
     private record ModuleColumnLayout(String title, List<Module> modules, float x, float y, float width, float cardHeight) {
     }
 
@@ -1277,35 +1288,6 @@ public class ClickGuiUI extends Screen {
     }
 
     private record ValueComponentLayout(AbstractComponent component, float x, float y, float width, float height) {
-    }
-
-    private record AvatarTextureRenderState(
-        TextureSetup textureSetup,
-        Matrix3x2f pose,
-        float x0,
-        float y0,
-        float x1,
-        float y1,
-        @Nullable ScreenRectangle scissorArea,
-        @Nullable ScreenRectangle bounds
-    ) implements GuiElementRenderState {
-        private AvatarTextureRenderState(TextureSetup textureSetup, Matrix3x2f pose, float x0, float y0, float x1, float y1,
-                                         @Nullable ScreenRectangle scissorArea) {
-            this(textureSetup, pose, x0, y0, x1, y1, scissorArea, boundsFor(x0, y0, x1, y1, pose, scissorArea));
-        }
-
-        @Override
-        public com.mojang.blaze3d.pipeline.RenderPipeline pipeline() {
-            return RenderPipelines.GUI_TEXTURED;
-        }
-
-        @Override
-        public void buildVertices(VertexConsumer consumer) {
-            consumer.addVertexWith2DPose(pose, x0, y0).setUv(0.0F, 0.0F).setColor(0xFFFFFFFF);
-            consumer.addVertexWith2DPose(pose, x0, y1).setUv(0.0F, 1.0F).setColor(0xFFFFFFFF);
-            consumer.addVertexWith2DPose(pose, x1, y1).setUv(1.0F, 1.0F).setColor(0xFFFFFFFF);
-            consumer.addVertexWith2DPose(pose, x1, y0).setUv(1.0F, 0.0F).setColor(0xFFFFFFFF);
-        }
     }
 
     @Override

@@ -24,6 +24,7 @@ public class NyxClient {
         HUDManager.load();
         EventManager.register(this);
         EventManager.register(KeyManager.INSTANCE);
+        CommandManager.init();
         RotationManager.INSTANCE.getClass();
         FontManager.init();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
