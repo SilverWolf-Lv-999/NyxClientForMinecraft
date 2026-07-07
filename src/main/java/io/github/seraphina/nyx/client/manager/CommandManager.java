@@ -2,8 +2,9 @@ package io.github.seraphina.nyx.client.manager;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import io.github.seraphina.nyx.client.command.Command;
+import io.github.seraphina.nyx.client.command.NyxCommand;
 import io.github.seraphina.nyx.client.command.impl.BindCommand;
+import io.github.seraphina.nyx.client.command.impl.ToggleCommand;
 import io.github.seraphina.nyx.client.module.client.Client;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import net.minecraft.ChatFormatting;
@@ -18,7 +19,7 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class CommandManager implements IMinecraft {
-    private static final Set<Command> commands = new LinkedHashSet<>();
+    private static final Set<NyxCommand> commands = new LinkedHashSet<>();
     private static final CommandDispatcher<ClientSuggestionProvider> dispatcher = new CommandDispatcher<>();
     private static boolean initialized;
 
@@ -26,9 +27,9 @@ public final class CommandManager implements IMinecraft {
         throw new RuntimeException("CommandManager can't be instantiated");
     }
 
-    public static void registerCommand(Command... command) {
+    public static void registerCommand(NyxCommand... command) {
         Collections.addAll(commands, command);
-        for (Command value : command) {
+        for (NyxCommand value : command) {
             dispatcher.getRoot().addChild(value.build().build());
         }
     }
@@ -39,13 +40,14 @@ public final class CommandManager implements IMinecraft {
         }
 
         registerCommand(
-                new BindCommand()
+                new BindCommand(),
+                new ToggleCommand()
         );
 
         initialized = true;
     }
 
-    public static Set<Command> getCommands() {
+    public static Set<NyxCommand> getCommands() {
         init();
         return Collections.unmodifiableSet(commands);
     }
@@ -70,9 +72,8 @@ public final class CommandManager implements IMinecraft {
             return false;
         }
 
-        if (addRecentChat && mc != null && mc.gui != null) {
+        if (addRecentChat)
             mc.gui.getChat().addRecentChat(input);
-        }
 
         execute(input);
         return true;
@@ -85,7 +86,7 @@ public final class CommandManager implements IMinecraft {
         }
 
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.player.connection == null) {
+        if (minecraft.player == null) {
             return;
         }
 
@@ -102,9 +103,7 @@ public final class CommandManager implements IMinecraft {
 
     public static void send(Component component) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.gui != null) {
-            minecraft.gui.getChat().addMessage(component);
-        }
+        minecraft.gui.getChat().addMessage(component);
     }
 
     public static String normalizeName(String value) {

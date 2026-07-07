@@ -1,13 +1,11 @@
 package io.github.seraphina.nyx.client.command.impl;
 
 import com.mojang.brigadier.Command;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import io.github.seraphina.nyx.client.command.CommandInfo;
-import io.github.seraphina.nyx.client.command.KeyNames;
 import io.github.seraphina.nyx.client.command.NyxCommand;
 import io.github.seraphina.nyx.client.manager.CommandManager;
 import io.github.seraphina.nyx.client.manager.ConfigManager;
@@ -22,23 +20,19 @@ import java.util.Locale;
 import static com.mojang.brigadier.arguments.StringArgumentType.getString;
 import static com.mojang.brigadier.arguments.StringArgumentType.word;
 
-@CommandInfo(command = "bind")
-public final class BindCommand extends NyxCommand {
+@CommandInfo(command = "toggle")
+public final class ToggleCommand extends NyxCommand {
     private static final DynamicCommandExceptionType UNKNOWN_MODULE =
             new DynamicCommandExceptionType(value -> Component.literal("Unknown module: " + value));
-    private static final DynamicCommandExceptionType UNKNOWN_KEY =
-            new DynamicCommandExceptionType(value -> Component.literal("Unknown key: " + value));
 
     @Override
     protected void configure(LiteralArgumentBuilder<ClientSuggestionProvider> builder) {
         builder.then(RequiredArgumentBuilder.<ClientSuggestionProvider, String>argument("module", word())
                 .suggests((context, suggestions) -> SharedSuggestionProvider.suggest(
-                        ModuleManager.getModules().stream().map(BindCommand::getCommandModuleName),
+                        ModuleManager.getModules().stream().map(ToggleCommand::getCommandModuleName),
                         suggestions
                 ))
-                .then(RequiredArgumentBuilder.<ClientSuggestionProvider, String>argument("key", StringArgumentType.word())
-                        .suggests((context, suggestions) -> SharedSuggestionProvider.suggest(KeyNames.suggestions(), suggestions))
-                        .executes(this::execute)));
+                .executes(this::execute));
     }
 
     private int execute(com.mojang.brigadier.context.CommandContext<ClientSuggestionProvider> context) throws CommandSyntaxException {
@@ -46,19 +40,10 @@ public final class BindCommand extends NyxCommand {
         Module module = ModuleManager.getModule(moduleName)
                 .orElseThrow(() -> UNKNOWN_MODULE.create(moduleName));
 
-        String keyName = getString(context, "key");
-        String normalizedKeyName;
-        int key;
-        try {
-            normalizedKeyName = KeyNames.getName(keyName);
-            key = KeyNames.getKey(keyName);
-        } catch (IllegalArgumentException exception) {
-            throw UNKNOWN_KEY.create(keyName);
-        }
-
-        module.setKey(key);
+        module.toggle();
         ConfigManager.save();
-        CommandManager.send(Component.literal("bind " + getCommandModuleName(module) + " " + normalizedKeyName));
+        CommandManager.send(Component.literal("toggle " + getCommandModuleName(module) + " "
+                + (module.isEnabled() ? "on" : "off")));
         return Command.SINGLE_SUCCESS;
     }
 

@@ -5,10 +5,10 @@ import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 
 import java.util.Locale;
 
-public abstract class Command {
+public abstract class NyxCommand {
     private final String name;
 
-    protected Command() {
+    protected NyxCommand() {
         CommandInfo info = this.getClass().getAnnotation(CommandInfo.class);
         String commandName = info == null ? "" : info.command();
         if (commandName == null || commandName.isBlank()) {

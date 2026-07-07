@@ -87,10 +87,10 @@ public final class ModuleManager {
             return Optional.empty();
         }
 
-        String normalizedName = name.toLowerCase(Locale.ROOT);
+        String normalizedName = CommandManager.normalizeName(name);
         return MODULES.stream()
-                .filter(module -> module.getConfigName().toLowerCase(Locale.ROOT).equals(normalizedName)
-                        || module.getName().toLowerCase(Locale.ROOT).equals(normalizedName))
+                .filter(module -> CommandManager.normalizeName(module.getConfigName()).equals(normalizedName)
+                        || CommandManager.normalizeName(module.getName()).equals(normalizedName))
                 .findFirst();
     }
 
