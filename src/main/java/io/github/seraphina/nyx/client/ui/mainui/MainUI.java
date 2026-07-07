@@ -4,11 +4,16 @@ import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.PathManager;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundMedia;
+import io.github.seraphina.nyx.client.ui.mainui.button.MainUIButton;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+import net.minecraft.client.gui.screens.multiplayer.SafetyScreen;
+import net.minecraft.client.gui.screens.options.OptionsScreen;
+import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -45,6 +50,12 @@ public final class MainUI extends Screen {
     private static final float CENTER_PANEL_TITLE_SIZE = 26.0F;
     private static final float CENTER_PANEL_TITLE_GAP = 18.0F;
     private static final String CENTER_PANEL_TITLE = "Nyx Client";
+    private static final float CENTER_BUTTON_HEIGHT = 34.0F;
+    private static final float CENTER_BUTTON_MIN_HEIGHT = 28.0F;
+    private static final float CENTER_BUTTON_GAP = 10.0F;
+    private static final float CENTER_BUTTON_MIN_GAP = 7.0F;
+    private static final float CENTER_BUTTON_MAX_INSET = 32.0F;
+    private static final float CENTER_BUTTON_MIN_INSET = 18.0F;
 
     private static final int TEXT = 0xFFFFFFFF;
     private static final int TEXT_MUTED = 0xFFA8AFBE;
@@ -68,6 +79,7 @@ public final class MainUI extends Screen {
     private static boolean backgroundCacheLoaded;
 
     private final List<BackgroundMedia> backgrounds = BACKGROUND_CACHE;
+    private final List<MainUIButton> mainButtons = new ArrayList<>();
 
     private String selectedKey = rememberedSelectedKey;
     private int selectedIndex;
@@ -77,6 +89,7 @@ public final class MainUI extends Screen {
     private float maxPanelScroll;
     private long lastFrameNanos;
     private float frameSeconds = DEFAULT_FRAME_SECONDS;
+    private MainUIButton multiplayerButton;
 
     public MainUI() {
         super(Component.empty());
@@ -87,6 +100,7 @@ public final class MainUI extends Screen {
         super.init();
         ensureBackgroundsLoaded();
         syncSelectedBackground();
+        initMainButtons();
         this.lastFrameNanos = 0L;
     }
 
@@ -102,6 +116,9 @@ public final class MainUI extends Screen {
             updatePanelAnimation();
             renderSelectedBackground();
             renderCenterPanel();
+            layoutMainButtons();
+            updateMainButtonStates();
+            super.render(guiGraphics, mouseX, mouseY, partialTick);
             renderSettingsPanel(mouseX, mouseY);
             renderSettingsButton(mouseX, mouseY);
         });
@@ -121,10 +138,12 @@ public final class MainUI extends Screen {
             return true;
         }
 
-        if (isSettingsPanelVisible() && isInside(event.x(), event.y(), panelX(), 0.0F, panelWidth(), this.height)) {
-            int row = backgroundRowAt(event.x(), event.y());
-            if (row >= 0 && row < this.backgrounds.size()) {
-                selectBackground(row);
+        if (isSettingsPanelVisible()) {
+            if (isInside(event.x(), event.y(), panelX(), 0.0F, panelWidth(), this.height)) {
+                int row = backgroundRowAt(event.x(), event.y());
+                if (row >= 0 && row < this.backgrounds.size()) {
+                    selectBackground(row);
+                }
             }
             return true;
         }
@@ -179,21 +198,12 @@ public final class MainUI extends Screen {
     }
 
     private void renderCenterPanel() {
-        float maxWidth = Math.max(1.0F, Math.min(CENTER_PANEL_MAX_WIDTH, this.width - 32.0F));
-        float minWidth = Math.min(CENTER_PANEL_MIN_WIDTH, maxWidth);
-        float panelWidth = clamp(this.width * 0.336F, minWidth, maxWidth);
-
-        float maxHeight = Math.max(1.0F, Math.min(CENTER_PANEL_MAX_HEIGHT, this.height - 32.0F));
-        float minHeight = Math.min(CENTER_PANEL_MIN_HEIGHT, maxHeight);
-        float panelHeight = clamp(this.height * 0.432F, minHeight, maxHeight);
-
-        float x = (this.width - panelWidth) * 0.5F;
-        float y = (this.height - panelHeight) * 0.5F;
+        CenterPanelBounds panel = centerPanelBounds();
         Render2DUtility.drawGaussianBlurredPanel(
-            x,
-            y,
-            panelWidth,
-            panelHeight,
+            panel.x(),
+            panel.y(),
+            panel.width(),
+            panel.height(),
             CENTER_PANEL_RADIUS,
             CENTER_PANEL_BLUR_RADIUS,
             CENTER_PANEL_BLUR,
@@ -203,10 +213,87 @@ public final class MainUI extends Screen {
         );
 
         FontRenderer titleFont = displayFont(CENTER_PANEL_TITLE_SIZE);
-        float titleX = x + (panelWidth - titleFont.getStringWidth(CENTER_PANEL_TITLE)) * 0.5F;
-        float titleY = Math.max(8.0F, y - CENTER_PANEL_TITLE_GAP - CENTER_PANEL_TITLE_SIZE);
+        float titleX = panel.x() + (panel.width() - titleFont.getStringWidth(CENTER_PANEL_TITLE)) * 0.5F;
+        float titleY = Math.max(8.0F, panel.y() - CENTER_PANEL_TITLE_GAP - CENTER_PANEL_TITLE_SIZE);
         titleFont.drawString(CENTER_PANEL_TITLE, titleX + 1.0F, titleY + 1.0F, CENTER_PANEL_TITLE_SHADOW);
         titleFont.drawString(CENTER_PANEL_TITLE, titleX, titleY, TEXT);
+    }
+
+    private void initMainButtons() {
+        this.mainButtons.clear();
+        this.multiplayerButton = null;
+        addMainButton("Single Player", this::openSinglePlayer);
+        this.multiplayerButton = addMainButton("Muti Player", this::openMultiplayer);
+        addMainButton("Option", this::openOptions);
+        addMainButton("Exit", this::exitGame);
+        layoutMainButtons();
+        updateMainButtonStates();
+    }
+
+    private MainUIButton addMainButton(String label, Runnable action) {
+        MainUIButton button = addRenderableWidget(new MainUIButton(0, 0, 1, 1, Component.literal(label), action));
+        this.mainButtons.add(button);
+        return button;
+    }
+
+    private void layoutMainButtons() {
+        if (this.mainButtons.isEmpty()) {
+            return;
+        }
+
+        CenterPanelBounds panel = centerPanelBounds();
+        float inset = clamp(panel.width() * 0.13F, CENTER_BUTTON_MIN_INSET, CENTER_BUTTON_MAX_INSET);
+        int buttonWidth = Math.max(1, Math.round(panel.width() - inset * 2.0F));
+        int buttonHeight = Math.max(1, Math.round(clamp(panel.height() * 0.11F, CENTER_BUTTON_MIN_HEIGHT, CENTER_BUTTON_HEIGHT)));
+        float buttonGap = clamp(panel.height() * 0.032F, CENTER_BUTTON_MIN_GAP, CENTER_BUTTON_GAP);
+        float totalHeight = this.mainButtons.size() * buttonHeight + (this.mainButtons.size() - 1) * buttonGap;
+        int buttonX = Math.round(panel.x() + (panel.width() - buttonWidth) * 0.5F);
+        float buttonY = panel.y() + (panel.height() - totalHeight) * 0.5F;
+
+        for (MainUIButton button : this.mainButtons) {
+            button.setX(buttonX);
+            button.setY(Math.round(buttonY));
+            button.setSize(buttonWidth, buttonHeight);
+            buttonY += buttonHeight + buttonGap;
+        }
+    }
+
+    private void updateMainButtonStates() {
+        if (this.multiplayerButton != null) {
+            Minecraft minecraft = Minecraft.getInstance();
+            this.multiplayerButton.active = minecraft != null && minecraft.allowsMultiplayer();
+        }
+    }
+
+    private void openSinglePlayer() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft != null) {
+            minecraft.setScreen(new SelectWorldScreen(this));
+        }
+    }
+
+    private void openMultiplayer() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || !minecraft.allowsMultiplayer()) {
+            return;
+        }
+
+        Screen screen = minecraft.options.skipMultiplayerWarning ? new JoinMultiplayerScreen(this) : new SafetyScreen(this);
+        minecraft.setScreen(screen);
+    }
+
+    private void openOptions() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft != null) {
+            minecraft.setScreen(new OptionsScreen(this, minecraft.options));
+        }
+    }
+
+    private void exitGame() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft != null) {
+            minecraft.stop();
+        }
     }
 
     private void renderSettingsButton(int mouseX, int mouseY) {
@@ -404,6 +491,23 @@ public final class MainUI extends Screen {
         return SETTINGS_BUTTON_MARGIN;
     }
 
+    private CenterPanelBounds centerPanelBounds() {
+        float maxWidth = Math.max(1.0F, Math.min(CENTER_PANEL_MAX_WIDTH, this.width - 32.0F));
+        float minWidth = Math.min(CENTER_PANEL_MIN_WIDTH, maxWidth);
+        float panelWidth = clamp(this.width * 0.336F, minWidth, maxWidth);
+
+        float maxHeight = Math.max(1.0F, Math.min(CENTER_PANEL_MAX_HEIGHT, this.height - 32.0F));
+        float minHeight = Math.min(CENTER_PANEL_MIN_HEIGHT, maxHeight);
+        float panelHeight = clamp(this.height * 0.432F, minHeight, maxHeight);
+
+        return new CenterPanelBounds(
+            (this.width - panelWidth) * 0.5F,
+            (this.height - panelHeight) * 0.5F,
+            panelWidth,
+            panelHeight
+        );
+    }
+
     private float panelWidth() {
         float upper = Math.max(120.0F, Math.min(PANEL_MAX_WIDTH, this.width - 24.0F));
         float lower = Math.min(PANEL_MIN_WIDTH, upper);
@@ -472,6 +576,9 @@ public final class MainUI extends Screen {
 
     private static boolean isInside(double mouseX, double mouseY, float x, float y, float width, float height) {
         return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
+    }
+
+    private record CenterPanelBounds(float x, float y, float width, float height) {
     }
 
     @Override
