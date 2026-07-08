@@ -9,6 +9,7 @@ import io.github.seraphina.nyx.client.utility.player.MovingUtility;
 import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
+import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -22,6 +23,7 @@ public class SpearThrust extends Module {
     public static final SpearThrust INSTANCE = new SpearThrust();
 
     public final DoubleValue speed = ValueBuild.doubleValue("speed", 1.0, 0.1, 10.0, 0.1, this);
+    public final IntValue range = ValueBuild.intSetting("range", 128, 3, 256, 1, this);
 
     private LivingEntity thrustTarget;
 
@@ -58,7 +60,7 @@ public class SpearThrust extends Module {
 
     private LivingEntity crosshairLivingTarget() {
         if (mc.player == null) return null;
-        HitResult hitResult = PlayerUtility.raycastForEntity(mc.level, mc.player, 128, true);
+        HitResult hitResult = PlayerUtility.raycastForEntity(mc.level, mc.player, range.getValue(), true);
         if (!(hitResult instanceof EntityHitResult entityHitResult)) {
             return null;
         }

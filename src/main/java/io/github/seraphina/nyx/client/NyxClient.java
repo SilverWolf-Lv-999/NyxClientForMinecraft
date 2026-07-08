@@ -6,6 +6,7 @@ import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
 import io.github.seraphina.nyx.client.manager.*;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
+import io.github.seraphina.nyx.client.utility.StringUtility;
 import io.github.seraphina.nyx.client.utility.render.Shaders;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
@@ -19,6 +20,8 @@ public class NyxClient {
 
     public void init() {
         LOGGER.info("Initializing NyxClient");
+        System.out.print(StringUtility.readStringInProject(NyxClient.class, "assets/nyxclient/nyx.txt"));
+        System.out.println();
         Shaders.init();
         ModuleManager.init();
         CommandManager.init();
