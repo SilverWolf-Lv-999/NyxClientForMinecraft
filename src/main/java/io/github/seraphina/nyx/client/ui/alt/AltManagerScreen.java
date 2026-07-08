@@ -429,7 +429,9 @@ public final class AltManagerScreen extends Screen {
             renderPanelSurface(panel, canBlurSurface);
             renderFlipShade(panel, degrees);
             if (backFace) {
-                renderAccountArea(panel, mouseX, mouseY, faceAlpha);
+                Render2DUtility.withScale(-1.0F, 1.0F, panel.centerX(), panel.centerY(), () ->
+                    renderAccountArea(panel, mouseX, mouseY, faceAlpha)
+                );
             } else {
                 renderMainButtonGhosts(panel, faceAlpha);
             }

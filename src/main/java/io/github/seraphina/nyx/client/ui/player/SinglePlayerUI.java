@@ -623,7 +623,9 @@ public final class SinglePlayerUI extends Screen {
             renderPanelSurface(panel, canBlurSurface);
             renderFlipShade(panel, degrees);
             if (backFace) {
-                renderWorldArea(panel, mouseX, mouseY, faceAlpha);
+                Render2DUtility.withScale(-1.0F, 1.0F, panel.centerX(), panel.centerY(), () ->
+                    renderWorldArea(panel, mouseX, mouseY, faceAlpha)
+                );
             } else {
                 renderMainButtonGhosts(panel, faceAlpha);
             }

@@ -55,7 +55,13 @@ public final class Render2DUtility {
     private static final float SKIN_TEXTURE_SIZE = 64.0F;
     private static final RenderPipeline GUI_TEXTURED_TRIANGLE_FAN = RenderPipeline.builder(RenderPipelines.GUI_TEXTURED_SNIPPET)
         .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_textured_triangle_fan"))
+        .withCull(false)
         .withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.TRIANGLE_FAN)
+        .build();
+    private static final RenderPipeline GUI_TRIANGLE_FAN = RenderPipeline.builder(RenderPipelines.GUI_SNIPPET)
+        .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_triangle_fan"))
+        .withCull(false)
+        .withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.TRIANGLE_FAN)
         .build();
     private static final RenderPipeline GUI_TRIANGLE_STRIP = RenderPipeline.builder(RenderPipelines.GUI_SNIPPET)
         .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/gui_triangle_strip"))
@@ -999,7 +1005,7 @@ public final class Render2DUtility {
         Objects.requireNonNull(action, "action");
 
         float radians = (float)Math.toRadians(degrees);
-        float horizontalScale = Math.max(Math.max(0.0F, minScale), verticalFlipScale(degrees));
+        float horizontalScale = clampedSignedVerticalFlipScale(degrees, minScale);
         float depthScale = (float)Math.sin(radians);
         float cameraDistance = Math.max(
             Math.max(1.0F, width) * VERTICAL_FLIP_CAMERA_DISTANCE_MULTIPLIER,
@@ -1020,6 +1026,15 @@ public final class Render2DUtility {
 
     public static float verticalFlipScale(float degrees) {
         return Math.abs((float)Math.cos(Math.toRadians(degrees)));
+    }
+
+    private static float clampedSignedVerticalFlipScale(float degrees, float minScale) {
+        float scale = (float)Math.cos(Math.toRadians(degrees));
+        float minimum = Math.max(0.0F, minScale);
+        if (Math.abs(scale) >= minimum) {
+            return scale;
+        }
+        return Math.copySign(minimum, scale == 0.0F ? 1.0F : scale);
     }
 
     public static boolean isVerticalFlipBackFace(float degrees) {
@@ -1137,7 +1152,7 @@ public final class Render2DUtility {
         GuiGraphics graphics = currentGraphics();
         VertexProjector projector = currentVertexProjector();
         graphics.submitGuiElementRenderState(new FanRenderState(
-            RenderPipelines.DEBUG_TRIANGLE_FAN,
+            GUI_TRIANGLE_FAN,
             TextureSetup.noTexture(),
             new Matrix3x2f(graphics.pose()),
             points,
