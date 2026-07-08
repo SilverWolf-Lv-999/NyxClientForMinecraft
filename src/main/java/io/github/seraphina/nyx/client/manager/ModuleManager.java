@@ -6,11 +6,7 @@ import io.github.seraphina.nyx.client.module.client.ClickGui;
 import io.github.seraphina.nyx.client.module.client.Client;
 import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
 import io.github.seraphina.nyx.client.module.combat.*;
-import io.github.seraphina.nyx.client.module.movement.AutoJump;
-import io.github.seraphina.nyx.client.module.movement.BHop;
-import io.github.seraphina.nyx.client.module.movement.Scaffold;
-import io.github.seraphina.nyx.client.module.movement.Sprint;
-import io.github.seraphina.nyx.client.module.movement.Stuck;
+import io.github.seraphina.nyx.client.module.movement.*;
 import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.*;
 import io.github.seraphina.nyx.client.module.visual.Animations;
@@ -53,7 +49,8 @@ public final class ModuleManager {
                 BHop.INSTANCE,
                 AutoJump.INSTANCE,
                 Sprint.INSTANCE,
-                Stuck.INSTANCE
+                Stuck.INSTANCE,
+                ElytraFly.INSTANCE
         );
         //Other
         registerModule(

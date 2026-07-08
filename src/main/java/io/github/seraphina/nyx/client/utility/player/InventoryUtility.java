@@ -168,6 +168,37 @@ public final class InventoryUtility {
         return true;
     }
 
+    public static boolean useHotbarItem(int hotbarSlot) {
+        return useHotbarItem(hotbarSlot, InteractionHand.MAIN_HAND);
+    }
+
+    public static boolean useHotbarItem(int hotbarSlot, InteractionHand hand) {
+        Objects.requireNonNull(hand, "hand");
+        if (MC.player == null || MC.gameMode == null || !Inventory.isHotbarSlot(hotbarSlot)) {
+            return false;
+        }
+
+        int previousSlot = getSelectedHotbarSlot();
+        if (!Inventory.isHotbarSlot(previousSlot)) {
+            return false;
+        }
+
+        boolean changedSlot = previousSlot != hotbarSlot;
+        if (changedSlot && !selectHotbarSlot(hotbarSlot, true)) {
+            return false;
+        }
+
+        try {
+            MC.gameMode.useItem(MC.player, hand);
+        } finally {
+            if (changedSlot) {
+                selectHotbarSlot(previousSlot, true);
+            }
+        }
+
+        return true;
+    }
+
     public static boolean isValidInventorySlot(int inventorySlot) {
         Inventory inventory = inventory();
         return inventory != null && inventorySlot >= 0 && inventorySlot < inventory.getContainerSize();
