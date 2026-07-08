@@ -11,6 +11,7 @@ import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.*;
 import io.github.seraphina.nyx.client.module.visual.Animations;
 import io.github.seraphina.nyx.client.module.visual.Cape;
+import io.github.seraphina.nyx.client.module.visual.FullBright;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 import io.github.seraphina.nyx.client.module.visual.hud.HUD;
 
@@ -69,7 +70,8 @@ public final class ModuleManager {
                 Cape.INSTANCE,
                 NoRenderer.INSTANCE,
                 HUD.INSTANCE,
-                Animations.INSTANCE
+                Animations.INSTANCE,
+                FullBright.INSTANCE
         );
 
         initialized = true;

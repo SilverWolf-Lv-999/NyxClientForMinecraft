@@ -21,6 +21,7 @@
     "KeyboardHandlerMixin",
     "KeyboardInputMixin",
     "LevelRendererMixin",
+    "LightTextureMixin",
     "LivingEntityMixin",
     "LocalPlayerMixin",
     "MinecraftMixin",
