@@ -88,6 +88,25 @@ public class AutoElytra extends Module {
     }
 
     @EventTarget
+    public void onPreTick(TickEvent.Pre event) {
+        if (activeElytra == null || activeElytra.stage != Stage.USE_ELYTRA) {
+            return;
+        }
+
+        if (mc.player == null || mc.level == null || mc.gameMode == null) {
+            activeElytra = null;
+            return;
+        }
+
+        if (mc.gameMode.getPlayerMode() != GameType.SURVIVAL) {
+            cancelActiveElytra();
+            return;
+        }
+
+        useQueuedElytra();
+    }
+
+    @EventTarget
     public void onPostTick(TickEvent.Post event) {
         if (activeElytra == null) {
             return;
@@ -123,7 +142,8 @@ public class AutoElytra extends Module {
         }
 
         switch (activeElytra.stage) {
-            case USE_ELYTRA -> useQueuedElytra();
+            case USE_ELYTRA -> {
+            }
             case WAIT_EQUIP -> {
                 if (waitForElytraEquip()) {
                     activeElytra.stage = mc.player.onGround() ? Stage.GROUND_JUMP_RELEASE : Stage.GLIDE_RELEASE;
