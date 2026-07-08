@@ -20,7 +20,7 @@ public class HUD extends Module {
     public static final List<UIComponent> components = new ArrayList<>();
     public static final HUD INSTANCE = new HUD();
 
-    public final BoolValue watermark = ValueBuild.boolSetting("WaterMark", true, this);
+    public final BoolValue watermark = ValueBuild.boolSetting("watermaker", true, this);
 
     public HUD() {
         if (components.stream().noneMatch(WatermarkComponent.class::isInstance)) {

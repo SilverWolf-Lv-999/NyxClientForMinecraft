@@ -27,6 +27,7 @@
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
     "OptionScreenMixin",
+    "ParticleEngineMixin",
     "PlayerMixin"
   ],
   "injectors": {

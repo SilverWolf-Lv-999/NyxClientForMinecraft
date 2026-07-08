@@ -14,8 +14,8 @@ import net.minecraft.world.phys.Vec3;
 @ModuleInfo(name = "nyxclient.module.bhop.name", description = "nyxclient.module.bhop.description", category = Category.MOVEMENT)
 public class BHop extends Module {
     public static final BHop INSTANCE = new BHop();
-    public final BoolValue lowhop = ValueBuild.boolSetting("nyxclient.setting.bhop.lowhop.name", false, this);
-    public final BoolValue yport = ValueBuild.boolSetting("nyxclient.setting.bhop.yport.name", false, this);
+    public final BoolValue lowhop = ValueBuild.boolSetting("lowhop", false, this);
+    public final BoolValue yport = ValueBuild.boolSetting("yport", false, this);
 
     private int airTime;
 

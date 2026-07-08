@@ -6,9 +6,9 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 
-@ModuleInfo(name = "nyxclient.module.nodelay.name", description = "nyxclient.module.nodelay.description", category = Category.PLAYER)
-public class DelayRemover extends Module {
-    public static final DelayRemover INSTANCE = new DelayRemover();
+@ModuleInfo(name = "nyxclient.module.nojumpdelay.name", description = "nyxclient.module.nojumpdelay.description", category = Category.PLAYER)
+public class NoJumpDelay extends Module {
+    public static final NoJumpDelay INSTANCE = new NoJumpDelay();
     @EventTarget
     public void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;

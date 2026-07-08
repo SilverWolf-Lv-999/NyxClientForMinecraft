@@ -10,13 +10,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
-    @Inject(method = "bobHurt", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "bobHurt(Lcom/mojang/blaze3d/vertex/PoseStack;F)V", at = @At("HEAD"), cancellable = true)
     private void bobHurt(PoseStack poseStack, float partialTicks, CallbackInfo ci) {
         if (NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.nohurtcamera.getValue()) ci.cancel();
     }
 
-    @Inject(method = "bobView", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "bobView(Lcom/mojang/blaze3d/vertex/PoseStack;F)V", at = @At("HEAD"), cancellable = true)
     private void bobView(PoseStack poseStack, float partialTicks, CallbackInfo ci) {
-        if (NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.noview.getValue()) ci.cancel(); {}
+        if (NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.noview.getValue()) ci.cancel();
     }
 }
