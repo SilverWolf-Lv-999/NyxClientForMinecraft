@@ -12,10 +12,14 @@ import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
 import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
 import io.github.seraphina.nyx.client.module.combat.UseClick;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
+import net.minecraft.client.gui.Gui;
+import net.minecraft.client.gui.components.ChatComponent;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -24,11 +28,17 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.UUID;
 
 @Mixin(Minecraft.class)
 public class MinecraftMixin {
     @Shadow
     public Options options;
+
+    @Shadow
+    public Gui gui;
 
     @Inject(method = "<init>", at = @At("TAIL"))
     public void init(CallbackInfo info) {
@@ -72,6 +82,26 @@ public class MinecraftMixin {
     private void onStartUseItemBeforeHands(CallbackInfo info) {
         if (EventBus.INSTANCE.post(new StartUseItemEvent()).isCancelled()) {
             info.cancel();
+        }
+    }
+
+    @Inject(method = "openChatScreen", at = @At("HEAD"), cancellable = true)
+    private void nyx$openChatScreen(ChatComponent.ChatMethod chatMethod, CallbackInfo info) {
+        Minecraft minecraft = (Minecraft) (Object) this;
+        if (!NoChattingAllowed.INSTANCE.shouldBypassChatRestriction(minecraft)) {
+            return;
+        }
+
+        this.gui.setChatDisabledByPlayerShown(false);
+        this.gui.getChat().openScreen(chatMethod, ChatScreen::new);
+        info.cancel();
+    }
+
+    @Inject(method = "isBlocked", at = @At("HEAD"), cancellable = true)
+    private void nyx$isBlocked(UUID playerId, CallbackInfoReturnable<Boolean> info) {
+        Minecraft minecraft = (Minecraft) (Object) this;
+        if (NoChattingAllowed.INSTANCE.shouldBypassMessageBlocking(minecraft)) {
+            info.setReturnValue(minecraft.getPlayerSocialManager().shouldHideMessageFrom(playerId));
         }
     }
 

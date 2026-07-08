@@ -51,9 +51,18 @@ public class AutoElytra extends Module {
         queueElytraFromHotbar();
     }
 
-    @EventTarget
+    @EventTarget(4)
     public void onMoveInput(MoveInputEvent event) {
         if (activeElytra == null) {
+            return;
+        }
+
+        if (activeElytra.stage == Stage.RESTORE_CHEST) {
+            event.setForward(0.0F);
+            event.setStrafe(0.0F);
+            event.setJump(false);
+            event.setSprint(false);
+            stopSprinting();
             return;
         }
 
@@ -106,9 +115,11 @@ public class AutoElytra extends Module {
         }
 
         if (activeElytra.confirmedEquipped && activeElytra.hasBeenAirborne && mc.player.onGround()) {
-            restoreSelectedSlot();
-            restoreChestSlot();
-            return;
+            if (activeElytra.stage != Stage.RESTORE_CHEST) {
+                activeElytra.stage = Stage.RESTORE_CHEST;
+                stopSprinting();
+                return;
+            }
         }
 
         switch (activeElytra.stage) {
@@ -121,6 +132,7 @@ public class AutoElytra extends Module {
             case WAIT_AIRBORNE -> waitForAirborne();
             case WAIT_GLIDE -> retryGlideInput();
             case FLIGHT -> restoreSelectedSlotAfterDelay();
+            case RESTORE_CHEST -> restoreChestSlotAfterInputClear();
         }
     }
 
@@ -255,6 +267,18 @@ public class AutoElytra extends Module {
         activeElytra.selectedSlotRestored = true;
     }
 
+    private void stopSprinting() {
+        if (mc.player != null && mc.player.isSprinting()) {
+            mc.player.setSprinting(false);
+        }
+    }
+
+    private void restoreChestSlotAfterInputClear() {
+        stopSprinting();
+        restoreSelectedSlot();
+        restoreChestSlot();
+    }
+
     private void restoreChestSlot() {
         if (mc.screen != null || activeElytra == null) {
             return;
@@ -328,6 +352,7 @@ public class AutoElytra extends Module {
         GLIDE_RELEASE,
         GLIDE_PRESS,
         WAIT_GLIDE,
-        FLIGHT
+        FLIGHT,
+        RESTORE_CHEST
     }
 }

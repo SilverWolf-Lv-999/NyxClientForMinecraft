@@ -4,6 +4,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.client.ClickGui;
 import io.github.seraphina.nyx.client.module.client.Client;
+import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
 import io.github.seraphina.nyx.client.module.combat.*;
 import io.github.seraphina.nyx.client.module.movement.AutoJump;
 import io.github.seraphina.nyx.client.module.movement.BHop;
@@ -35,7 +36,8 @@ public final class ModuleManager {
         //Client
         registerModule(
                 ClickGui.INSTANCE,
-                Client.INSTANCE
+                Client.INSTANCE,
+                NoChattingAllowed.INSTANCE
         );
         //Combat
         registerModule(
