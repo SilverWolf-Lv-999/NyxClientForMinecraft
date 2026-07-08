@@ -2,15 +2,12 @@ package io.github.seraphina.nyx.client.module.player;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.KeyPressEvent;
+import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
-import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
-import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
-import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
@@ -26,7 +23,8 @@ public class AutoElytra extends Module {
 
     private static final long DOUBLE_JUMP_WINDOW_MS = 300L;
     private static final int EQUIP_CONFIRM_TIMEOUT_TICKS = 40;
-    private static final int START_FALL_FLYING_RETRY_TICKS = 5;
+    private static final int START_FALL_FLYING_TIMEOUT_TICKS = 40;
+    private static final int RESTORE_SELECTED_SLOT_DELAY_TICKS = 2;
 
     private long lastJumpPressTime;
     private ActiveElytra activeElytra;
@@ -50,7 +48,34 @@ public class AutoElytra extends Module {
         }
 
         lastJumpPressTime = 0L;
-        equipElytraFromHotbar();
+        queueElytraFromHotbar();
+    }
+
+    @EventTarget
+    public void onMoveInput(MoveInputEvent event) {
+        if (activeElytra == null) {
+            return;
+        }
+
+        switch (activeElytra.stage) {
+            case WAIT_EQUIP -> event.setJump(false);
+            case GROUND_JUMP_RELEASE -> {
+                event.setJump(false);
+                activeElytra.stage = Stage.GROUND_JUMP_PRESS;
+            }
+            case GROUND_JUMP_PRESS -> {
+                event.setJump(true);
+                activeElytra.stage = Stage.WAIT_AIRBORNE;
+            }
+            case GLIDE_RELEASE -> {
+                event.setJump(false);
+                activeElytra.stage = Stage.GLIDE_PRESS;
+            }
+            case GLIDE_PRESS -> {
+                event.setJump(true);
+                activeElytra.stage = Stage.WAIT_GLIDE;
+            }
+        }
     }
 
     @EventTarget
@@ -64,23 +89,44 @@ public class AutoElytra extends Module {
             return;
         }
 
-        if (!waitForElytraEquip()) {
+        if (mc.gameMode.getPlayerMode() != GameType.SURVIVAL) {
+            cancelActiveElytra();
             return;
         }
 
         if (!mc.player.onGround()) {
             activeElytra.hasBeenAirborne = true;
-            retryStartFallFlying();
+        }
+
+        if (mc.player.isFallFlying()) {
+            activeElytra.hasBeenAirborne = true;
+            activeElytra.stage = Stage.FLIGHT;
+            restoreSelectedSlotAfterDelay();
             return;
         }
 
-        if (activeElytra.hasBeenAirborne) {
+        if (activeElytra.confirmedEquipped && activeElytra.hasBeenAirborne && mc.player.onGround()) {
+            restoreSelectedSlot();
             restoreChestSlot();
+            return;
+        }
+
+        switch (activeElytra.stage) {
+            case USE_ELYTRA -> useQueuedElytra();
+            case WAIT_EQUIP -> {
+                if (waitForElytraEquip()) {
+                    activeElytra.stage = mc.player.onGround() ? Stage.GROUND_JUMP_RELEASE : Stage.GLIDE_RELEASE;
+                }
+            }
+            case WAIT_AIRBORNE -> waitForAirborne();
+            case WAIT_GLIDE -> retryGlideInput();
+            case FLIGHT -> restoreSelectedSlotAfterDelay();
         }
     }
 
     private boolean canRun() {
-        return mc.player != null
+        return activeElytra == null
+                && mc.player != null
                 && mc.level != null
                 && mc.gameMode != null
                 && mc.screen == null
@@ -94,7 +140,7 @@ public class AutoElytra extends Module {
         return chestStack.is(Items.ELYTRA);
     }
 
-    private void equipElytraFromHotbar() {
+    private void queueElytraFromHotbar() {
         if (mc.player == null) return;
         int elytraSlot = InventoryUtility.findHotbarSlot(Items.ELYTRA);
         int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
@@ -103,46 +149,26 @@ public class AutoElytra extends Module {
         }
 
         ItemStack originalChestStack = mc.player.getItemBySlot(EquipmentSlot.CHEST).copy();
-        activeElytra = new ActiveElytra(elytraSlot, originalChestStack, !mc.player.onGround());
-
-        if (elytraSlot != selectedSlot) {
-            mc.player.connection.send(new ServerboundSetCarriedItemPacket(elytraSlot));
-        }
-
-        try (BlockStatePredictionHandler prediction = mc.level.getBlockStatePredictionHandler().startPredicting()) {
-            mc.player.connection.send(new ServerboundUseItemPacket(
-                    InteractionHand.MAIN_HAND,
-                    prediction.currentSequence(),
-                    mc.player.getYRot(),
-                    mc.player.getXRot()
-            ));
-        }
-
-        if (elytraSlot != selectedSlot) {
-            mc.player.connection.send(new ServerboundSetCarriedItemPacket(selectedSlot));
-        }
-
-        sendStartFallFlyingPacket();
+        activeElytra = new ActiveElytra(elytraSlot, selectedSlot, originalChestStack, !mc.player.onGround());
     }
 
-    private void retryStartFallFlying() {
-        if (mc.player == null || mc.player.isFallFlying() || activeElytra.startFallFlyingRetryTicks <= 0) {
+    private void useQueuedElytra() {
+        if (mc.screen != null || activeElytra == null) {
+            cancelActiveElytra();
             return;
         }
 
-        activeElytra.startFallFlyingRetryTicks--;
-        sendStartFallFlyingPacket();
-    }
-
-    private void sendStartFallFlyingPacket() {
-        if (mc.player == null || mc.player.connection == null || mc.player.isFallFlying()) {
+        if (!InventoryUtility.selectHotbarSlot(activeElytra.elytraSlot)) {
+            cancelActiveElytra();
             return;
         }
 
-        mc.player.connection.send(new ServerboundPlayerCommandPacket(
-                mc.player,
-                ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
-        ));
+        mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        activeElytra.stage = Stage.WAIT_EQUIP;
+        if (isWearingElytra()) {
+            activeElytra.confirmedEquipped = true;
+            activeElytra.stage = mc.player.onGround() ? Stage.GROUND_JUMP_RELEASE : Stage.GLIDE_RELEASE;
+        }
     }
 
     private boolean waitForElytraEquip() {
@@ -159,8 +185,74 @@ public class AutoElytra extends Module {
             return false;
         }
 
-        activeElytra = null;
+        cancelActiveElytra();
         return false;
+    }
+
+    private void waitForAirborne() {
+        if (mc.player == null || activeElytra == null) {
+            return;
+        }
+
+        if (mc.player.onGround()) {
+            if (!tickStartFallFlyingTimeout()) {
+                cancelActiveElytra();
+            }
+            return;
+        }
+
+        activeElytra.hasBeenAirborne = true;
+        activeElytra.stage = Stage.GLIDE_RELEASE;
+    }
+
+    private void retryGlideInput() {
+        if (mc.player == null || activeElytra == null) {
+            return;
+        }
+
+        if (!isWearingElytra() || mc.player.onGround()) {
+            if (!tickStartFallFlyingTimeout()) {
+                cancelActiveElytra();
+            }
+            return;
+        }
+
+        if (tickStartFallFlyingTimeout()) {
+            activeElytra.stage = Stage.GLIDE_RELEASE;
+        } else {
+            cancelActiveElytra();
+        }
+    }
+
+    private boolean tickStartFallFlyingTimeout() {
+        return activeElytra != null && activeElytra.startFallFlyingTicks-- > 0;
+    }
+
+    private void cancelActiveElytra() {
+        restoreSelectedSlot();
+        activeElytra = null;
+    }
+
+    private void restoreSelectedSlotAfterDelay() {
+        if (activeElytra == null || activeElytra.selectedSlotRestored) {
+            return;
+        }
+
+        if (activeElytra.restoreSelectedSlotDelayTicks > 0) {
+            activeElytra.restoreSelectedSlotDelayTicks--;
+            return;
+        }
+
+        restoreSelectedSlot();
+    }
+
+    private void restoreSelectedSlot() {
+        if (activeElytra == null || activeElytra.selectedSlotRestored) {
+            return;
+        }
+
+        InventoryUtility.selectHotbarSlot(activeElytra.originalSelectedSlot);
+        activeElytra.selectedSlotRestored = true;
     }
 
     private void restoreChestSlot() {
@@ -209,16 +301,33 @@ public class AutoElytra extends Module {
 
     private static final class ActiveElytra {
         private final int elytraSlot;
+        private final int originalSelectedSlot;
         private final ItemStack originalChestStack;
+        private Stage stage = Stage.USE_ELYTRA;
         private boolean hasBeenAirborne;
         private boolean confirmedEquipped;
+        private boolean selectedSlotRestored;
         private int equipConfirmTicks = EQUIP_CONFIRM_TIMEOUT_TICKS;
-        private int startFallFlyingRetryTicks = START_FALL_FLYING_RETRY_TICKS;
+        private int startFallFlyingTicks = START_FALL_FLYING_TIMEOUT_TICKS;
+        private int restoreSelectedSlotDelayTicks = RESTORE_SELECTED_SLOT_DELAY_TICKS;
 
-        private ActiveElytra(int elytraSlot, ItemStack originalChestStack, boolean hasBeenAirborne) {
+        private ActiveElytra(int elytraSlot, int originalSelectedSlot, ItemStack originalChestStack, boolean hasBeenAirborne) {
             this.elytraSlot = elytraSlot;
+            this.originalSelectedSlot = originalSelectedSlot;
             this.originalChestStack = originalChestStack;
             this.hasBeenAirborne = hasBeenAirborne;
         }
+    }
+
+    private enum Stage {
+        USE_ELYTRA,
+        WAIT_EQUIP,
+        GROUND_JUMP_RELEASE,
+        GROUND_JUMP_PRESS,
+        WAIT_AIRBORNE,
+        GLIDE_RELEASE,
+        GLIDE_PRESS,
+        WAIT_GLIDE,
+        FLIGHT
     }
 }
