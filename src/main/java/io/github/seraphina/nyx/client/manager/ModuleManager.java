@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.client.ClickGui;
 import io.github.seraphina.nyx.client.module.client.Client;
 import io.github.seraphina.nyx.client.module.combat.KillAura;
+import io.github.seraphina.nyx.client.module.combat.Reach;
 import io.github.seraphina.nyx.client.module.movement.AutoJump;
 import io.github.seraphina.nyx.client.module.movement.BHop;
 import io.github.seraphina.nyx.client.module.movement.Scaffold;
@@ -40,7 +41,8 @@ public final class ModuleManager {
         );
         //Combat
         registerModule(
-                KillAura.INSTANCE
+                KillAura.INSTANCE,
+                Reach.INSTANCE
         );
         //Movement
         registerModule(
