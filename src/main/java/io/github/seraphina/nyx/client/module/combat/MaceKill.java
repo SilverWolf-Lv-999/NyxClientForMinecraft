@@ -4,6 +4,7 @@ import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
+import io.github.seraphina.nyx.client.events.impl.TravelEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
@@ -12,11 +13,10 @@ import io.github.seraphina.nyx.client.utility.DebugUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
+import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
-import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -31,52 +31,24 @@ import java.util.Locale;
 public class MaceKill extends Module {
     public static final MaceKill INSTANCE = new MaceKill();
 
-    private static final double GRAVITY = 0.08D;
-    private static final double DRAG = 0.98D;
-    private static final int STATUS_INTERVAL_TICKS = 20;
+    private static final int TICKS_PER_SECOND = 20;
 
     public final DoubleValue range = ValueBuild.doubleValue("range", 4.5D, 1.0D, 8.0D, 0.1D, this);
-    public final IntValue packets = ValueBuild.intSetting("packets", 5, 1, 20, 1, this);
+    public final IntValue cps = ValueBuild.intSetting("cps", 20, 1, 20, 1, this);
+    public final BoolValue autodisble = ValueBuild.boolSetting("auto disable", false, this);
 
-    private boolean sendingMovePacket;
-    private boolean skipDisableAttack;
-    private double spoofedY;
-    private double fallVelocity;
-    private double spoofedFallDistance;
-    private int sentPackets;
-    private int statusTicks;
+    private int attackProgress;
 
     @Override
     public void onEnable() {
-        skipDisableAttack = false;
-        resetFallState();
-        DebugUtility.msg("MaceKill enabled: range=", format(range.getValue()), ", packets=", packets.getValue());
+        attackProgress = TICKS_PER_SECOND;
+        DebugUtility.msg("MaceKill enabled: range=", format(range.getValue()), ", cps=", cps.getValue());
     }
 
     @Override
     public void onDisable() {
-        if (skipDisableAttack) {
-            skipDisableAttack = false;
-            DebugUtility.msg("MaceKill disabled: server corrected position");
-            resetFallState();
-            return;
-        }
-
-        if (mc.player == null || mc.level == null || mc.gameMode == null) {
-            DebugUtility.msg("MaceKill disabled: player unavailable");
-            resetFallState();
-            return;
-        }
-
-        LivingEntity target = findTarget(range.getValue());
-        if (target == null) {
-            DebugUtility.msg("MaceKill disabled: no target within ", format(range.getValue()), " blocks");
-            resetFallState();
-            return;
-        }
-
-        attackTarget(target);
-        resetFallState();
+        attackProgress = 0;
+        DebugUtility.msg("MaceKill disabled");
     }
 
     @EventTarget
@@ -86,87 +58,56 @@ public class MaceKill extends Module {
     }
 
     @EventTarget
-    public void onPacketSend(PacketEvent.Send event) {
-        if (!sendingMovePacket && event.getPacket() instanceof ServerboundMovePlayerPacket) {
-            event.setCancelled(true);
-        }
-    }
-
-    @EventTarget
     public void onPacketReceive(PacketEvent.Receive event) {
         if (event.getPacket() instanceof ClientboundPlayerPositionPacket) {
-            skipDisableAttack = true;
+            DebugUtility.msg("MaceKill disabled: server corrected position");
             setEnabled(false);
-            return;
-        }
-
-        if (mc.player != null
-                && event.getPacket() instanceof ClientboundSetEntityMotionPacket packet
-                && packet.getId() == mc.player.getId()) {
-            event.setCancelled(true);
         }
     }
 
     @EventTarget
     public void onPostTick(TickEvent.Post event) {
-        if (mc.player == null || mc.level == null) {
+        if (mc.player == null || mc.level == null || mc.gameMode == null) {
+            this.setEnabled(false);
             return;
         }
 
-        if (mc.player.onGround()) {
-            resetFallState();
+        LivingEntity target = findTarget(range.getValue());
+        if (target == null) {
+            attackProgress = Math.min(attackProgress + cps.getValue(), TICKS_PER_SECOND);
             return;
         }
 
-        spoofedY = Math.min(spoofedY, mc.player.getY());
-
-        for (int i = 0; i < packets.getValue(); i++) {
-            fallVelocity = (fallVelocity - GRAVITY) * DRAG;
-            spoofedY += fallVelocity;
-            spoofedFallDistance = Math.max(spoofedFallDistance, mc.player.getY() - spoofedY);
-
-            sendMovePacket(new ServerboundMovePlayerPacket.PosRot(
-                    mc.player.getX(),
-                    spoofedY,
-                    mc.player.getZ(),
-                    mc.player.getYRot(),
-                    mc.player.getXRot(),
-                    false,
-                    mc.player.horizontalCollision
-            ));
-
-            sentPackets++;
+        attackProgress += cps.getValue();
+        if (attackProgress >= TICKS_PER_SECOND) {
+            attackProgress -= TICKS_PER_SECOND;
+            attackTarget(target);
         }
+    }
 
-        mc.player.fallDistance = Math.max(mc.player.fallDistance, (float) spoofedFallDistance);
-        sendFallStatus();
+    @EventTarget
+    public void onTravel(TravelEvent event) {
+        if (mc.player != null && mc.player.positionReminder < 19) {
+            event.setCancelled(true);
+        }
     }
 
     private void attackTarget(LivingEntity target) {
         Vector2f rotations = RotationUtility.calculate(target, true, range.getValue());
         RotationManager.INSTANCE.setRotations(rotations, 180.0D, Priority.Highest);
 
-        sendMovePacket(new ServerboundMovePlayerPacket.PosRot(
-                mc.player.getX(),
-                mc.player.getY(),
-                mc.player.getZ(),
-                rotations.x,
-                rotations.y,
-                false,
-                mc.player.horizontalCollision
-        ));
-
         mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
-
         DebugUtility.msg(
                 "MaceKill attacked ",
                 target.getName().getString(),
-                ": packets=",
-                sentPackets,
-                ", fall=",
-                format(spoofedFallDistance)
+                ": range=",
+                format(RotationUtility.getEyeDistanceToEntity(target))
         );
+        if (this.autodisble.getValue()) {
+            this.setEnabled(false);
+            DebugUtility.msg("MaceKill disabled");
+        }
     }
 
     private LivingEntity findTarget(double attackRange) {
@@ -194,40 +135,6 @@ public class MaceKill extends Module {
                 && entity.isPickable()
                 && !entity.isInvulnerable()
                 && RotationUtility.getEyeDistanceToEntity(entity) <= attackRange;
-    }
-
-    private void sendMovePacket(ServerboundMovePlayerPacket packet) {
-        if (mc.player == null || mc.player.connection == null) {
-            return;
-        }
-
-        sendingMovePacket = true;
-        try {
-            mc.player.connection.send(packet);
-        } finally {
-            sendingMovePacket = false;
-        }
-    }
-
-    private void sendFallStatus() {
-        if (sentPackets == packets.getValue()) {
-            DebugUtility.msg("MaceKill falling: packets=", sentPackets, ", fall=", format(spoofedFallDistance));
-            return;
-        }
-
-        statusTicks++;
-        if (statusTicks >= STATUS_INTERVAL_TICKS) {
-            statusTicks = 0;
-            DebugUtility.msg("MaceKill falling: packets=", sentPackets, ", fall=", format(spoofedFallDistance));
-        }
-    }
-
-    private void resetFallState() {
-        spoofedY = mc.player != null ? mc.player.getY() : 0.0D;
-        fallVelocity = 0.0D;
-        spoofedFallDistance = 0.0D;
-        sentPackets = 0;
-        statusTicks = 0;
     }
 
     private String format(double value) {
