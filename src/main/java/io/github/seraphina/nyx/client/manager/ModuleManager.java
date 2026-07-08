@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.module.movement.AutoJump;
 import io.github.seraphina.nyx.client.module.movement.BHop;
 import io.github.seraphina.nyx.client.module.movement.Scaffold;
 import io.github.seraphina.nyx.client.module.movement.Sprint;
+import io.github.seraphina.nyx.client.module.movement.Stuck;
 import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.*;
 import io.github.seraphina.nyx.client.module.visual.Animations;
@@ -51,7 +52,8 @@ public final class ModuleManager {
                 Scaffold.INSTANCE,
                 BHop.INSTANCE,
                 AutoJump.INSTANCE,
-                Sprint.INSTANCE
+                Sprint.INSTANCE,
+                Stuck.INSTANCE
         );
         //Other
         registerModule(
