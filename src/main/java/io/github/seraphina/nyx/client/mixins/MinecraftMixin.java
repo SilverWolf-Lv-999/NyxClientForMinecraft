@@ -1,5 +1,7 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import io.github.seraphina.nyx.client.NyxClient;
@@ -10,17 +12,24 @@ import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
 import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.module.combat.UseClick;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.Options;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Minecraft.class)
 public class MinecraftMixin {
+    @Shadow
+    public Options options;
+
     @Inject(method = "<init>", at = @At("TAIL"))
     public void init(CallbackInfo info) {
         NyxClient.INSTANCE.init();
@@ -42,6 +51,21 @@ public class MinecraftMixin {
         if (event.isCancelled()) {
             info.cancel();
         }
+    }
+
+    @WrapOperation(method = "handleKeybinds", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isUsingItem()Z", ordinal = 0))
+    private boolean allowClicksWhileUsingInKeybinds(LocalPlayer player, Operation<Boolean> original) {
+        return original.call(player) && !UseClick.INSTANCE.shouldProcessClicksWhileUsing(player, options.keyUse.isDown());
+    }
+
+    @WrapOperation(method = "startAttack", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isHandsBusy()Z"))
+    private boolean allowStartAttackWhileUsing(LocalPlayer player, Operation<Boolean> original) {
+        return original.call(player) && !UseClick.INSTANCE.canClickWhileUsing(player);
+    }
+
+    @WrapOperation(method = "continueAttack", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isUsingItem()Z"))
+    private boolean allowContinueAttackWhileUsing(LocalPlayer player, Operation<Boolean> original) {
+        return original.call(player) && !UseClick.INSTANCE.canClickWhileUsing(player);
     }
 
     @Inject(method = "startUseItem", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/InteractionHand;values()[Lnet/minecraft/world/InteractionHand;"), cancellable = true)
