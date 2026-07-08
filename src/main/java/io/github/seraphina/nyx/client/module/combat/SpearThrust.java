@@ -23,7 +23,6 @@ public class SpearThrust extends Module {
 
     public final DoubleValue speed = ValueBuild.doubleValue("speed", 1.0, 0.1, 10.0, 0.1, this);
 
-    private boolean charged;
     private LivingEntity thrustTarget;
 
     @Override
@@ -46,15 +45,11 @@ public class SpearThrust extends Module {
         }
 
         if (mc.player.getTicksUsingItem() < kineticWeapon.delayTicks()) {
-            charged = false;
             thrustTarget = null;
             return;
         }
 
-        if (!charged) {
-            charged = true;
-            thrustTarget = crosshairLivingTarget();
-        }
+        thrustTarget = crosshairLivingTarget();
 
         if (thrustTarget != null && thrustTarget.isAlive()) {
             MovingUtility.setMomentumToward(thrustTarget, speed.getValue());
@@ -62,8 +57,8 @@ public class SpearThrust extends Module {
     }
 
     private LivingEntity crosshairLivingTarget() {
-        float distance = mc.player.entityAttackRange().effectiveMaxRange(mc.player);
-        HitResult hitResult = PlayerUtility.raycastForEntity(mc.level, mc.player, distance, true);
+        if (mc.player == null) return null;
+        HitResult hitResult = PlayerUtility.raycastForEntity(mc.level, mc.player, 128, true);
         if (!(hitResult instanceof EntityHitResult entityHitResult)) {
             return null;
         }
@@ -86,7 +81,6 @@ public class SpearThrust extends Module {
     }
 
     private void resetThrust() {
-        charged = false;
         thrustTarget = null;
     }
 }
