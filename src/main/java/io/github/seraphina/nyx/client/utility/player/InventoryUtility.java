@@ -126,6 +126,11 @@ public final class InventoryUtility {
         return getStack(OFFHAND_SLOT);
     }
 
+    public static boolean hasCarriedStack() {
+        AbstractContainerMenu menu = currentMenu();
+        return menu != null && !menu.getCarried().isEmpty();
+    }
+
     public static ItemStack getSelectedStack() {
         Inventory inventory = inventory();
         return inventory == null ? ItemStack.EMPTY : inventory.getSelectedItem();
@@ -230,6 +235,28 @@ public final class InventoryUtility {
     public static int findSlot(Item item) {
         Objects.requireNonNull(item, "item");
         return findSlot(stack -> stack.is(item));
+    }
+
+    public static int findInventorySlot(Item item) {
+        Objects.requireNonNull(item, "item");
+        return findInventorySlot(stack -> stack.is(item));
+    }
+
+    public static int findInventorySlot(Predicate<ItemStack> predicate) {
+        Objects.requireNonNull(predicate, "predicate");
+        Inventory inventory = inventory();
+        if (inventory == null) {
+            return NOT_FOUND;
+        }
+
+        for (int slot = HOTBAR_START; slot < MAIN_INVENTORY_END; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && predicate.test(stack)) {
+                return slot;
+            }
+        }
+
+        return NOT_FOUND;
     }
 
     public static int findSlot(ItemStack target) {
@@ -455,6 +482,14 @@ public final class InventoryUtility {
 
     public static boolean moveInventorySlotToHotbar(int inventorySlot, int hotbarSlot) {
         return swapInventorySlotWithHotbar(inventorySlot, hotbarSlot);
+    }
+
+    public static boolean moveInventorySlotToOffhand(int inventorySlot) {
+        if (inventorySlot == OFFHAND_SLOT) {
+            return isValidInventorySlot(inventorySlot);
+        }
+
+        return isValidInventorySlot(inventorySlot) && swapInventorySlotWithOffhand(inventorySlot);
     }
 
     public static boolean equipFromInventorySlot(int inventorySlot) {
