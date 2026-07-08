@@ -3,7 +3,9 @@ package io.github.seraphina.nyx.client.utility.player;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 public class MovingUtility implements IMinecraft {
     public static boolean isMoving() {
@@ -41,6 +43,16 @@ public class MovingUtility implements IMinecraft {
         double y = speed * strafes[1];
         mc.player.setDeltaMovement(x, mc.player.getDeltaMovement().y, y);
         return new double[]{x, y};
+    }
+
+    public static boolean addMomentumToward(Entity target, double speed) {
+        if (mc.player == null || target == null || speed <= 0.0) return false;
+
+        Vec3 direction = target.getBoundingBox().getCenter().subtract(mc.player.getBoundingBox().getCenter());
+        if (direction.lengthSqr() < 1.0E-6) return false;
+
+        mc.player.addDeltaMovement(direction.normalize().scale(speed));
+        return true;
     }
 
     public static int forwardVal() {
