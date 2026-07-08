@@ -6,12 +6,14 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.utility.player.MovingUtility;
+import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.KineticWeapon;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 
@@ -21,34 +23,47 @@ public class SpearThrust extends Module {
 
     public final DoubleValue speed = ValueBuild.doubleValue("speed", 1.0, 0.1, 10.0, 0.1, this);
 
-    private boolean usingSpear;
+    private boolean charged;
+    private LivingEntity thrustTarget;
+
+    @Override
+    public void onDisable() {
+        resetThrust();
+    }
 
     @EventTarget
     public void onPostTick(TickEvent.Post event) {
         if (mc.player == null || mc.level == null) {
-            usingSpear = false;
+            resetThrust();
             return;
         }
 
-        boolean currentlyUsingSpear = mc.player.isUsingItem() && isSpear(mc.player.getUseItem());
-        if (!currentlyUsingSpear) {
-            usingSpear = false;
+        ItemStack useItem = mc.player.getUseItem();
+        KineticWeapon kineticWeapon = getSpearKineticWeapon(useItem);
+        if (!mc.player.isUsingItem() || kineticWeapon == null) {
+            resetThrust();
             return;
         }
 
-        if (usingSpear) {
+        if (mc.player.getTicksUsingItem() < kineticWeapon.delayTicks()) {
+            charged = false;
+            thrustTarget = null;
             return;
         }
 
-        usingSpear = true;
-        LivingEntity target = crosshairLivingTarget();
-        if (target != null) {
-            MovingUtility.addMomentumToward(target, speed.getValue());
+        if (!charged) {
+            charged = true;
+            thrustTarget = crosshairLivingTarget();
+        }
+
+        if (thrustTarget != null && thrustTarget.isAlive()) {
+            MovingUtility.setMomentumToward(thrustTarget, speed.getValue());
         }
     }
 
     private LivingEntity crosshairLivingTarget() {
-        HitResult hitResult = mc.hitResult;
+        float distance = mc.player.entityAttackRange().effectiveMaxRange(mc.player);
+        HitResult hitResult = PlayerUtility.raycastForEntity(mc.level, mc.player, distance, true);
         if (!(hitResult instanceof EntityHitResult entityHitResult)) {
             return null;
         }
@@ -61,7 +76,17 @@ public class SpearThrust extends Module {
         return null;
     }
 
-    private boolean isSpear(ItemStack stack) {
-        return stack.has(DataComponents.KINETIC_WEAPON) && stack.has(DataComponents.PIERCING_WEAPON);
+    private KineticWeapon getSpearKineticWeapon(ItemStack stack) {
+        KineticWeapon kineticWeapon = stack.get(DataComponents.KINETIC_WEAPON);
+        if (kineticWeapon == null || !stack.has(DataComponents.PIERCING_WEAPON)) {
+            return null;
+        }
+
+        return kineticWeapon;
+    }
+
+    private void resetThrust() {
+        charged = false;
+        thrustTarget = null;
     }
 }

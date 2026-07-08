@@ -45,13 +45,13 @@ public class MovingUtility implements IMinecraft {
         return new double[]{x, y};
     }
 
-    public static boolean addMomentumToward(Entity target, double speed) {
+    public static boolean setMomentumToward(Entity target, double speed) {
         if (mc.player == null || target == null || speed <= 0.0) return false;
 
         Vec3 direction = target.getBoundingBox().getCenter().subtract(mc.player.getBoundingBox().getCenter());
         if (direction.lengthSqr() < 1.0E-6) return false;
 
-        mc.player.addDeltaMovement(direction.normalize().scale(speed));
+        mc.player.setDeltaMovement(direction.normalize().scale(speed));
         return true;
     }
 
