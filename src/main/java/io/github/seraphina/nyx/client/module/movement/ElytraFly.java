@@ -29,6 +29,8 @@ public class ElytraFly extends Module {
 
     private static final int GRIM_FALL_FLYING_READY_TICKS = 3;
     private static final int GRIM_RESTORE_SLOT_DELAY_TICKS = 1;
+    private static final double NORMAL_ASCEND_ACCELERATION = 0.08D;
+    private static final double NORMAL_DESCEND_ACCELERATION = 0.04D;
 
     public final BoolValue onlyOnPreeSpace = ValueBuild.boolSetting("on space press", false, this);
 
@@ -40,9 +42,12 @@ public class ElytraFly extends Module {
 
     public final DoubleValue downFlySpeed = ValueBuild.doubleSetting("down speed", 0.2, 0.1, 1.0, 0.1, ()-> flyType.getValue() == FlyType.NORMAL && shouldDown.getValue(), this);
 
+    public final IntValue startPacketDelay = ValueBuild.intSetting("start packet delay", 5, 2, 40, 1, ()-> flyType.getValue() == FlyType.NORMAL, this);
+
     public final IntValue fireworkDelay = ValueBuild.intSetting("firework delay", 30, 1, 100, 1, ()-> flyType.getValue() == FlyType.GRIM, this);
 
     private boolean activeFallFlight;
+    private int startPacketDelayTicks;
     private int fireworkDelayTicks;
     private int fallFlyingTicks;
     private int lastFallFlyingTick = -1;
@@ -138,6 +143,7 @@ public class ElytraFly extends Module {
 
     private void resetFlightState() {
         activeFallFlight = false;
+        startPacketDelayTicks = 0;
         fireworkDelayTicks = 0;
         fallFlyingTicks = 0;
         lastFallFlyingTick = -1;
@@ -155,8 +161,9 @@ public class ElytraFly extends Module {
 
     private void applyNormalVelocity() {
         Vec3 direction = horizontalDirection();
+        Vec3 velocity = mc.player.getDeltaMovement();
         double speed = flySpeed.getValue();
-        mc.player.setDeltaMovement(direction.x * speed, verticalVelocity(), direction.z * speed);
+        mc.player.setDeltaMovement(direction.x * speed, verticalVelocity(velocity.y), direction.z * speed);
     }
 
     private Vec3 horizontalDirection() {
@@ -173,27 +180,37 @@ public class ElytraFly extends Module {
         return direction.lengthSqr() > 1.0E-6D ? direction.normalize() : Vec3.ZERO;
     }
 
-    private double verticalVelocity() {
+    private double verticalVelocity(double currentVelocity) {
         if (mc.options.keyJump.isDown()) {
-            return flySpeed.getValue();
+            double targetVelocity = flySpeed.getValue();
+            return currentVelocity < targetVelocity ? currentVelocity + NORMAL_ASCEND_ACCELERATION : currentVelocity;
         }
 
         if (mc.options.keyShift.isDown() || shouldDown.getValue()) {
-            return -downFlySpeed.getValue();
+            double targetVelocity = -downFlySpeed.getValue();
+            return currentVelocity > targetVelocity ? currentVelocity - NORMAL_DESCEND_ACCELERATION : currentVelocity;
         }
 
-        return 0.0D;
+        return currentVelocity;
     }
 
     private void keepFallFlying() {
+        if (mc.player.isFallFlying()) {
+            return;
+        }
+
+        if (startPacketDelayTicks > 0) {
+            startPacketDelayTicks--;
+            return;
+        }
+
         mc.player.connection.send(new ServerboundPlayerCommandPacket(
                 mc.player,
                 ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
         ));
+        startPacketDelayTicks = startPacketDelay.getValue();
 
-        if (!mc.player.isFallFlying()) {
-            mc.player.startFallFlying();
-        }
+        mc.player.startFallFlying();
     }
 
     private void useFireworkRocket() {

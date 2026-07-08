@@ -51,7 +51,8 @@ public final class ModuleManager {
                 AutoJump.INSTANCE,
                 Sprint.INSTANCE,
                 Stuck.INSTANCE,
-                ElytraFly.INSTANCE
+                ElytraFly.INSTANCE,
+                FastFall.INSTANCE
         );
         //Other
         registerModule(
@@ -63,7 +64,8 @@ public final class ModuleManager {
                 FastPlace.INSTANCE,
                 NoJumpDelay.INSTANCE,
                 AutoElytra.INSTANCE,
-                AutoTotem.INSTANCE
+                AutoTotem.INSTANCE,
+                AutoWindCharge.INSTANCE
         );
         //Visual
         registerModule(
