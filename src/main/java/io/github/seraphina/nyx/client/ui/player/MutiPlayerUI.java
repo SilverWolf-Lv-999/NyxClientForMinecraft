@@ -684,7 +684,7 @@ public final class MutiPlayerUI extends Screen {
         boolean backFace = Render2DUtility.isVerticalFlipBackFace(degrees);
         boolean canBlurSurface = flipProgress <= 0.001F || flipProgress >= 0.999F;
         float faceAlpha = easeOutCubic(clamp((projectionScale - FLIP_EDGE_MIN_SCALE) / (1.0F - FLIP_EDGE_MIN_SCALE), 0.0F, 1.0F));
-        Render2DUtility.withVerticalFlip(degrees, panel.centerX(), panel.centerY(), FLIP_EDGE_MIN_SCALE, () -> {
+        Render2DUtility.withVerticalPerspectiveFlip(degrees, panel.centerX(), panel.centerY(), panel.width, FLIP_EDGE_MIN_SCALE, () -> {
             renderPanelSurface(panel, canBlurSurface);
             renderFlipShade(panel, degrees);
             if (backFace) {

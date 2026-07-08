@@ -130,13 +130,15 @@ public final class FontRenderer implements AutoCloseable {
             }
 
             ensureTexture();
+            Render2DUtility.VertexProjector projector = Render2DUtility.currentVertexProjector();
             graphics.submitGuiElementRenderState(new FontTextRenderState(
                 TextureSetup.singleTexture(texture.getTextureView(), fontSampler()),
                 new Matrix3x2f(graphics.pose()),
                 layout.quads(),
                 color,
                 graphics.peekScissorStack(),
-                layout.bounds()
+                layout.bounds(),
+                projector
             ));
         }
     }
@@ -427,14 +429,17 @@ public final class FontRenderer implements AutoCloseable {
         return text != null && !text.isEmpty() && ((color >>> 24) & 0xFF) != 0;
     }
 
-    private static ScreenRectangle boundsFor(Bounds bounds, Matrix3x2f pose, ScreenRectangle scissorArea) {
-        ScreenRectangle rectangle = new ScreenRectangle(
-            floor(bounds.minX),
-            floor(bounds.minY),
-            Math.max(1, ceil(bounds.maxX - bounds.minX)),
-            Math.max(1, ceil(bounds.maxY - bounds.minY))
-        ).transformMaxBounds(pose);
-        return scissorArea == null ? rectangle : scissorArea.intersection(rectangle);
+    private static ScreenRectangle boundsFor(Bounds bounds, Matrix3x2f pose, ScreenRectangle scissorArea,
+                                             Render2DUtility.VertexProjector projector) {
+        return Render2DUtility.boundsForProjectedRect(
+            bounds.minX,
+            bounds.minY,
+            bounds.maxX,
+            bounds.maxY,
+            pose,
+            projector,
+            scissorArea
+        );
     }
 
     private static int floor(float value) {
@@ -470,11 +475,20 @@ public final class FontRenderer implements AutoCloseable {
         GlyphQuad[] quads,
         int color,
         ScreenRectangle scissorArea,
+        Render2DUtility.VertexProjector projector,
         ScreenRectangle bounds
     ) implements GuiElementRenderState {
         private FontTextRenderState(TextureSetup textureSetup, Matrix3x2f pose, GlyphQuad[] quads, int color,
-                                    ScreenRectangle scissorArea, Bounds bounds) {
-            this(textureSetup, pose, quads, color, scissorArea, bounds == null ? null : boundsFor(bounds, pose, scissorArea));
+                                    ScreenRectangle scissorArea, Bounds bounds, Render2DUtility.VertexProjector projector) {
+            this(
+                textureSetup,
+                pose,
+                quads,
+                color,
+                scissorArea,
+                projector,
+                bounds == null ? null : boundsFor(bounds, pose, scissorArea, projector)
+            );
         }
 
         @Override
@@ -485,10 +499,10 @@ public final class FontRenderer implements AutoCloseable {
         @Override
         public void buildVertices(VertexConsumer consumer) {
             for (GlyphQuad quad : quads) {
-                consumer.addVertexWith2DPose(pose, quad.x0, quad.y0).setUv(quad.u0, quad.v0).setColor(color);
-                consumer.addVertexWith2DPose(pose, quad.x0, quad.y1).setUv(quad.u0, quad.v1).setColor(color);
-                consumer.addVertexWith2DPose(pose, quad.x1, quad.y1).setUv(quad.u1, quad.v1).setColor(color);
-                consumer.addVertexWith2DPose(pose, quad.x1, quad.y0).setUv(quad.u1, quad.v0).setColor(color);
+                Render2DUtility.addVertexWithProjection(consumer, pose, projector, quad.x0, quad.y0).setUv(quad.u0, quad.v0).setColor(color);
+                Render2DUtility.addVertexWithProjection(consumer, pose, projector, quad.x0, quad.y1).setUv(quad.u0, quad.v1).setColor(color);
+                Render2DUtility.addVertexWithProjection(consumer, pose, projector, quad.x1, quad.y1).setUv(quad.u1, quad.v1).setColor(color);
+                Render2DUtility.addVertexWithProjection(consumer, pose, projector, quad.x1, quad.y0).setUv(quad.u1, quad.v0).setColor(color);
             }
         }
     }

@@ -45,6 +45,8 @@ public final class Render2DUtility {
     private static final float ANTIALIAS_PIXELS = 1.25F;
     private static final float MAX_GAUSSIAN_BLUR_RADIUS = 32.0F;
     private static final float MAX_BLOOM_RADIUS = 64.0F;
+    private static final float VERTICAL_FLIP_CAMERA_DISTANCE_MULTIPLIER = 4.5F;
+    private static final float VERTICAL_FLIP_MIN_CAMERA_DISTANCE = 720.0F;
     private static final float SKIN_HEAD_U = 8.0F;
     private static final float SKIN_HEAD_V = 8.0F;
     private static final float SKIN_HAT_U = 40.0F;
@@ -61,6 +63,8 @@ public final class Render2DUtility {
         .withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.TRIANGLE_STRIP)
         .build();
     private static final ThreadLocal<GuiGraphics> CURRENT_GRAPHICS = new ThreadLocal<>();
+    private static final ThreadLocal<VertexProjector> CURRENT_VERTEX_PROJECTOR = new ThreadLocal<>();
+    private static final Matrix3x2f IDENTITY_POSE = new Matrix3x2f();
     private static final Map<BlurCacheKey, BlurTarget> GAUSSIAN_BLUR_CACHE = new HashMap<>();
     private static final Map<BloomCacheKey, BlurTarget> BLOOM_CACHE = new HashMap<>();
     private static BlurTarget gaussianBlurScratch;
@@ -68,6 +72,12 @@ public final class Render2DUtility {
     private static int bloomVao;
 
     private Render2DUtility() {
+    }
+
+    public interface VertexProjector {
+        float projectX(float x, float y);
+
+        float projectY(float x, float y);
     }
 
     public static void withGuiGraphics(GuiGraphics graphics, Runnable action) {
@@ -95,6 +105,11 @@ public final class Render2DUtility {
 
     public static GuiGraphics currentGuiGraphics() {
         return currentGraphics();
+    }
+
+    @Nullable
+    public static VertexProjector currentVertexProjector() {
+        return CURRENT_VERTEX_PROJECTOR.get();
     }
 
     public static int rgb(int red, int green, int blue) {
@@ -142,6 +157,7 @@ public final class Render2DUtility {
         }
 
         GuiGraphics graphics = currentGraphics();
+        VertexProjector projector = currentVertexProjector();
         graphics.submitGuiElementRenderState(new TextureRenderState(
             RenderPipelines.GUI_TEXTURED,
             TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(filterMode)),
@@ -155,7 +171,8 @@ public final class Render2DUtility {
             clamp01(u1),
             clamp01(v1),
             color,
-            graphics.peekScissorStack()
+            graphics.peekScissorStack(),
+            projector
         ));
     }
 
@@ -978,6 +995,29 @@ public final class Render2DUtility {
         withScale(Math.max(Math.max(0.0F, minScale), verticalFlipScale(degrees)), 1.0F, pivotX, pivotY, action);
     }
 
+    public static void withVerticalPerspectiveFlip(float degrees, float pivotX, float pivotY, float width, float minScale, Runnable action) {
+        Objects.requireNonNull(action, "action");
+
+        float radians = (float)Math.toRadians(degrees);
+        float horizontalScale = Math.max(Math.max(0.0F, minScale), verticalFlipScale(degrees));
+        float depthScale = (float)Math.sin(radians);
+        float cameraDistance = Math.max(
+            Math.max(1.0F, width) * VERTICAL_FLIP_CAMERA_DISTANCE_MULTIPLIER,
+            VERTICAL_FLIP_MIN_CAMERA_DISTANCE
+        );
+        VertexProjector previous = CURRENT_VERTEX_PROJECTOR.get();
+        CURRENT_VERTEX_PROJECTOR.set(new VerticalFlipProjector(pivotX, pivotY, horizontalScale, depthScale, cameraDistance));
+        try {
+            action.run();
+        } finally {
+            if (previous == null) {
+                CURRENT_VERTEX_PROJECTOR.remove();
+            } else {
+                CURRENT_VERTEX_PROJECTOR.set(previous);
+            }
+        }
+    }
+
     public static float verticalFlipScale(float degrees) {
         return Math.abs((float)Math.cos(Math.toRadians(degrees)));
     }
@@ -1004,8 +1044,70 @@ public final class Render2DUtility {
         }
     }
 
+    public static VertexConsumer addVertexWithProjection(VertexConsumer consumer, Matrix3x2f pose,
+                                                         @Nullable VertexProjector projector, float x, float y) {
+        Objects.requireNonNull(consumer, "consumer");
+        Objects.requireNonNull(pose, "pose");
+        if (projector == null) {
+            return consumer.addVertexWith2DPose(pose, x, y);
+        }
+
+        float transformedX = transformX(pose, x, y);
+        float transformedY = transformY(pose, x, y);
+        return consumer.addVertexWith2DPose(
+            IDENTITY_POSE,
+            projector.projectX(transformedX, transformedY),
+            projector.projectY(transformedX, transformedY)
+        );
+    }
+
+    @Nullable
+    public static ScreenRectangle boundsForProjectedRect(float x0, float y0, float x1, float y1, Matrix3x2f pose,
+                                                         @Nullable VertexProjector projector, @Nullable ScreenRectangle scissorArea) {
+        return boundsForProjectedPoints(new float[] {
+            x0, y0,
+            x0, y1,
+            x1, y1,
+            x1, y0
+        }, pose, projector, scissorArea);
+    }
+
+    @Nullable
+    public static ScreenRectangle boundsForProjectedPoints(float[] points, Matrix3x2f pose,
+                                                           @Nullable VertexProjector projector, @Nullable ScreenRectangle scissorArea) {
+        Objects.requireNonNull(points, "points");
+        Objects.requireNonNull(pose, "pose");
+        if (points.length < 2) {
+            return null;
+        }
+
+        float minX = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        for (int i = 0; i + 1 < points.length; i += 2) {
+            float transformedX = transformX(pose, points[i], points[i + 1]);
+            float transformedY = transformY(pose, points[i], points[i + 1]);
+            float x = projector == null ? transformedX : projector.projectX(transformedX, transformedY);
+            float y = projector == null ? transformedY : projector.projectY(transformedX, transformedY);
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+
+        ScreenRectangle bounds = new ScreenRectangle(
+            floor(minX),
+            floor(minY),
+            Math.max(1, ceil(maxX - minX)),
+            Math.max(1, ceil(maxY - minY))
+        );
+        return scissorArea != null ? scissorArea.intersection(bounds) : bounds;
+    }
+
     private static void submitQuad(float x0, float y0, float x1, float y1, int topLeft, int topRight, int bottomRight, int bottomLeft) {
         GuiGraphics graphics = currentGraphics();
+        VertexProjector projector = currentVertexProjector();
         graphics.submitGuiElementRenderState(new QuadRenderState(
             RenderPipelines.GUI,
             TextureSetup.noTexture(),
@@ -1018,7 +1120,8 @@ public final class Render2DUtility {
             topRight,
             bottomRight,
             bottomLeft,
-            graphics.peekScissorStack()
+            graphics.peekScissorStack(),
+            projector
         ));
     }
 
@@ -1032,13 +1135,15 @@ public final class Render2DUtility {
         }
 
         GuiGraphics graphics = currentGraphics();
+        VertexProjector projector = currentVertexProjector();
         graphics.submitGuiElementRenderState(new FanRenderState(
             RenderPipelines.DEBUG_TRIANGLE_FAN,
             TextureSetup.noTexture(),
             new Matrix3x2f(graphics.pose()),
             points,
             colors,
-            graphics.peekScissorStack()
+            graphics.peekScissorStack(),
+            projector
         ));
     }
 
@@ -1052,13 +1157,15 @@ public final class Render2DUtility {
         }
 
         GuiGraphics graphics = currentGraphics();
+        VertexProjector projector = currentVertexProjector();
         graphics.submitGuiElementRenderState(new StripRenderState(
             GUI_TRIANGLE_STRIP,
             TextureSetup.noTexture(),
             new Matrix3x2f(graphics.pose()),
             points,
             colors,
-            graphics.peekScissorStack()
+            graphics.peekScissorStack(),
+            projector
         ));
     }
 
@@ -1068,6 +1175,7 @@ public final class Render2DUtility {
         }
 
         GuiGraphics graphics = currentGraphics();
+        VertexProjector projector = currentVertexProjector();
         graphics.submitGuiElementRenderState(new TexturedFanRenderState(
             GUI_TEXTURED_TRIANGLE_FAN,
             TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(filterMode)),
@@ -1075,7 +1183,8 @@ public final class Render2DUtility {
             points,
             uvs,
             color,
-            graphics.peekScissorStack()
+            graphics.peekScissorStack(),
+            projector
         ));
     }
 
@@ -1822,6 +1931,14 @@ public final class Render2DUtility {
         return (int)Math.ceil(value);
     }
 
+    private static float transformX(Matrix3x2f pose, float x, float y) {
+        return pose.m00() * x + pose.m10() * y + pose.m20();
+    }
+
+    private static float transformY(Matrix3x2f pose, float x, float y) {
+        return pose.m01() * x + pose.m11() * y + pose.m21();
+    }
+
     private static void setCapability(int capability, boolean enabled) {
         if (enabled) {
             GL11.glEnable(capability);
@@ -1840,35 +1957,24 @@ public final class Render2DUtility {
 
     @Nullable
     private static ScreenRectangle boundsFor(float[] points, Matrix3x2f pose, @Nullable ScreenRectangle scissorArea) {
-        if (points.length < 2) {
-            return null;
-        }
+        return boundsFor(points, pose, null, scissorArea);
+    }
 
-        float minX = points[0];
-        float maxX = points[0];
-        float minY = points[1];
-        float maxY = points[1];
-        for (int i = 2; i < points.length; i += 2) {
-            minX = Math.min(minX, points[i]);
-            maxX = Math.max(maxX, points[i]);
-            minY = Math.min(minY, points[i + 1]);
-            maxY = Math.max(maxY, points[i + 1]);
-        }
-
-        ScreenRectangle bounds = new ScreenRectangle(floor(minX), floor(minY), Math.max(1, ceil(maxX - minX)), Math.max(1, ceil(maxY - minY)))
-            .transformMaxBounds(pose);
-        return scissorArea != null ? scissorArea.intersection(bounds) : bounds;
+    @Nullable
+    private static ScreenRectangle boundsFor(float[] points, Matrix3x2f pose, @Nullable VertexProjector projector,
+                                             @Nullable ScreenRectangle scissorArea) {
+        return boundsForProjectedPoints(points, pose, projector, scissorArea);
     }
 
     @Nullable
     private static ScreenRectangle boundsFor(float x0, float y0, float x1, float y1, Matrix3x2f pose, @Nullable ScreenRectangle scissorArea) {
-        float minX = Math.min(x0, x1);
-        float maxX = Math.max(x0, x1);
-        float minY = Math.min(y0, y1);
-        float maxY = Math.max(y0, y1);
-        ScreenRectangle bounds = new ScreenRectangle(floor(minX), floor(minY), Math.max(1, ceil(maxX - minX)), Math.max(1, ceil(maxY - minY)))
-            .transformMaxBounds(pose);
-        return scissorArea != null ? scissorArea.intersection(bounds) : bounds;
+        return boundsFor(x0, y0, x1, y1, pose, null, scissorArea);
+    }
+
+    @Nullable
+    private static ScreenRectangle boundsFor(float x0, float y0, float x1, float y1, Matrix3x2f pose,
+                                             @Nullable VertexProjector projector, @Nullable ScreenRectangle scissorArea) {
+        return boundsForProjectedRect(x0, y0, x1, y1, pose, projector, scissorArea);
     }
 
     private record QuadRenderState(
@@ -1884,10 +1990,12 @@ public final class Render2DUtility {
         int bottomRight,
         int bottomLeft,
         @Nullable ScreenRectangle scissorArea,
+        @Nullable VertexProjector projector,
         @Nullable ScreenRectangle bounds
     ) implements GuiElementRenderState {
         private QuadRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float x0, float y0, float x1, float y1,
-                                int topLeft, int topRight, int bottomRight, int bottomLeft, @Nullable ScreenRectangle scissorArea) {
+                                int topLeft, int topRight, int bottomRight, int bottomLeft, @Nullable ScreenRectangle scissorArea,
+                                @Nullable VertexProjector projector) {
             this(
                 pipeline,
                 textureSetup,
@@ -1901,16 +2009,17 @@ public final class Render2DUtility {
                 bottomRight,
                 bottomLeft,
                 scissorArea,
-                boundsFor(x0, y0, x1, y1, pose, scissorArea)
+                projector,
+                boundsFor(x0, y0, x1, y1, pose, projector, scissorArea)
             );
         }
 
         @Override
         public void buildVertices(VertexConsumer consumer) {
-            consumer.addVertexWith2DPose(this.pose, this.x0, this.y0).setColor(this.topLeft);
-            consumer.addVertexWith2DPose(this.pose, this.x0, this.y1).setColor(this.bottomLeft);
-            consumer.addVertexWith2DPose(this.pose, this.x1, this.y1).setColor(this.bottomRight);
-            consumer.addVertexWith2DPose(this.pose, this.x1, this.y0).setColor(this.topRight);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x0, this.y0).setColor(this.topLeft);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x0, this.y1).setColor(this.bottomLeft);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x1, this.y1).setColor(this.bottomRight);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x1, this.y0).setColor(this.topRight);
         }
     }
 
@@ -1928,19 +2037,37 @@ public final class Render2DUtility {
         float v1,
         int color,
         @Nullable ScreenRectangle scissorArea,
+        @Nullable VertexProjector projector,
         @Nullable ScreenRectangle bounds
     ) implements GuiElementRenderState {
         private TextureRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float x0, float y0, float x1, float y1,
-                                   float u0, float v0, float u1, float v1, int color, @Nullable ScreenRectangle scissorArea) {
-            this(pipeline, textureSetup, pose, x0, y0, x1, y1, u0, v0, u1, v1, color, scissorArea, boundsFor(x0, y0, x1, y1, pose, scissorArea));
+                                   float u0, float v0, float u1, float v1, int color, @Nullable ScreenRectangle scissorArea,
+                                   @Nullable VertexProjector projector) {
+            this(
+                pipeline,
+                textureSetup,
+                pose,
+                x0,
+                y0,
+                x1,
+                y1,
+                u0,
+                v0,
+                u1,
+                v1,
+                color,
+                scissorArea,
+                projector,
+                boundsFor(x0, y0, x1, y1, pose, projector, scissorArea)
+            );
         }
 
         @Override
         public void buildVertices(VertexConsumer consumer) {
-            consumer.addVertexWith2DPose(this.pose, this.x0, this.y0).setUv(this.u0, this.v0).setColor(this.color);
-            consumer.addVertexWith2DPose(this.pose, this.x0, this.y1).setUv(this.u0, this.v1).setColor(this.color);
-            consumer.addVertexWith2DPose(this.pose, this.x1, this.y1).setUv(this.u1, this.v1).setColor(this.color);
-            consumer.addVertexWith2DPose(this.pose, this.x1, this.y0).setUv(this.u1, this.v0).setColor(this.color);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x0, this.y0).setUv(this.u0, this.v0).setColor(this.color);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x0, this.y1).setUv(this.u0, this.v1).setColor(this.color);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x1, this.y1).setUv(this.u1, this.v1).setColor(this.color);
+            addVertexWithProjection(consumer, this.pose, this.projector, this.x1, this.y0).setUv(this.u1, this.v0).setColor(this.color);
         }
     }
 
@@ -1951,17 +2078,18 @@ public final class Render2DUtility {
         float[] points,
         int[] colors,
         @Nullable ScreenRectangle scissorArea,
+        @Nullable VertexProjector projector,
         @Nullable ScreenRectangle bounds
     ) implements GuiElementRenderState {
         private FanRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, int[] colors,
-                               @Nullable ScreenRectangle scissorArea) {
-            this(pipeline, textureSetup, pose, points, colors, scissorArea, boundsFor(points, pose, scissorArea));
+                               @Nullable ScreenRectangle scissorArea, @Nullable VertexProjector projector) {
+            this(pipeline, textureSetup, pose, points, colors, scissorArea, projector, boundsFor(points, pose, projector, scissorArea));
         }
 
         @Override
         public void buildVertices(VertexConsumer consumer) {
             for (int i = 0; i < this.points.length; i += 2) {
-                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setColor(colorAt(i / 2));
+                addVertexWithProjection(consumer, this.pose, this.projector, this.points[i], this.points[i + 1]).setColor(colorAt(i / 2));
             }
         }
 
@@ -1980,17 +2108,18 @@ public final class Render2DUtility {
         float[] points,
         int[] colors,
         @Nullable ScreenRectangle scissorArea,
+        @Nullable VertexProjector projector,
         @Nullable ScreenRectangle bounds
     ) implements GuiElementRenderState {
         private StripRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, int[] colors,
-                                 @Nullable ScreenRectangle scissorArea) {
-            this(pipeline, textureSetup, pose, points, colors, scissorArea, boundsFor(points, pose, scissorArea));
+                                 @Nullable ScreenRectangle scissorArea, @Nullable VertexProjector projector) {
+            this(pipeline, textureSetup, pose, points, colors, scissorArea, projector, boundsFor(points, pose, projector, scissorArea));
         }
 
         @Override
         public void buildVertices(VertexConsumer consumer) {
             for (int i = 0; i < this.points.length; i += 2) {
-                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setColor(colorAt(i / 2));
+                addVertexWithProjection(consumer, this.pose, this.projector, this.points[i], this.points[i + 1]).setColor(colorAt(i / 2));
             }
         }
 
@@ -2010,22 +2139,42 @@ public final class Render2DUtility {
         float[] uvs,
         int color,
         @Nullable ScreenRectangle scissorArea,
+        @Nullable VertexProjector projector,
         @Nullable ScreenRectangle bounds
     ) implements GuiElementRenderState {
         private TexturedFanRenderState(RenderPipeline pipeline, TextureSetup textureSetup, Matrix3x2f pose, float[] points, float[] uvs,
-                                       int color, @Nullable ScreenRectangle scissorArea) {
-            this(pipeline, textureSetup, pose, points, uvs, color, scissorArea, boundsFor(points, pose, scissorArea));
+                                       int color, @Nullable ScreenRectangle scissorArea, @Nullable VertexProjector projector) {
+            this(pipeline, textureSetup, pose, points, uvs, color, scissorArea, projector, boundsFor(points, pose, projector, scissorArea));
         }
 
         @Override
         public void buildVertices(VertexConsumer consumer) {
             for (int i = 0; i < this.points.length; i += 2) {
-                consumer.addVertexWith2DPose(this.pose, this.points[i], this.points[i + 1]).setUv(this.uvs[i], this.uvs[i + 1]).setColor(this.color);
+                addVertexWithProjection(consumer, this.pose, this.projector, this.points[i], this.points[i + 1]).setUv(this.uvs[i], this.uvs[i + 1]).setColor(this.color);
             }
         }
     }
 
     private record TextureUv(float u0, float v0, float u1, float v1) {
+    }
+
+    private record VerticalFlipProjector(float pivotX, float pivotY, float horizontalScale, float depthScale,
+                                         float cameraDistance) implements VertexProjector {
+        @Override
+        public float projectX(float x, float y) {
+            float perspective = perspectiveScale(x);
+            return this.pivotX + (x - this.pivotX) * this.horizontalScale * perspective;
+        }
+
+        @Override
+        public float projectY(float x, float y) {
+            return this.pivotY + (y - this.pivotY) * perspectiveScale(x);
+        }
+
+        private float perspectiveScale(float x) {
+            float depth = (x - this.pivotX) * this.depthScale;
+            return this.cameraDistance / Math.max(1.0F, this.cameraDistance + depth);
+        }
     }
 
     private record BlurCacheKey(int sourceTexture, int width, int height, int radius) {
