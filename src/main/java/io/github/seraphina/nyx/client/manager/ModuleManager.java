@@ -11,7 +11,7 @@ import io.github.seraphina.nyx.client.module.movement.Scaffold;
 import io.github.seraphina.nyx.client.module.movement.Sprint;
 import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.AutoHeal;
-import io.github.seraphina.nyx.client.module.player.DelayRemover;
+import io.github.seraphina.nyx.client.module.player.NoJumpDelay;
 import io.github.seraphina.nyx.client.module.player.FastPlace;
 import io.github.seraphina.nyx.client.module.visual.Animations;
 import io.github.seraphina.nyx.client.module.visual.Cape;
@@ -57,7 +57,7 @@ public final class ModuleManager {
         registerModule(
                 AutoHeal.INSTANCE,
                 FastPlace.INSTANCE,
-                DelayRemover.INSTANCE
+                NoJumpDelay.INSTANCE
         );
         //Visual
         registerModule(
