@@ -376,7 +376,7 @@ public final class Render2DUtility {
     }
 
     public static void drawGaussianBlurredRect(float x, float y, float width, float height, float blurRadius, int color) {
-        if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F || currentVertexProjector() != null) {
             return;
         }
 
@@ -408,7 +408,7 @@ public final class Render2DUtility {
     public static void drawRoundedGaussianBlurredRect(float x, float y, float width, float height,
                                                      float topLeftRadius, float topRightRadius, float bottomRightRadius, float bottomLeftRadius,
                                                      float blurRadius, int color) {
-        if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F || currentVertexProjector() != null) {
             return;
         }
 
@@ -438,7 +438,7 @@ public final class Render2DUtility {
     }
 
     public static void drawGaussianBlurredOval(float x, float y, float width, float height, float blurRadius, int color) {
-        if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F || currentVertexProjector() != null) {
             return;
         }
 
@@ -1013,6 +1013,22 @@ public final class Render2DUtility {
         );
         VertexProjector previous = CURRENT_VERTEX_PROJECTOR.get();
         CURRENT_VERTEX_PROJECTOR.set(new VerticalFlipProjector(pivotX, pivotY, horizontalScale, depthScale, cameraDistance));
+        try {
+            action.run();
+        } finally {
+            if (previous == null) {
+                CURRENT_VERTEX_PROJECTOR.remove();
+            } else {
+                CURRENT_VERTEX_PROJECTOR.set(previous);
+            }
+        }
+    }
+
+    public static void withHorizontalVertexReflection(float pivotX, Runnable action) {
+        Objects.requireNonNull(action, "action");
+
+        VertexProjector previous = CURRENT_VERTEX_PROJECTOR.get();
+        CURRENT_VERTEX_PROJECTOR.set(new HorizontalReflectionProjector(pivotX, previous));
         try {
             action.run();
         } finally {
@@ -2189,6 +2205,24 @@ public final class Render2DUtility {
         private float perspectiveScale(float x) {
             float depth = (x - this.pivotX) * this.depthScale;
             return this.cameraDistance / Math.max(1.0F, this.cameraDistance + depth);
+        }
+    }
+
+    private record HorizontalReflectionProjector(float pivotX, @Nullable VertexProjector delegate) implements VertexProjector {
+        @Override
+        public float projectX(float x, float y) {
+            float reflectedX = reflectedX(x);
+            return this.delegate == null ? reflectedX : this.delegate.projectX(reflectedX, y);
+        }
+
+        @Override
+        public float projectY(float x, float y) {
+            float reflectedX = reflectedX(x);
+            return this.delegate == null ? y : this.delegate.projectY(reflectedX, y);
+        }
+
+        private float reflectedX(float x) {
+            return this.pivotX * 2.0F - x;
         }
     }
 

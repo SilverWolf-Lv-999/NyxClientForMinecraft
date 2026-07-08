@@ -415,6 +415,17 @@ public final class AltManagerScreen extends Screen {
 
     private void renderFlippingPanel(PanelBounds panel, int mouseX, int mouseY) {
         float flipProgress = easeInOutCubic(panelProgress());
+        if (flipProgress <= 0.001F) {
+            renderPanelSurface(panel, true);
+            renderMainButtonGhosts(panel, 1.0F);
+            return;
+        }
+        if (flipProgress >= 0.999F) {
+            renderPanelSurface(panel, true);
+            renderAccountArea(panel, mouseX, mouseY, 1.0F);
+            return;
+        }
+
         float degrees = flipProgress * FLIP_DEGREES;
         float projectionScale = Render2DUtility.verticalFlipScale(degrees);
         if (projectionScale <= FLIP_EDGE_MIN_SCALE) {
@@ -423,13 +434,12 @@ public final class AltManagerScreen extends Screen {
         }
 
         boolean backFace = Render2DUtility.isVerticalFlipBackFace(degrees);
-        boolean canBlurSurface = flipProgress <= 0.001F || flipProgress >= 0.999F;
         float faceAlpha = easeOutCubic(clamp((projectionScale - FLIP_EDGE_MIN_SCALE) / (1.0F - FLIP_EDGE_MIN_SCALE), 0.0F, 1.0F));
         Render2DUtility.withVerticalPerspectiveFlip(degrees, panel.centerX(), panel.centerY(), panel.width, FLIP_EDGE_MIN_SCALE, () -> {
-            renderPanelSurface(panel, canBlurSurface);
+            renderPanelSurface(panel, false);
             renderFlipShade(panel, degrees);
             if (backFace) {
-                Render2DUtility.withScale(-1.0F, 1.0F, panel.centerX(), panel.centerY(), () ->
+                Render2DUtility.withHorizontalVertexReflection(panel.centerX(), () ->
                     renderAccountArea(panel, mouseX, mouseY, faceAlpha)
                 );
             } else {
