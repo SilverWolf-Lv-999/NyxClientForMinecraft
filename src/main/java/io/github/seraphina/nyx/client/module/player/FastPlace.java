@@ -27,7 +27,7 @@ public class FastPlace extends Module {
     @EventTarget
     public void onTick(TickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) return;
+        if (mc.player == null) return;
         if (onlyBlocks.getValue() && !isHasBlock(mc.player)) return;
         mc.rightClickDelay = delay.getValue();
     }
