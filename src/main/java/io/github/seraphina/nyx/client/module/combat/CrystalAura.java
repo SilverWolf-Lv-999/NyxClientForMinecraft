@@ -22,7 +22,6 @@ import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
@@ -122,9 +121,7 @@ public class CrystalAura extends Module {
     private int postUseSlotDelayTicks;
     private int postAttackPlaceDelayTicks;
     private boolean usedInteractionThisTick;
-    private boolean waitingForMovePacketAfterUse;
     private Vector2f forcedOutgoingRotations;
-    private Vector2f postUseRotations;
     private Vector2f lastOutgoingRotations;
     private Vector2f syncedRotations;
 
@@ -151,11 +148,6 @@ public class CrystalAura extends Module {
 
         tickTimers();
         tickActionDelays();
-
-        if (waitingForMovePacketAfterUse) {
-            holdPostUseRotations();
-            return;
-        }
 
         if (postUseSlotDelayTicks > 0) {
             return;
@@ -226,12 +218,7 @@ public class CrystalAura extends Module {
     public void onPacketSend(PacketEvent.Send event) {
         if (event.getPacket() instanceof ServerboundMovePlayerPacket packet) {
             ServerboundMovePlayerPacket outgoingPacket = packet;
-            if (postUseRotations != null) {
-                outgoingPacket = applyMovePacketRotations(packet, postUseRotations);
-                event.setPacket(outgoingPacket);
-                clearForcedOutgoingRotations();
-                completePostUseMoveAlignment();
-            } else if (forcedOutgoingRotations != null) {
+            if (forcedOutgoingRotations != null) {
                 outgoingPacket = applyMovePacketRotations(packet, forcedOutgoingRotations);
                 event.setPacket(outgoingPacket);
                 clearForcedOutgoingRotations();
@@ -239,17 +226,6 @@ public class CrystalAura extends Module {
 
             if (outgoingPacket.hasRotation()) {
                 updateLastOutgoingRotations(outgoingPacket);
-            }
-
-            if (waitingForMovePacketAfterUse) {
-                completePostUseMoveAlignment();
-            }
-        }
-
-        if (event.getPacket() instanceof ServerboundClientTickEndPacket) {
-            sendPendingPostUseMovePacket();
-            if (waitingForMovePacketAfterUse) {
-                event.setCancelled(true);
             }
         }
     }
@@ -783,14 +759,13 @@ public class CrystalAura extends Module {
 
         Vec3 hitVec = blockHitVec(blockPos, direction);
         Vector2f appliedRotations = applyActionRotations(RotationUtility.calculate(hitVec));
-        sendPreActionMovePacket(appliedRotations);
 
         BlockHitResult hitResult = new BlockHitResult(hitVec, direction, blockPos, false);
         InteractionResult result;
         try {
             result = useItemOnWithRotations(appliedRotations, hitResult);
         } finally {
-            beginPostUseDelay(appliedRotations);
+            beginPostUseDelay();
         }
 
         if (result.consumesAction()) {
@@ -913,20 +888,6 @@ public class CrystalAura extends Module {
         syncedRotations = new Vector2f(lastOutgoingRotations);
     }
 
-    private void sendPreActionMovePacket(Vector2f rotations) {
-        if (rotations == null || mc.player == null || mc.player.connection == null) {
-            return;
-        }
-
-        syncPlayerRotation(rotations);
-        mc.player.connection.send(new ServerboundMovePlayerPacket.Rot(
-                rotations.x,
-                rotations.y,
-                mc.player.onGround(),
-                mc.player.horizontalCollision
-        ));
-    }
-
     private ServerboundMovePlayerPacket applyMovePacketRotations(ServerboundMovePlayerPacket packet, Vector2f rotations) {
         if (rotations == null) {
             return packet;
@@ -957,38 +918,7 @@ public class CrystalAura extends Module {
     }
 
     private Vector2f activeForcedOutgoingRotations() {
-        return postUseRotations != null ? postUseRotations : forcedOutgoingRotations;
-    }
-
-    private void completePostUseMoveAlignment() {
-        waitingForMovePacketAfterUse = false;
-        postUseRotations = null;
-        postUseSlotDelayTicks = POST_USE_SLOT_DELAY_TICKS;
-    }
-
-    private void holdPostUseRotations() {
-        Vector2f rotations = activeForcedOutgoingRotations();
-        if (rotations != null) {
-            syncPlayerRotation(rotations);
-        }
-    }
-
-    private void sendPendingPostUseMovePacket() {
-        Vector2f rotations = activeForcedOutgoingRotations();
-        if (!waitingForMovePacketAfterUse
-                || rotations == null
-                || mc.player == null
-                || mc.player.connection == null) {
-            return;
-        }
-
-        syncPlayerRotation(rotations);
-        mc.player.connection.send(new ServerboundMovePlayerPacket.Rot(
-                rotations.x,
-                rotations.y,
-                mc.player.onGround(),
-                mc.player.horizontalCollision
-        ));
+        return forcedOutgoingRotations;
     }
 
     private InteractionResult useItemOnWithRotations(Vector2f rotations, BlockHitResult hitResult) {
@@ -1036,16 +966,9 @@ public class CrystalAura extends Module {
         }
     }
 
-    private void beginPostUseDelay(Vector2f rotations) {
+    private void beginPostUseDelay() {
         usedInteractionThisTick = true;
-        if (rotations == null) {
-            postUseSlotDelayTicks = POST_USE_SLOT_DELAY_TICKS;
-            return;
-        }
-
-        waitingForMovePacketAfterUse = true;
-        forcedOutgoingRotations = new Vector2f(rotations);
-        postUseRotations = new Vector2f(rotations);
+        postUseSlotDelayTicks = POST_USE_SLOT_DELAY_TICKS;
     }
 
     private boolean selectWorkHotbarSlot(int hotbarSlot, int currentSlot) {
@@ -1057,7 +980,7 @@ public class CrystalAura extends Module {
             originalHotbarSlot = currentSlot;
         }
 
-        return InventoryUtility.selectHotbarSlot(hotbarSlot);
+        return InventoryUtility.selectHotbarSlot(hotbarSlot, true);
     }
 
     private void restoreOriginalHotbarSlot() {
@@ -1067,7 +990,7 @@ public class CrystalAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != originalHotbarSlot) {
-            InventoryUtility.selectHotbarSlot(originalHotbarSlot);
+            InventoryUtility.selectHotbarSlot(originalHotbarSlot, true);
         }
 
         originalHotbarSlot = InventoryUtility.NOT_FOUND;
@@ -1075,7 +998,6 @@ public class CrystalAura extends Module {
 
     private void restoreOriginalHotbarSlotIfIdle() {
         if (usedInteractionThisTick
-                || waitingForMovePacketAfterUse
                 || activeForcedOutgoingRotations() != null
                 || postUseSlotDelayTicks > 0) {
             return;
@@ -1116,9 +1038,7 @@ public class CrystalAura extends Module {
         postUseSlotDelayTicks = 0;
         postAttackPlaceDelayTicks = 0;
         usedInteractionThisTick = false;
-        waitingForMovePacketAfterUse = false;
         forcedOutgoingRotations = null;
-        postUseRotations = null;
         lastOutgoingRotations = currentPlayerRotations();
         syncedRotations = new Vector2f(lastOutgoingRotations);
     }
