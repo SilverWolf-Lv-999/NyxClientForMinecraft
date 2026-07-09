@@ -48,7 +48,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-// 一切都建立在快捷栏中有对应物品的情况
 @ModuleInfo(name = "nyxclient.module.crystalaura.name", description = "nyxclient.module.crystalaura.description", category = Category.COMBAT)
 public class CrystalAura extends Module {
     public static final CrystalAura INSTANCE = new CrystalAura();
@@ -79,37 +78,30 @@ public class CrystalAura extends Module {
             ()-> target.getValue() == Select.SWITCH,
             this);
 
-    // 放置速度
     public final IntValue placeSpeed = ValueBuild.intSetting("placeTimer",
             10, 1, 40, 1,
             this);
 
-    // 破坏速度
     public final IntValue breakSpeed = ValueBuild.intSetting("breakTimer",
             10, 1, 40, 1,
             this);
 
-    // 放置距离
     public final DoubleValue placeRange = ValueBuild.doubleSetting(
             "place range",
             3.0, 0.1, 6.0, 0.1,
             this
     );
 
-    // 破坏距离
     public final DoubleValue breakRange = ValueBuild.doubleSetting(
             "break range",
             3.0, 0.1, 6.0, 0.1,
             this
     );
 
-    // 安全放置，只有在有方块阻挡在自己面前的情况下才会放置并破坏
     public final BoolValue safePlace = ValueBuild.boolSetting("safe place", true, this);
 
-    // 在目标四周无黑曜石等允许放置水晶的方块时，自动放黑曜石、基岩等方块在目标四周一定位置，为水晶提供放置点
     public final BoolValue autoPlaceBlock = ValueBuild.boolSetting("auto place block", true, this);
 
-    // 在放置水晶前，先往自己面前放置一个方块来防止自己被炸到
     public final BoolValue autoPlaceProtectBlock = ValueBuild.boolSetting("auto place protect block", true, this);
 
     private int placeProgress;
