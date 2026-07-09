@@ -105,13 +105,16 @@ public class MaceAura extends Module {
 
     @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
-        if (stage != Stage.JUMP || !canRun()) {
+        if (!canRun()) {
             return;
         }
 
-        rotateDown();
-        if (stageTicks == 0 && canJumpFromGround()) {
-            jumpForWindCharge();
+        switch (stage) {
+            case JUMP -> tickJumpBeforeMove();
+            case WIND_CHARGE_USE -> tickQueuedWindChargeUseBeforeMove();
+            case ATTACK -> tickAttackBeforeMove();
+            default -> {
+            }
         }
     }
 
@@ -180,12 +183,12 @@ public class MaceAura extends Module {
             }
             case USE_WIND_CHARGE -> tickUseWindCharge();
             case JUMP -> tickJumpForWindCharge();
-            case WIND_CHARGE_USE -> tickQueuedWindChargeUse();
+            case WIND_CHARGE_USE -> tickAwaitQueuedWindChargeUse();
             case WAIT_LAUNCH -> tickWaitLaunch();
             case WAIT_APEX -> tickWaitApex();
             case DIVE -> tickDive();
             case SWITCH_TO_MACE -> tickSwitchToMace();
-            case ATTACK -> tickAttack();
+            case ATTACK -> tickAwaitAttack();
             case AFTER_ATTACK -> tickAfterAttack();
         }
     }
@@ -210,13 +213,20 @@ public class MaceAura extends Module {
 
         windChargeOriginalSlot = selectedSlot;
         windChargeSlot = foundWindChargeSlot;
-        if (!InventoryUtility.selectHotbarSlot(foundWindChargeSlot, true)) {
+        if (!InventoryUtility.selectHotbarSlot(foundWindChargeSlot)) {
             clearQueuedWindCharge();
             return;
         }
 
         windChargeRestoreQueued = false;
         setStage(Stage.JUMP);
+    }
+
+    private void tickJumpBeforeMove() {
+        rotateDown();
+        if (stageTicks == 0 && canJumpFromGround()) {
+            jumpForWindCharge();
+        }
     }
 
     private void tickJumpForWindCharge() {
@@ -247,7 +257,7 @@ public class MaceAura extends Module {
         }
     }
 
-    private void tickQueuedWindChargeUse() {
+    private void tickAwaitQueuedWindChargeUse() {
         rotateDown();
 
         if (stageTicks > WIND_CHARGE_USE_TIMEOUT_TICKS) {
@@ -265,6 +275,26 @@ public class MaceAura extends Module {
 
         if (windChargeUseDelayTicks > 0) {
             windChargeUseDelayTicks--;
+        }
+    }
+
+    private void tickQueuedWindChargeUseBeforeMove() {
+        rotateDown();
+
+        if (stageTicks > WIND_CHARGE_USE_TIMEOUT_TICKS) {
+            restoreQueuedWindChargeSlotNow();
+            setStage(Stage.USE_WIND_CHARGE);
+            return;
+        }
+
+        if (InventoryUtility.getSelectedHotbarSlot() != windChargeSlot
+                || !canUseHotbarItem(windChargeSlot, Items.WIND_CHARGE)) {
+            restoreQueuedWindChargeSlotNow();
+            setStage(Stage.USE_WIND_CHARGE);
+            return;
+        }
+
+        if (windChargeUseDelayTicks > 0) {
             return;
         }
 
@@ -376,6 +406,23 @@ public class MaceAura extends Module {
         }
     }
 
+    private void tickAttackBeforeMove() {
+        tickAttack();
+    }
+
+    private void tickAwaitAttack() {
+        if (target == null) {
+            setStage(Stage.ACQUIRE_TARGET);
+            return;
+        }
+
+        aimAtTarget();
+
+        if (!canAttackTarget(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.DIVE);
+        }
+    }
+
     private void tickAfterAttack() {
         aimAtTarget();
 
@@ -451,7 +498,7 @@ public class MaceAura extends Module {
         }
 
         return InventoryUtility.getSelectedHotbarSlot() == maceSlot
-                || InventoryUtility.selectHotbarSlot(maceSlot, true);
+                || InventoryUtility.selectHotbarSlot(maceSlot);
     }
 
     private boolean attackTarget(LivingEntity target) {
@@ -577,7 +624,7 @@ public class MaceAura extends Module {
         }
 
         if (mc.player != null && InventoryUtility.getSelectedHotbarSlot() == windChargeSlot) {
-            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot, true);
+            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot);
         }
 
         clearQueuedWindCharge();
@@ -597,7 +644,7 @@ public class MaceAura extends Module {
                 && Inventory.isHotbarSlot(windChargeSlot)
                 && windChargeOriginalSlot != windChargeSlot
                 && InventoryUtility.getSelectedHotbarSlot() == windChargeSlot) {
-            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot, true);
+            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot);
         }
 
         clearQueuedWindCharge();
