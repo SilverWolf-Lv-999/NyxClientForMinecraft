@@ -980,7 +980,7 @@ public class CrystalAura extends Module {
             originalHotbarSlot = currentSlot;
         }
 
-        return InventoryUtility.selectHotbarSlot(hotbarSlot, true);
+        return InventoryUtility.selectHotbarSlot(hotbarSlot);
     }
 
     private void restoreOriginalHotbarSlot() {
@@ -990,7 +990,7 @@ public class CrystalAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != originalHotbarSlot) {
-            InventoryUtility.selectHotbarSlot(originalHotbarSlot, true);
+            InventoryUtility.selectHotbarSlot(originalHotbarSlot);
         }
 
         originalHotbarSlot = InventoryUtility.NOT_FOUND;
