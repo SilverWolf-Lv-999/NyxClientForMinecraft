@@ -9,7 +9,7 @@ import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.phys.AABB;
 
-public final class WatermarkComponent implements UIComponent {
+public final class WatermarkComponent implements UIComponent<HUD> {
     private static final String ID = "watermark";
     private static final float HEIGHT = 24.0F;
     private static final float HORIZONTAL_PADDING = 8.0F;

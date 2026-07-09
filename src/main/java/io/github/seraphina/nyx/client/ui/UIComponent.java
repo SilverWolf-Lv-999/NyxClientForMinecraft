@@ -1,10 +1,11 @@
 package io.github.seraphina.nyx.client.ui;
 
+import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.phys.AABB;
 
-public interface UIComponent extends IMinecraft {
+public interface UIComponent<T extends Module> extends IMinecraft {
     default String getId() {
         return getClass().getSimpleName();
     }
