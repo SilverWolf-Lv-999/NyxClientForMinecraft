@@ -44,12 +44,16 @@ public class MaceAura extends Module {
     private static final int WIND_CHARGE_USE_DELAY_TICKS = 0;
     private static final int WIND_CHARGE_JUMP_TIMEOUT_TICKS = 6;
     private static final int WIND_CHARGE_USE_TIMEOUT_TICKS = 10;
-    private static final int WIND_CHARGE_RESTORE_SLOT_DELAY_TICKS = 2;
     private static final int MIN_LAUNCH_TICKS = 3;
+    private static final int MACE_SWITCH_AFTER_USE_DELAY_TICKS = 1;
+    private static final int MACE_SWITCH_SETTLE_TICKS = 2;
+    private static final int POST_WIND_CHARGE_ATTACK_DELAY_TICKS = 4;
     private static final int ATTACK_HOLD_TICKS = 5;
     private static final int AFTER_ATTACK_TIMEOUT_TICKS = 20;
     private static final int STAGE_TIMEOUT_TICKS = 120;
     private static final double LAUNCH_VELOCITY_THRESHOLD = 0.08D;
+    private static final double FALLING_ATTACK_VELOCITY = -0.03D;
+    private static final float MIN_MACE_FALL_DISTANCE = 1.5F;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
     public final EnumValue<ItemType> itemType = ValueBuild.enumSetting("item type", ItemType.WIND_CHARGE, this);
@@ -60,14 +64,16 @@ public class MaceAura extends Module {
     private Stage stage = Stage.ACQUIRE_TARGET;
     private LivingEntity target;
     private int originalSelectedSlot = InventoryUtility.NOT_FOUND;
+    private int maceSlot = InventoryUtility.NOT_FOUND;
     private int windChargeOriginalSlot = InventoryUtility.NOT_FOUND;
     private int windChargeSlot = InventoryUtility.NOT_FOUND;
     private int windChargeUseDelayTicks;
-    private int windChargeRestoreSlotDelayTicks;
     private int stageTicks;
     private int launchTicks;
+    private int maceSwitchDelayTicks;
+    private int windChargeAttackDelayTicks;
+    private int heldMaceTicks;
     private int attackHoldTicks;
-    private boolean windChargeRestoreQueued;
     private boolean warnedMissingLoadout;
     private boolean warnedFireworkOnly;
 
@@ -133,7 +139,7 @@ public class MaceAura extends Module {
 
     @EventTarget
     public void onPostTick(TickEvent.Post event) {
-        tickWindChargeSlotRestore();
+        tickActionDelays();
 
         if (!canRun()) {
             resetCombatCycle();
@@ -152,6 +158,7 @@ public class MaceAura extends Module {
 
         warnedMissingLoadout = false;
         syncDetectedValues(loadout);
+        tickHeldMaceState();
 
         if (loadout.itemType() != ItemType.WIND_CHARGE) {
             if (!warnedFireworkOnly) {
@@ -204,8 +211,12 @@ public class MaceAura extends Module {
 
         rotateDown();
 
-        int reservedMaceSlot = InventoryUtility.findHotbarSlot(Items.MACE);
-        int foundWindChargeSlot = ensureHotbarItem(Items.WIND_CHARGE, reservedMaceSlot);
+        int foundMaceSlot = ensureHotbarItem(Items.MACE, InventoryUtility.NOT_FOUND);
+        if (!canHoldHotbarItem(foundMaceSlot, Items.MACE)) {
+            return;
+        }
+
+        int foundWindChargeSlot = ensureHotbarItem(Items.WIND_CHARGE, foundMaceSlot);
         if (!canUseHotbarItem(foundWindChargeSlot, Items.WIND_CHARGE)) {
             return;
         }
@@ -216,13 +227,13 @@ public class MaceAura extends Module {
         }
 
         windChargeOriginalSlot = selectedSlot;
+        maceSlot = foundMaceSlot;
         windChargeSlot = foundWindChargeSlot;
         if (!InventoryUtility.selectHotbarSlot(foundWindChargeSlot)) {
             clearQueuedWindCharge();
             return;
         }
 
-        windChargeRestoreQueued = false;
         setStage(Stage.JUMP);
     }
 
@@ -309,13 +320,15 @@ public class MaceAura extends Module {
         }
 
         launchTicks = 0;
-        windChargeRestoreQueued = true;
-        windChargeRestoreSlotDelayTicks = WIND_CHARGE_RESTORE_SLOT_DELAY_TICKS;
+        clearQueuedWindCharge();
+        maceSwitchDelayTicks = MACE_SWITCH_AFTER_USE_DELAY_TICKS;
+        windChargeAttackDelayTicks = POST_WIND_CHARGE_ATTACK_DELAY_TICKS;
         setStage(Stage.WAIT_LAUNCH);
     }
 
     private void tickWaitLaunch() {
         rotateDown();
+        selectMaceSlot();
 
         Vec3 velocity = mc.player.getDeltaMovement();
         if (velocity.y > LAUNCH_VELOCITY_THRESHOLD || !mc.player.onGround()) {
@@ -336,10 +349,10 @@ public class MaceAura extends Module {
         }
 
         aimAtTarget();
+        selectMaceSlot();
 
-        if (isTargetInAttackRange(target)) {
-            setStage(Stage.SWITCH_TO_MACE);
-            tickSwitchToMace();
+        if (canAttackTarget(target)) {
+            setStage(Stage.ATTACK);
             return;
         }
 
@@ -356,15 +369,20 @@ public class MaceAura extends Module {
         }
 
         aimAtTarget();
+        selectMaceSlot();
+
+        if (canAttackTarget(target)) {
+            setStage(Stage.ATTACK);
+            return;
+        }
 
         if (!isTargetInAttackRange(target)) {
             setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
             return;
         }
 
-        if (selectMaceSlot()) {
-            setStage(Stage.ATTACK);
-            tickAttack();
+        if (mc.player.onGround()) {
+            setStage(Stage.USE_WIND_CHARGE);
         }
     }
 
@@ -376,8 +394,8 @@ public class MaceAura extends Module {
 
         aimAtTarget();
 
-        if (!isTargetInAttackRange(target)) {
-            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
+        if (!canAttackTarget(target)) {
+            waitForAttackWindowOrRetry();
             return;
         }
 
@@ -399,8 +417,8 @@ public class MaceAura extends Module {
 
         aimAtTarget();
 
-        if (!isTargetInAttackRange(target)) {
-            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
+        if (!canAttackTarget(target)) {
+            waitForAttackWindowOrRetry();
         }
     }
 
@@ -473,13 +491,29 @@ public class MaceAura extends Module {
     }
 
     private boolean selectMaceSlot() {
-        int maceSlot = ensureHotbarItem(Items.MACE, windChargeSlot);
+        if (maceSwitchDelayTicks > 0) {
+            return false;
+        }
+
+        if (InventoryUtility.getSelectedStack().is(Items.MACE)) {
+            return true;
+        }
+
+        if (!canHoldHotbarItem(maceSlot, Items.MACE)) {
+            maceSlot = ensureHotbarItem(Items.MACE, windChargeSlot);
+        }
+
         if (!canHoldHotbarItem(maceSlot, Items.MACE)) {
             return false;
         }
 
-        return InventoryUtility.getSelectedHotbarSlot() == maceSlot
+        boolean selected = InventoryUtility.getSelectedHotbarSlot() == maceSlot
                 || InventoryUtility.selectHotbarSlot(maceSlot);
+        if (selected) {
+            heldMaceTicks = 0;
+        }
+
+        return selected;
     }
 
     private boolean attackTarget(LivingEntity target) {
@@ -505,6 +539,40 @@ public class MaceAura extends Module {
 
     private boolean isTargetInAttackRange(LivingEntity target) {
         return RotationUtility.getEyeDistanceToEntity(target) <= attackRange.getValue();
+    }
+
+    private boolean canAttackTarget(LivingEntity target) {
+        return isTargetInAttackRange(target)
+                && isHeldMaceSettled()
+                && isWindChargeAttackSettled()
+                && isMaceSmashReady(target);
+    }
+
+    private boolean isHeldMaceSettled() {
+        return InventoryUtility.getSelectedStack().is(Items.MACE)
+                && heldMaceTicks >= MACE_SWITCH_SETTLE_TICKS;
+    }
+
+    private boolean isWindChargeAttackSettled() {
+        return windChargeAttackDelayTicks <= 0;
+    }
+
+    private boolean isMaceSmashReady(LivingEntity target) {
+        Vec3 velocity = mc.player.getDeltaMovement();
+        return velocity.y <= FALLING_ATTACK_VELOCITY
+                && (mc.player.fallDistance >= MIN_MACE_FALL_DISTANCE
+                || mc.player.getY() > target.getY() + MIN_MACE_FALL_DISTANCE);
+    }
+
+    private void waitForAttackWindowOrRetry() {
+        if (!isTargetInAttackRange(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
+            return;
+        }
+
+        if (mc.player.onGround()) {
+            setStage(Stage.USE_WIND_CHARGE);
+        }
     }
 
     private int ensureHotbarItem(Item item, int reservedSlot) {
@@ -582,35 +650,10 @@ public class MaceAura extends Module {
         return false;
     }
 
-    private void tickWindChargeSlotRestore() {
-        if (!windChargeRestoreQueued) {
-            return;
-        }
-
-        if (!Inventory.isHotbarSlot(windChargeOriginalSlot)
-                || !Inventory.isHotbarSlot(windChargeSlot)
-                || windChargeOriginalSlot == windChargeSlot) {
-            return;
-        }
-
-        if (windChargeRestoreSlotDelayTicks > 0) {
-            windChargeRestoreSlotDelayTicks--;
-            return;
-        }
-
-        if (mc.player != null && InventoryUtility.getSelectedHotbarSlot() == windChargeSlot) {
-            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot);
-        }
-
-        clearQueuedWindCharge();
-    }
-
     private void clearQueuedWindCharge() {
         windChargeOriginalSlot = InventoryUtility.NOT_FOUND;
         windChargeSlot = InventoryUtility.NOT_FOUND;
         windChargeUseDelayTicks = 0;
-        windChargeRestoreSlotDelayTicks = 0;
-        windChargeRestoreQueued = false;
     }
 
     private void restoreQueuedWindChargeSlotNow() {
@@ -623,6 +666,24 @@ public class MaceAura extends Module {
         }
 
         clearQueuedWindCharge();
+    }
+
+    private void tickHeldMaceState() {
+        if (InventoryUtility.getSelectedStack().is(Items.MACE)) {
+            heldMaceTicks++;
+        } else {
+            heldMaceTicks = 0;
+        }
+    }
+
+    private void tickActionDelays() {
+        if (maceSwitchDelayTicks > 0) {
+            maceSwitchDelayTicks--;
+        }
+
+        if (windChargeAttackDelayTicks > 0) {
+            windChargeAttackDelayTicks--;
+        }
     }
 
     private void rotateDown() {
@@ -691,6 +752,9 @@ public class MaceAura extends Module {
         target = null;
         stageTicks = 0;
         launchTicks = 0;
+        maceSwitchDelayTicks = 0;
+        windChargeAttackDelayTicks = 0;
+        heldMaceTicks = 0;
         attackHoldTicks = 0;
         restoreQueuedWindChargeSlotNow();
         stage = Stage.ACQUIRE_TARGET;
@@ -699,6 +763,7 @@ public class MaceAura extends Module {
     private void resetRuntimeState() {
         resetCombatCycle();
         originalSelectedSlot = InventoryUtility.NOT_FOUND;
+        maceSlot = InventoryUtility.NOT_FOUND;
         warnedMissingLoadout = false;
         warnedFireworkOnly = false;
     }

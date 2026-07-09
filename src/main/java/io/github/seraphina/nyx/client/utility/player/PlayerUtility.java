@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.utility.player;
 
+import io.github.seraphina.nyx.client.utility.IMinecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
@@ -13,7 +14,31 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.Predicate;
 
-public class PlayerUtility {
+public class PlayerUtility implements IMinecraft {
+    public static void sendMsg(String msg) {
+        if (mc.player == null || mc.player.connection == null || msg == null || msg.isBlank()) {
+            return;
+        }
+
+        mc.player.connection.sendChat(msg.trim());
+    }
+
+    public static void runCmd(String cmd) {
+        if (mc.player == null || mc.player.connection == null || cmd == null || cmd.isBlank()) {
+            return;
+        }
+
+        String command = cmd.trim();
+        if (command.startsWith("/")) {
+            command = command.substring(1);
+        }
+
+        if (!command.isBlank()) {
+            mc.player.connection.sendCommand(command);
+        }
+
+    }
+
     public static HitResult raycastForEntity(Level level, Entity originEntity, float distance, boolean checkForBlocks) {
         Vec3 start = originEntity.getEyePosition();
         Vec3 end = originEntity.getLookAngle().normalize().scale(distance).add(start);

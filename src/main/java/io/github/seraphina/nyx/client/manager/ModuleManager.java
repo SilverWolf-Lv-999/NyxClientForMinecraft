@@ -69,7 +69,8 @@ public final class ModuleManager {
                 AutoElytra.INSTANCE,
                 AutoTotem.INSTANCE,
                 AutoWindCharge.INSTANCE,
-                InstantSwitch.INSTANCE
+                InstantSwitch.INSTANCE,
+                AutoLeave.INSTANCE
         );
         //Visual
         registerModule(
