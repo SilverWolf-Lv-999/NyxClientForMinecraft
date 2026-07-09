@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.client.SilentRotation;
 import io.github.seraphina.nyx.client.utility.DebugUtility;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -105,7 +106,9 @@ public class MaceAura extends Module {
     private boolean fireworkPressJumpForGlide;
     private Vector2f forcedUseItemRotations;
     private Vector2f forcedOutgoingRotations;
+    private Vector2f postUseItemRotations;
     private Vector2f lastOutgoingRotations;
+    private Vector2f syncedRotations;
     private boolean usedItemThisTick;
     private boolean waitingForMovePacketAfterUse;
     private int postUseItemSlotDelayTicks;
@@ -176,8 +179,13 @@ public class MaceAura extends Module {
 
         if (event.getPacket() instanceof ServerboundMovePlayerPacket packet) {
             ServerboundMovePlayerPacket outgoingPacket = packet;
-            if (forcedOutgoingRotations != null) {
-                outgoingPacket = applyForcedMovePacketRotations(packet);
+            if (postUseItemRotations != null) {
+                outgoingPacket = applyMovePacketRotations(packet, postUseItemRotations);
+                event.setPacket(outgoingPacket);
+                clearForcedOutgoingRotations();
+                completePostUseMoveAlignment();
+            } else if (forcedOutgoingRotations != null) {
+                outgoingPacket = applyMovePacketRotations(packet, forcedOutgoingRotations);
                 event.setPacket(outgoingPacket);
                 clearForcedOutgoingRotations();
             }
@@ -187,25 +195,28 @@ public class MaceAura extends Module {
             }
 
             if (waitingForMovePacketAfterUse) {
-                waitingForMovePacketAfterUse = false;
-                postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
+                completePostUseMoveAlignment();
             }
         }
 
         if (event.getPacket() instanceof ServerboundClientTickEndPacket) {
             sendPendingPostUseMovePacket();
+            if (waitingForMovePacketAfterUse) {
+                event.setCancelled(true);
+            }
         }
     }
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onSendPosition(SendPositionEvent event) {
-        if (forcedOutgoingRotations == null) {
+        Vector2f forcedRotations = activeForcedOutgoingRotations();
+        if (forcedRotations == null) {
             return;
         }
 
-        event.setYaw(forcedOutgoingRotations.x);
-        event.setPitch(forcedOutgoingRotations.y);
-        syncPlayerRotation(forcedOutgoingRotations);
+        event.setYaw(forcedRotations.x);
+        event.setPitch(forcedRotations.y);
+        syncPlayerRotation(forcedRotations);
     }
 
     private void tickCombatCycle() {
@@ -215,6 +226,11 @@ public class MaceAura extends Module {
 
         if (!canRun()) {
             resetCombatCycle();
+            return;
+        }
+
+        if (waitingForMovePacketAfterUse) {
+            holdPostUseRotations();
             return;
         }
 
@@ -996,7 +1012,7 @@ public class MaceAura extends Module {
         Vector2f appliedRotations = applyCombatRotation(rotations);
         forceOutgoingRotations(appliedRotations);
 
-        mc.gameMode.attack(mc.player, target);
+        attackWithRotations(appliedRotations, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
         DebugUtility.msg(
                 "MaceAura attacked ",
@@ -1204,10 +1220,11 @@ public class MaceAura extends Module {
         syncPlayerRotation(useItemRotations);
         forcedUseItemRotations = new Vector2f(useItemRotations);
         forcedOutgoingRotations = new Vector2f(useItemRotations);
+        postUseItemRotations = new Vector2f(useItemRotations);
 
         InteractionResult result;
         try {
-            result = mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+            result = useItemWithRotations(useItemRotations);
         } finally {
             forcedUseItemRotations = null;
             usedItemThisTick = true;
@@ -1233,7 +1250,7 @@ public class MaceAura extends Module {
 
         Vector2f rotations = RotationManager.INSTANCE.isActive()
                 ? RotationManager.INSTANCE.getRotation()
-                : new Vector2f(mc.player.getYRot(), mc.player.getXRot());
+                : currentSyncedRotations();
         return legitimizeRotations(rotations);
     }
 
@@ -1277,24 +1294,43 @@ public class MaceAura extends Module {
         forcedOutgoingRotations = null;
     }
 
+    private Vector2f activeForcedOutgoingRotations() {
+        return postUseItemRotations != null ? postUseItemRotations : forcedOutgoingRotations;
+    }
+
+    private void completePostUseMoveAlignment() {
+        waitingForMovePacketAfterUse = false;
+        postUseItemRotations = null;
+        postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
+    }
+
+    private void holdPostUseRotations() {
+        Vector2f rotations = activeForcedOutgoingRotations();
+        if (rotations != null) {
+            syncPlayerRotation(rotations);
+        }
+    }
+
     private void sendPendingPostUseMovePacket() {
+        Vector2f rotations = activeForcedOutgoingRotations();
         if (!waitingForMovePacketAfterUse
-                || forcedOutgoingRotations == null
+                || rotations == null
                 || mc.player == null
                 || mc.player.connection == null) {
             return;
         }
 
+        syncPlayerRotation(rotations);
         mc.player.connection.send(new ServerboundMovePlayerPacket.Rot(
-                forcedOutgoingRotations.x,
-                forcedOutgoingRotations.y,
+                rotations.x,
+                rotations.y,
                 mc.player.onGround(),
                 mc.player.horizontalCollision
         ));
     }
 
-    private ServerboundMovePlayerPacket applyForcedMovePacketRotations(ServerboundMovePlayerPacket packet) {
-        if (forcedOutgoingRotations == null) {
+    private ServerboundMovePlayerPacket applyMovePacketRotations(ServerboundMovePlayerPacket packet, Vector2f rotations) {
+        if (rotations == null) {
             return packet;
         }
 
@@ -1303,16 +1339,16 @@ public class MaceAura extends Module {
                     packet.getX(0.0D),
                     packet.getY(0.0D),
                     packet.getZ(0.0D),
-                    forcedOutgoingRotations.x,
-                    forcedOutgoingRotations.y,
+                    rotations.x,
+                    rotations.y,
                     packet.isOnGround(),
                     packet.horizontalCollision()
             );
         }
 
         return new ServerboundMovePlayerPacket.Rot(
-                forcedOutgoingRotations.x,
-                forcedOutgoingRotations.y,
+                rotations.x,
+                rotations.y,
                 packet.isOnGround(),
                 packet.horizontalCollision()
         );
@@ -1332,6 +1368,10 @@ public class MaceAura extends Module {
         }
 
         return new Vector2f(mc.player.getYRot(), mc.player.getXRot());
+    }
+
+    private Vector2f currentSyncedRotations() {
+        return syncedRotations != null ? new Vector2f(syncedRotations) : currentPlayerRotations();
     }
 
     private boolean selectHotbarSlot(int hotbarSlot) {
@@ -1439,7 +1479,8 @@ public class MaceAura extends Module {
             return new Vector2f();
         }
 
-        float yaw = mc.player.getYRot() + Mth.wrapDegrees(rotations.x - mc.player.getYRot());
+        Vector2f baseRotations = currentSyncedRotations();
+        float yaw = baseRotations.x + Mth.wrapDegrees(rotations.x - baseRotations.x);
         float pitch = Mth.clamp(rotations.y, -90.0F, 90.0F);
         return new Vector2f(yaw, pitch);
     }
@@ -1449,13 +1490,56 @@ public class MaceAura extends Module {
             return;
         }
 
+        syncedRotations = new Vector2f(rotations);
+
+        if (SilentRotation.INSTANCE.isEnabled()) {
+            return;
+        }
+
         mc.player.setYRot(rotations.x);
         mc.player.setXRot(rotations.y);
     }
 
+    private InteractionResult useItemWithRotations(Vector2f rotations) {
+        if (!SilentRotation.INSTANCE.isEnabled() || mc.player == null || rotations == null) {
+            return mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        }
+
+        float yaw = mc.player.getYRot();
+        float pitch = mc.player.getXRot();
+        mc.player.setYRot(rotations.x);
+        mc.player.setXRot(rotations.y);
+
+        try {
+            return mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        } finally {
+            mc.player.setYRot(yaw);
+            mc.player.setXRot(pitch);
+        }
+    }
+
+    private void attackWithRotations(Vector2f rotations, LivingEntity target) {
+        if (!SilentRotation.INSTANCE.isEnabled() || mc.player == null || rotations == null) {
+            mc.gameMode.attack(mc.player, target);
+            return;
+        }
+
+        float yaw = mc.player.getYRot();
+        float pitch = mc.player.getXRot();
+        mc.player.setYRot(rotations.x);
+        mc.player.setXRot(rotations.y);
+
+        try {
+            mc.gameMode.attack(mc.player, target);
+        } finally {
+            mc.player.setYRot(yaw);
+            mc.player.setXRot(pitch);
+        }
+    }
+
     private float targetYaw() {
         if (target == null) {
-            return mc.player.getYRot();
+            return currentSyncedRotations().x;
         }
 
         return legitimizeRotations(RotationUtility.calculate(target.getBoundingBox().getCenter())).x;
@@ -1552,6 +1636,8 @@ public class MaceAura extends Module {
         attackHoldTicks = 0;
         forcedUseItemRotations = null;
         clearForcedOutgoingRotations();
+        postUseItemRotations = null;
+        syncedRotations = null;
         usedItemThisTick = false;
         waitingForMovePacketAfterUse = false;
         postUseItemSlotDelayTicks = 0;
