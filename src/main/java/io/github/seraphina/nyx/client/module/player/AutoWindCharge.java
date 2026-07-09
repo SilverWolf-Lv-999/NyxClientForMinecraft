@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.module.player;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.impl.ClickEvent;
 import io.github.seraphina.nyx.client.events.impl.MousePressEvent;
 import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
@@ -42,6 +43,7 @@ public class AutoWindCharge extends Module {
     private boolean pendingRightClickDoubleClick;
     private int pendingWindChargeTicks;
     private ActivePearlUp activePearlUp;
+    private QueuedUse queuedUse;
     private PendingRestore pendingRestore;
 
     @Override
@@ -52,8 +54,10 @@ public class AutoWindCharge extends Module {
         pendingRightClickDoubleClick = false;
         pendingWindChargeTicks = 0;
         restorePendingSlotNow();
+        restoreQueuedUseSlotNow();
         restoreActivePearlUpSlotNow();
         activePearlUp = null;
+        queuedUse = null;
         pendingRestore = null;
     }
 
@@ -71,6 +75,14 @@ public class AutoWindCharge extends Module {
                 activePearlUp = null;
             }
         }
+
+        if (queuedUse != null && queuedUse.rotateUp) {
+            if (canRun()) {
+                rotateUp();
+            } else {
+                finishQueuedUse(queuedUse, false);
+            }
+        }
     }
 
     @EventTarget
@@ -78,6 +90,31 @@ public class AutoWindCharge extends Module {
         tickPendingRestore();
         tickActivePearlUp();
         tickPendingWindCharge();
+        tickQueuedUse();
+    }
+
+    @EventTarget
+    public void onClick(ClickEvent event) {
+        if (queuedUse == null || queuedUse.stage != QueuedUseStage.USE) {
+            return;
+        }
+
+        event.setCancelled(true);
+        drainUseClicks();
+
+        QueuedUse currentUse = queuedUse;
+        if (!canRun()
+                || InventoryUtility.getSelectedHotbarSlot() != currentUse.hotbarSlot
+                || !canUseHotbarItem(currentUse.hotbarSlot, currentUse.item)) {
+            finishQueuedUse(currentUse, false);
+            return;
+        }
+
+        if (currentUse.rotateUp) {
+            rotateUp();
+        }
+
+        finishQueuedUse(currentUse, useSelectedItem());
     }
 
     @EventTarget
@@ -94,7 +131,7 @@ public class AutoWindCharge extends Module {
 
     @EventTarget
     public void onStartUseItem(StartUseItemEvent event) {
-        if (activePearlUp != null || pendingRestore != null || waitForUseRelease) {
+        if (activePearlUp != null || queuedUse != null || pendingRestore != null || waitForUseRelease) {
             consumeRightClickDoubleClick();
             event.setCancelled(true);
             return;
@@ -121,7 +158,7 @@ public class AutoWindCharge extends Module {
             return;
         }
 
-        pendingWindChargeTicks = 1;
+        queueUse(QueuedUseType.WIND_CHARGE, windChargeSlot, Items.WIND_CHARGE, false, InventoryUtility.getSelectedHotbarSlot(), true);
         event.setCancelled(true);
     }
 
@@ -160,7 +197,11 @@ public class AutoWindCharge extends Module {
         }
 
         rotateUp();
-        activePearlUp = new ActivePearlUp(originalSlot, pearlSlot, windChargeSlot, pearlUpDelay.getValue());
+        activePearlUp = new ActivePearlUp(originalSlot, windChargeSlot, pearlUpDelay.getValue());
+        if (!queueUse(QueuedUseType.PEARL_UP_PEARL, pearlSlot, Items.ENDER_PEARL, true, originalSlot, false)) {
+            activePearlUp = null;
+            return false;
+        }
         event.setCancelled(true);
         return true;
     }
@@ -188,8 +229,8 @@ public class AutoWindCharge extends Module {
         }
 
         int windChargeSlot = InventoryUtility.findHotbarSlot(Items.WIND_CHARGE);
-        if (windChargeSlot != InventoryUtility.NOT_FOUND && useHotbarItem(windChargeSlot, Items.WIND_CHARGE, false)) {
-            waitForUseRelease = mc.options.keyUse.isDown();
+        if (windChargeSlot != InventoryUtility.NOT_FOUND) {
+            queueUse(QueuedUseType.WIND_CHARGE, windChargeSlot, Items.WIND_CHARGE, false, InventoryUtility.getSelectedHotbarSlot(), true);
         }
     }
 
@@ -206,14 +247,7 @@ public class AutoWindCharge extends Module {
 
         rotateUp();
 
-        if (!activePearlUp.pearlThrown) {
-            if (useHotbarItem(activePearlUp.pearlSlot, Items.ENDER_PEARL, true, activePearlUp.originalSlot, false)) {
-                activePearlUp.pearlThrown = true;
-                waitForUseRelease = mc.options.keyUse.isDown();
-            } else {
-                queueRestoreSelectedSlot(activePearlUp.originalSlot, InventoryUtility.getSelectedHotbarSlot());
-                activePearlUp = null;
-            }
+        if (!activePearlUp.pearlThrown || activePearlUp.windChargeQueued) {
             return;
         }
 
@@ -227,15 +261,13 @@ public class AutoWindCharge extends Module {
             windChargeSlot = InventoryUtility.findHotbarSlot(Items.WIND_CHARGE);
         }
 
-        if (windChargeSlot != InventoryUtility.NOT_FOUND) {
-            if (useHotbarItem(windChargeSlot, Items.WIND_CHARGE, true, activePearlUp.originalSlot, true)) {
-                waitForUseRelease = mc.options.keyUse.isDown();
-            }
+        if (windChargeSlot != InventoryUtility.NOT_FOUND
+                && queueUse(QueuedUseType.PEARL_UP_WIND_CHARGE, windChargeSlot, Items.WIND_CHARGE, true, activePearlUp.originalSlot, true)) {
+            activePearlUp.windChargeQueued = true;
         } else {
             queueRestoreSelectedSlot(activePearlUp.originalSlot, InventoryUtility.getSelectedHotbarSlot());
+            activePearlUp = null;
         }
-
-        activePearlUp = null;
     }
 
     private boolean canRun() {
@@ -258,44 +290,87 @@ public class AutoWindCharge extends Module {
                 && !mc.player.getCooldowns().isOnCooldown(stack);
     }
 
-    private boolean useHotbarItem(int hotbarSlot, Item item, boolean rotateUp) {
-        return useHotbarItem(hotbarSlot, item, rotateUp, InventoryUtility.getSelectedHotbarSlot(), true);
+    private boolean queueUse(QueuedUseType type, int hotbarSlot, Item item, boolean rotateUp, int restoreSlot, boolean restoreOnSuccess) {
+        if (queuedUse != null || !canUseHotbarItem(hotbarSlot, item)) {
+            return false;
+        }
+
+        int currentSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (!Inventory.isHotbarSlot(currentSlot)) {
+            return false;
+        }
+
+        int targetRestoreSlot = Inventory.isHotbarSlot(restoreSlot) ? restoreSlot : currentSlot;
+        queuedUse = new QueuedUse(type, hotbarSlot, item, rotateUp, targetRestoreSlot, restoreOnSuccess);
+        return true;
     }
 
-    private boolean useHotbarItem(int hotbarSlot, Item item, boolean rotateUp, int restoreSlot, boolean restoreOnSuccess) {
-        int previousSlot = InventoryUtility.getSelectedHotbarSlot();
-        if (!Inventory.isHotbarSlot(previousSlot) || !canUseHotbarItem(hotbarSlot, item)) {
-            return false;
+    private void tickQueuedUse() {
+        if (queuedUse == null || queuedUse.stage != QueuedUseStage.SWITCH_SLOT) {
+            return;
         }
 
-        boolean changedSlot = previousSlot != hotbarSlot;
-        if (changedSlot && !InventoryUtility.selectHotbarSlot(hotbarSlot, true)) {
-            return false;
+        if (!canRun() || !canUseHotbarItem(queuedUse.hotbarSlot, queuedUse.item)) {
+            finishQueuedUse(queuedUse, false);
+            return;
         }
 
-        boolean usedSuccessfully = false;
-        try {
-            if (rotateUp) {
-                rotateUp();
+        if (InventoryUtility.getSelectedHotbarSlot() != queuedUse.hotbarSlot
+                && !InventoryUtility.selectHotbarSlot(queuedUse.hotbarSlot)) {
+            finishQueuedUse(queuedUse, false);
+            return;
+        }
+
+        queuedUse.stage = QueuedUseStage.USE;
+    }
+
+    private boolean useSelectedItem() {
+        InteractionResult result = mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        if (result instanceof InteractionResult.Success useSuccess) {
+            if (useSuccess.swingSource() == InteractionResult.SwingSource.CLIENT) {
+                mc.player.swing(InteractionHand.MAIN_HAND);
             }
 
-            InteractionResult result = mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
-            if (result instanceof InteractionResult.Success useSuccess) {
-                if (useSuccess.swingSource() == InteractionResult.SwingSource.CLIENT) {
-                    mc.player.swing(InteractionHand.MAIN_HAND);
+            mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void finishQueuedUse(QueuedUse finishedUse, boolean usedSuccessfully) {
+        if (queuedUse == finishedUse) {
+            queuedUse = null;
+        }
+
+        if (usedSuccessfully) {
+            waitForUseRelease = mc.options.keyUse.isDown();
+        }
+
+        if ((finishedUse.restoreOnSuccess && usedSuccessfully) || !usedSuccessfully) {
+            queueRestoreSelectedSlot(finishedUse.restoreSlot, finishedUse.hotbarSlot);
+        }
+
+        switch (finishedUse.type) {
+            case WIND_CHARGE -> {
+            }
+            case PEARL_UP_PEARL -> {
+                if (activePearlUp == null) {
+                    return;
                 }
 
-                mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
-                usedSuccessfully = true;
-                return true;
+                if (usedSuccessfully) {
+                    activePearlUp.pearlThrown = true;
+                } else {
+                    activePearlUp = null;
+                }
             }
+            case PEARL_UP_WIND_CHARGE -> activePearlUp = null;
+        }
+    }
 
-            return false;
-        } finally {
-            if (changedSlot && (restoreOnSuccess || !usedSuccessfully)) {
-                int targetRestoreSlot = Inventory.isHotbarSlot(restoreSlot) ? restoreSlot : previousSlot;
-                queueRestoreSelectedSlot(targetRestoreSlot, hotbarSlot);
-            }
+    private void drainUseClicks() {
+        while (mc.options.keyUse.consumeClick()) {
         }
     }
 
@@ -347,6 +422,12 @@ public class AutoWindCharge extends Module {
         }
     }
 
+    private void restoreQueuedUseSlotNow() {
+        if (queuedUse != null) {
+            restoreSelectedSlot(new PendingRestore(queuedUse.restoreSlot, queuedUse.hotbarSlot, 0));
+        }
+    }
+
     private void restoreSelectedSlot(PendingRestore restore) {
         if (restore == null
                 || !Inventory.isHotbarSlot(restore.restoreSlot)
@@ -354,7 +435,7 @@ public class AutoWindCharge extends Module {
             return;
         }
 
-        InventoryUtility.selectHotbarSlot(restore.restoreSlot, true);
+        InventoryUtility.selectHotbarSlot(restore.restoreSlot);
     }
 
     private void rotateUp() {
@@ -363,14 +444,13 @@ public class AutoWindCharge extends Module {
 
     private static final class ActivePearlUp {
         private final int originalSlot;
-        private final int pearlSlot;
         private final int windChargeSlot;
         private int windChargeDelayTicks;
         private boolean pearlThrown;
+        private boolean windChargeQueued;
 
-        private ActivePearlUp(int originalSlot, int pearlSlot, int windChargeSlot, int windChargeDelayTicks) {
+        private ActivePearlUp(int originalSlot, int windChargeSlot, int windChargeDelayTicks) {
             this.originalSlot = originalSlot;
-            this.pearlSlot = pearlSlot;
             this.windChargeSlot = windChargeSlot;
             this.windChargeDelayTicks = windChargeDelayTicks;
         }
@@ -386,6 +466,36 @@ public class AutoWindCharge extends Module {
             this.temporarySlot = temporarySlot;
             this.delayTicks = delayTicks;
         }
+    }
+
+    private static final class QueuedUse {
+        private final QueuedUseType type;
+        private final int hotbarSlot;
+        private final Item item;
+        private final boolean rotateUp;
+        private final int restoreSlot;
+        private final boolean restoreOnSuccess;
+        private QueuedUseStage stage = QueuedUseStage.SWITCH_SLOT;
+
+        private QueuedUse(QueuedUseType type, int hotbarSlot, Item item, boolean rotateUp, int restoreSlot, boolean restoreOnSuccess) {
+            this.type = type;
+            this.hotbarSlot = hotbarSlot;
+            this.item = item;
+            this.rotateUp = rotateUp;
+            this.restoreSlot = restoreSlot;
+            this.restoreOnSuccess = restoreOnSuccess;
+        }
+    }
+
+    private enum QueuedUseType {
+        WIND_CHARGE,
+        PEARL_UP_PEARL,
+        PEARL_UP_WIND_CHARGE
+    }
+
+    private enum QueuedUseStage {
+        SWITCH_SLOT,
+        USE
     }
 
     public enum ModeType {
