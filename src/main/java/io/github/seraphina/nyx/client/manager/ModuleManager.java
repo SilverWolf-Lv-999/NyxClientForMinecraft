@@ -44,7 +44,8 @@ public final class ModuleManager {
                 SpearThrust.INSTANCE,
                 UseClick.INSTANCE,
                 MaceKill.INSTANCE,
-                MaceAura.INSTANCE
+                MaceAura.INSTANCE,
+                CrystalAura.INSTANCE
         );
         //Movement
         registerModule(
