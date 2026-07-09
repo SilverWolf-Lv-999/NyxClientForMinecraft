@@ -68,7 +68,8 @@ public final class ModuleManager {
                 NoJumpDelay.INSTANCE,
                 AutoElytra.INSTANCE,
                 AutoTotem.INSTANCE,
-                AutoWindCharge.INSTANCE
+                AutoWindCharge.INSTANCE,
+                InstantSwitch.INSTANCE
         );
         //Visual
         registerModule(

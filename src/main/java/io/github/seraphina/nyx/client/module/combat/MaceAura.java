@@ -4,6 +4,7 @@ import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
+import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
@@ -45,14 +46,10 @@ public class MaceAura extends Module {
     private static final int WIND_CHARGE_USE_TIMEOUT_TICKS = 10;
     private static final int WIND_CHARGE_RESTORE_SLOT_DELAY_TICKS = 2;
     private static final int MIN_LAUNCH_TICKS = 3;
-    private static final int MIN_APEX_TICKS = 5;
-    private static final int APEX_TIMEOUT_TICKS = 60;
     private static final int ATTACK_HOLD_TICKS = 5;
     private static final int AFTER_ATTACK_TIMEOUT_TICKS = 20;
     private static final int STAGE_TIMEOUT_TICKS = 120;
     private static final double LAUNCH_VELOCITY_THRESHOLD = 0.08D;
-    private static final double FALLING_ATTACK_VELOCITY = -0.18D;
-    private static final float MIN_MACE_FALL_DISTANCE = 1.5F;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
     public final EnumValue<ItemType> itemType = ValueBuild.enumSetting("item type", ItemType.WIND_CHARGE, this);
@@ -70,7 +67,6 @@ public class MaceAura extends Module {
     private int stageTicks;
     private int launchTicks;
     private int attackHoldTicks;
-    private boolean sawUpwardMotion;
     private boolean windChargeRestoreQueued;
     private boolean warnedMissingLoadout;
     private boolean warnedFireworkOnly;
@@ -96,11 +92,20 @@ public class MaceAura extends Module {
             return;
         }
 
-        event.setForward(0.0F);
+        event.setForward(shouldApproachTarget() ? 1.0F : 0.0F);
         event.setStrafe(0.0F);
-        event.setSprint(false);
+        event.setSprint(shouldApproachTarget());
         event.setSneak(false);
         event.setJump(stage == Stage.JUMP);
+    }
+
+    @EventTarget
+    public void onStrafe(StrafeEvent event) {
+        if (!canRun() || !shouldApproachTarget()) {
+            return;
+        }
+
+        event.setYaw(targetYaw());
     }
 
     @EventTarget
@@ -185,8 +190,7 @@ public class MaceAura extends Module {
             case JUMP -> tickJumpForWindCharge();
             case WIND_CHARGE_USE -> tickAwaitQueuedWindChargeUse();
             case WAIT_LAUNCH -> tickWaitLaunch();
-            case WAIT_APEX -> tickWaitApex();
-            case DIVE -> tickDive();
+            case APPROACH_TARGET -> tickApproachTarget();
             case SWITCH_TO_MACE -> tickSwitchToMace();
             case ATTACK -> tickAwaitAttack();
             case AFTER_ATTACK -> tickAfterAttack();
@@ -305,7 +309,6 @@ public class MaceAura extends Module {
         }
 
         launchTicks = 0;
-        sawUpwardMotion = false;
         windChargeRestoreQueued = true;
         windChargeRestoreSlotDelayTicks = WIND_CHARGE_RESTORE_SLOT_DELAY_TICKS;
         setStage(Stage.WAIT_LAUNCH);
@@ -316,8 +319,7 @@ public class MaceAura extends Module {
 
         Vec3 velocity = mc.player.getDeltaMovement();
         if (velocity.y > LAUNCH_VELOCITY_THRESHOLD || !mc.player.onGround()) {
-            sawUpwardMotion = velocity.y > LAUNCH_VELOCITY_THRESHOLD;
-            setStage(Stage.WAIT_APEX);
+            setStage(Stage.APPROACH_TARGET);
             return;
         }
 
@@ -327,7 +329,7 @@ public class MaceAura extends Module {
         }
     }
 
-    private void tickWaitApex() {
+    private void tickApproachTarget() {
         if (target == null) {
             setStage(Stage.ACQUIRE_TARGET);
             return;
@@ -335,36 +337,14 @@ public class MaceAura extends Module {
 
         aimAtTarget();
 
-        Vec3 velocity = mc.player.getDeltaMovement();
-        if (velocity.y > LAUNCH_VELOCITY_THRESHOLD) {
-            sawUpwardMotion = true;
+        if (isTargetInAttackRange(target)) {
+            setStage(Stage.SWITCH_TO_MACE);
+            tickSwitchToMace();
+            return;
         }
 
         launchTicks++;
-        if (hasReachedApex(velocity)) {
-            setStage(Stage.DIVE);
-            return;
-        }
-
         if (mc.player.onGround() && launchTicks > MIN_LAUNCH_TICKS) {
-            setStage(Stage.USE_WIND_CHARGE);
-        }
-    }
-
-    private void tickDive() {
-        if (target == null) {
-            setStage(Stage.ACQUIRE_TARGET);
-            return;
-        }
-
-        aimAtTarget();
-
-        if (canAttackTarget(target)) {
-            setStage(Stage.SWITCH_TO_MACE);
-            return;
-        }
-
-        if (mc.player.onGround()) {
             setStage(Stage.USE_WIND_CHARGE);
         }
     }
@@ -377,13 +357,14 @@ public class MaceAura extends Module {
 
         aimAtTarget();
 
-        if (!canAttackTarget(target)) {
-            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.DIVE);
+        if (!isTargetInAttackRange(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
             return;
         }
 
         if (selectMaceSlot()) {
             setStage(Stage.ATTACK);
+            tickAttack();
         }
     }
 
@@ -395,8 +376,8 @@ public class MaceAura extends Module {
 
         aimAtTarget();
 
-        if (!canAttackTarget(target)) {
-            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.DIVE);
+        if (!isTargetInAttackRange(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
             return;
         }
 
@@ -418,8 +399,8 @@ public class MaceAura extends Module {
 
         aimAtTarget();
 
-        if (!canAttackTarget(target)) {
-            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.DIVE);
+        if (!isTargetInAttackRange(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.APPROACH_TARGET);
         }
     }
 
@@ -522,14 +503,8 @@ public class MaceAura extends Module {
         return true;
     }
 
-    private boolean canAttackTarget(LivingEntity target) {
-        if (RotationUtility.getEyeDistanceToEntity(target) > attackRange.getValue()) {
-            return false;
-        }
-
-        Vec3 velocity = mc.player.getDeltaMovement();
-        return velocity.y <= FALLING_ATTACK_VELOCITY
-                && (mc.player.fallDistance >= MIN_MACE_FALL_DISTANCE || mc.player.getY() > target.getY() + 1.5D);
+    private boolean isTargetInAttackRange(LivingEntity target) {
+        return RotationUtility.getEyeDistanceToEntity(target) <= attackRange.getValue();
     }
 
     private int ensureHotbarItem(Item item, int reservedSlot) {
@@ -668,16 +643,6 @@ public class MaceAura extends Module {
         return RotationUtility.calculate(target.getBoundingBox().getCenter()).x;
     }
 
-    private boolean hasReachedApex(Vec3 velocity) {
-        if (launchTicks < MIN_APEX_TICKS) {
-            return false;
-        }
-
-        return (sawUpwardMotion && velocity.y <= 0.03D)
-                || (mc.player.fallDistance > 0.0F && velocity.y < 0.0D)
-                || launchTicks >= APEX_TIMEOUT_TICKS;
-    }
-
     private boolean canRun() {
         return mc.player != null
                 && mc.level != null
@@ -702,7 +667,14 @@ public class MaceAura extends Module {
 
     private boolean shouldControlInput() {
         return switch (stage) {
-            case JUMP, WIND_CHARGE_USE, WAIT_LAUNCH, WAIT_APEX, DIVE, SWITCH_TO_MACE, ATTACK, AFTER_ATTACK -> true;
+            case JUMP, WIND_CHARGE_USE, WAIT_LAUNCH, APPROACH_TARGET, SWITCH_TO_MACE, ATTACK, AFTER_ATTACK -> true;
+            default -> false;
+        };
+    }
+
+    private boolean shouldApproachTarget() {
+        return target != null && switch (stage) {
+            case APPROACH_TARGET, SWITCH_TO_MACE, ATTACK -> true;
             default -> false;
         };
     }
@@ -720,7 +692,6 @@ public class MaceAura extends Module {
         stageTicks = 0;
         launchTicks = 0;
         attackHoldTicks = 0;
-        sawUpwardMotion = false;
         restoreQueuedWindChargeSlotNow();
         stage = Stage.ACQUIRE_TARGET;
     }
@@ -765,8 +736,7 @@ public class MaceAura extends Module {
         JUMP,
         WIND_CHARGE_USE,
         WAIT_LAUNCH,
-        WAIT_APEX,
-        DIVE,
+        APPROACH_TARGET,
         SWITCH_TO_MACE,
         ATTACK,
         AFTER_ATTACK
