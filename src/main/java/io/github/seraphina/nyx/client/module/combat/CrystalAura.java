@@ -81,12 +81,12 @@ public class CrystalAura extends Module {
 
     // 放置速度
     public final IntValue placeSpeed = ValueBuild.intSetting("placeTimer",
-            10, 1, 20, 1,
+            10, 1, 40, 1,
             this);
 
     // 破坏速度
     public final IntValue breakSpeed = ValueBuild.intSetting("breakTimer",
-            10, 1, 20, 1,
+            10, 1, 40, 1,
             this);
 
     // 放置距离
