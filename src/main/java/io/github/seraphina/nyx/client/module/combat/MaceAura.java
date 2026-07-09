@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.module.combat;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.impl.ClickEvent;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
@@ -17,10 +18,8 @@ import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
@@ -41,30 +40,33 @@ public class MaceAura extends Module {
     public static final MaceAura INSTANCE = new MaceAura();
 
     private static final float DOWN_PITCH = 90.0F;
-    private static final float CLIMB_PITCH = -35.0F;
-    private static final int EQUIP_CONFIRM_TIMEOUT_TICKS = 20;
-    private static final int GLIDE_CONFIRM_TIMEOUT_TICKS = 30;
-    private static final int GLIDE_PACKET_DELAY_TICKS = 2;
+    private static final int WIND_CHARGE_USE_TIMEOUT_TICKS = 10;
+    private static final int WIND_CHARGE_RESTORE_SLOT_DELAY_TICKS = 2;
+    private static final int MIN_LAUNCH_TICKS = 3;
     private static final int MIN_APEX_TICKS = 5;
     private static final int APEX_TIMEOUT_TICKS = 60;
+    private static final int ATTACK_HOLD_TICKS = 5;
+    private static final int AFTER_ATTACK_TIMEOUT_TICKS = 20;
     private static final int STAGE_TIMEOUT_TICKS = 120;
+    private static final double LAUNCH_VELOCITY_THRESHOLD = 0.08D;
+    private static final double FALLING_ATTACK_VELOCITY = -0.18D;
+    private static final float MIN_MACE_FALL_DISTANCE = 1.5F;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
     public final EnumValue<ItemType> itemType = ValueBuild.enumSetting("item type", ItemType.WIND_CHARGE, this);
     public final DoubleValue targetRange = ValueBuild.doubleSetting("target range", 24.0D, 4.0D, 64.0D, 0.5D, this);
     public final DoubleValue attackRange = ValueBuild.doubleSetting("attack range", 4.5D, 2.5D, 8.0D, 0.1D, this);
-    public final DoubleValue diveSpeed = ValueBuild.doubleSetting("dive speed", 1.6D, 0.3D, 3.5D, 0.1D, this);
     public final IntValue blockheight = ValueBuild.intSetting("block height", 15, 10, 40, 1, () -> itemType.getValue() == ItemType.FIREWORK_ROCKET, this);
 
     private Stage stage = Stage.ACQUIRE_TARGET;
     private LivingEntity target;
     private int originalSelectedSlot = InventoryUtility.NOT_FOUND;
-    private ItemStack originalChestStack = ItemStack.EMPTY;
-    private int elytraRestoreSlot = InventoryUtility.NOT_FOUND;
-    private boolean equippedElytra;
+    private int windChargeOriginalSlot = InventoryUtility.NOT_FOUND;
+    private int windChargeSlot = InventoryUtility.NOT_FOUND;
+    private int windChargeRestoreSlotDelayTicks;
     private int stageTicks;
-    private int glidePacketDelayTicks;
     private int launchTicks;
+    private int attackHoldTicks;
     private boolean sawUpwardMotion;
     private boolean warnedMissingLoadout;
     private boolean warnedFireworkOnly;
@@ -79,7 +81,6 @@ public class MaceAura extends Module {
     @Override
     public void onDisable() {
         restoreOriginalSelectedSlot();
-        restoreChestSlot();
         RotationManager.INSTANCE.setActive(false);
         resetRuntimeState();
         DebugUtility.msg("MaceAura disabled");
@@ -95,18 +96,37 @@ public class MaceAura extends Module {
         event.setStrafe(0.0F);
         event.setSprint(false);
         event.setSneak(false);
+        event.setJump(false);
+    }
 
-        switch (stage) {
-            case JUMP_RELEASE -> {
-                event.setJump(false);
-                setStage(Stage.JUMP_PRESS);
-            }
-            case JUMP_PRESS -> {
-                event.setJump(true);
-                setStage(Stage.WAIT_AIRBORNE);
-            }
-            default -> event.setJump(false);
+    @EventTarget(4)
+    public void onClick(ClickEvent event) {
+        if (stage != Stage.WIND_CHARGE_USE) {
+            return;
         }
+
+        event.setCancelled(true);
+        drainUseClicks();
+
+        if (!canRun()
+                || InventoryUtility.getSelectedHotbarSlot() != windChargeSlot
+                || !canUseHotbarItem(windChargeSlot, Items.WIND_CHARGE)) {
+            restoreQueuedWindChargeSlotNow();
+            setStage(Stage.USE_WIND_CHARGE);
+            return;
+        }
+
+        rotateDown();
+        if (!useSelectedItem()) {
+            restoreQueuedWindChargeSlotNow();
+            setStage(Stage.USE_WIND_CHARGE);
+            return;
+        }
+
+        launchTicks = 0;
+        sawUpwardMotion = false;
+        windChargeRestoreSlotDelayTicks = WIND_CHARGE_RESTORE_SLOT_DELAY_TICKS;
+        setStage(Stage.WAIT_LAUNCH);
     }
 
     @EventTarget
@@ -119,6 +139,8 @@ public class MaceAura extends Module {
 
     @EventTarget
     public void onPostTick(TickEvent.Post event) {
+        tickWindChargeSlotRestore();
+
         if (!canRun()) {
             resetCombatCycle();
             return;
@@ -127,7 +149,7 @@ public class MaceAura extends Module {
         DetectedLoadout loadout = detectLoadout();
         if (loadout == null) {
             if (!warnedMissingLoadout) {
-                DebugUtility.msg("MaceAura waiting: need elytra, mace and wind charge/firework rocket");
+                DebugUtility.msg("MaceAura waiting: need mace and wind charge/firework rocket");
                 warnedMissingLoadout = true;
             }
             resetCombatCycle();
@@ -167,157 +189,77 @@ public class MaceAura extends Module {
         switch (stage) {
             case ACQUIRE_TARGET -> {
                 if (target != null) {
-                    setStage(Stage.EQUIP_ELYTRA);
+                    setStage(Stage.USE_WIND_CHARGE);
                 }
             }
-            case EQUIP_ELYTRA -> tickEquipElytra();
-            case WAIT_ELYTRA_EQUIP -> tickWaitElytraEquip();
-            case START_GLIDE -> tickStartGlide();
-            case JUMP_RELEASE, JUMP_PRESS -> {
-            }
-            case WAIT_AIRBORNE -> tickWaitAirborne();
-            case WAIT_GLIDE -> tickWaitGlide();
             case USE_WIND_CHARGE -> tickUseWindCharge();
+            case WIND_CHARGE_USE -> tickQueuedWindChargeUse();
+            case WAIT_LAUNCH -> tickWaitLaunch();
             case WAIT_APEX -> tickWaitApex();
             case DIVE -> tickDive();
-        }
-    }
-
-    private void tickEquipElytra() {
-        if (isWearingElytra()) {
-            setStage(Stage.START_GLIDE);
-            return;
-        }
-
-        int elytraSlot = InventoryUtility.findInventorySlot(Items.ELYTRA);
-        if (!InventoryUtility.isValidInventorySlot(elytraSlot)) {
-            setStage(Stage.ACQUIRE_TARGET);
-            return;
-        }
-
-        if (!equippedElytra) {
-            originalChestStack = mc.player.getItemBySlot(EquipmentSlot.CHEST).copy();
-            elytraRestoreSlot = elytraSlot;
-            equippedElytra = true;
-        }
-
-        if (InventoryUtility.equipFromInventorySlot(elytraSlot)) {
-            setStage(Stage.WAIT_ELYTRA_EQUIP);
-        }
-    }
-
-    private void tickWaitElytraEquip() {
-        if (isWearingElytra()) {
-            setStage(Stage.START_GLIDE);
-            return;
-        }
-
-        if (stageTicks > EQUIP_CONFIRM_TIMEOUT_TICKS) {
-            setStage(Stage.ACQUIRE_TARGET);
-        }
-    }
-
-    private void tickStartGlide() {
-        if (!isWearingElytra()) {
-            setStage(Stage.EQUIP_ELYTRA);
-            return;
-        }
-
-        if (mc.player.isFallFlying()) {
-            setStage(Stage.USE_WIND_CHARGE);
-            return;
-        }
-
-        if (!canStartFallFlying()) {
-            setStage(Stage.ACQUIRE_TARGET);
-            return;
-        }
-
-        if (mc.player.onGround()) {
-            setStage(Stage.JUMP_RELEASE);
-            return;
-        }
-
-        startFallFlying();
-        setStage(Stage.WAIT_GLIDE);
-    }
-
-    private void tickWaitAirborne() {
-        if (!isWearingElytra()) {
-            setStage(Stage.EQUIP_ELYTRA);
-            return;
-        }
-
-        if (mc.player.isFallFlying()) {
-            setStage(Stage.USE_WIND_CHARGE);
-            return;
-        }
-
-        if (!canStartFallFlying()) {
-            setStage(Stage.ACQUIRE_TARGET);
-            return;
-        }
-
-        if (!mc.player.onGround()) {
-            startFallFlying();
-            setStage(Stage.WAIT_GLIDE);
-        }
-    }
-
-    private void tickWaitGlide() {
-        if (mc.player.isFallFlying()) {
-            setStage(Stage.USE_WIND_CHARGE);
-            return;
-        }
-
-        if (!canStartFallFlying()) {
-            setStage(Stage.START_GLIDE);
-            return;
-        }
-
-        if (mc.player.onGround()) {
-            setStage(Stage.START_GLIDE);
-            return;
-        }
-
-        if (glidePacketDelayTicks > 0) {
-            glidePacketDelayTicks--;
-        } else {
-            startFallFlying();
-        }
-
-        if (stageTicks > GLIDE_CONFIRM_TIMEOUT_TICKS) {
-            setStage(Stage.START_GLIDE);
+            case SWITCH_TO_MACE -> tickSwitchToMace();
+            case ATTACK -> tickAttack();
+            case AFTER_ATTACK -> tickAfterAttack();
         }
     }
 
     private void tickUseWindCharge() {
-        if (!isWearingElytra()) {
-            setStage(Stage.EQUIP_ELYTRA);
+        if (target == null || !mc.player.onGround()) {
             return;
-        }
-
-        if (!mc.player.isFallFlying() && !mc.player.onGround() && canStartFallFlying()) {
-            startFallFlying();
         }
 
         rotateDown();
 
-        int maceSlot = InventoryUtility.findHotbarSlot(Items.MACE);
-        int windChargeSlot = ensureHotbarItem(Items.WIND_CHARGE, maceSlot);
-        if (!canUseHotbarItem(windChargeSlot, Items.WIND_CHARGE)) {
+        int reservedMaceSlot = InventoryUtility.findHotbarSlot(Items.MACE);
+        int foundWindChargeSlot = ensureHotbarItem(Items.WIND_CHARGE, reservedMaceSlot);
+        if (!canUseHotbarItem(foundWindChargeSlot, Items.WIND_CHARGE)) {
+            return;
+        }
+
+        int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (!Inventory.isHotbarSlot(selectedSlot)) {
+            return;
+        }
+
+        windChargeOriginalSlot = selectedSlot;
+        windChargeSlot = foundWindChargeSlot;
+        if (selectedSlot != foundWindChargeSlot && !InventoryUtility.selectHotbarSlot(foundWindChargeSlot)) {
+            clearQueuedWindCharge();
+            return;
+        }
+
+        setStage(Stage.WIND_CHARGE_USE);
+    }
+
+    private void tickQueuedWindChargeUse() {
+        rotateDown();
+
+        if (stageTicks > WIND_CHARGE_USE_TIMEOUT_TICKS) {
+            restoreQueuedWindChargeSlotNow();
+            setStage(Stage.USE_WIND_CHARGE);
             return;
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != windChargeSlot
-                && !InventoryUtility.selectHotbarSlot(windChargeSlot, true)) {
+                || !canUseHotbarItem(windChargeSlot, Items.WIND_CHARGE)) {
+            restoreQueuedWindChargeSlotNow();
+            setStage(Stage.USE_WIND_CHARGE);
+        }
+    }
+
+    private void tickWaitLaunch() {
+        rotateDown();
+
+        Vec3 velocity = mc.player.getDeltaMovement();
+        if (velocity.y > LAUNCH_VELOCITY_THRESHOLD || !mc.player.onGround()) {
+            sawUpwardMotion = velocity.y > LAUNCH_VELOCITY_THRESHOLD;
+            setStage(Stage.WAIT_APEX);
             return;
         }
 
-        if (useSelectedItem()) {
-            launchTicks = 0;
-            sawUpwardMotion = false;
-            setStage(Stage.WAIT_APEX);
+        launchTicks++;
+        if (launchTicks > WIND_CHARGE_USE_TIMEOUT_TICKS) {
+            setStage(Stage.USE_WIND_CHARGE);
         }
     }
 
@@ -327,11 +269,10 @@ public class MaceAura extends Module {
             return;
         }
 
-        keepFallFlying();
-        rotateClimb();
+        aimAtTarget();
 
         Vec3 velocity = mc.player.getDeltaMovement();
-        if (velocity.y > 0.08D) {
+        if (velocity.y > LAUNCH_VELOCITY_THRESHOLD) {
             sawUpwardMotion = true;
         }
 
@@ -341,8 +282,8 @@ public class MaceAura extends Module {
             return;
         }
 
-        if (mc.player.onGround() && launchTicks > MIN_APEX_TICKS) {
-            setStage(Stage.START_GLIDE);
+        if (mc.player.onGround() && launchTicks > MIN_LAUNCH_TICKS) {
+            setStage(Stage.USE_WIND_CHARGE);
         }
     }
 
@@ -352,32 +293,79 @@ public class MaceAura extends Module {
             return;
         }
 
-        if (!isWearingElytra()) {
-            setStage(Stage.EQUIP_ELYTRA);
-            return;
-        }
-
-        keepFallFlying();
         aimAtTarget();
-        applyDiveVelocity();
 
-        if (canAttackTarget(target) && attackTarget(target)) {
-            setStage(Stage.USE_WIND_CHARGE);
+        if (canAttackTarget(target)) {
+            setStage(Stage.SWITCH_TO_MACE);
             return;
         }
 
         if (mc.player.onGround()) {
-            setStage(Stage.START_GLIDE);
+            setStage(Stage.USE_WIND_CHARGE);
+        }
+    }
+
+    private void tickSwitchToMace() {
+        if (target == null) {
+            setStage(Stage.ACQUIRE_TARGET);
+            return;
+        }
+
+        aimAtTarget();
+
+        if (!canAttackTarget(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.DIVE);
+            return;
+        }
+
+        if (selectMaceSlot()) {
+            setStage(Stage.ATTACK);
+        }
+    }
+
+    private void tickAttack() {
+        if (target == null) {
+            setStage(Stage.ACQUIRE_TARGET);
+            return;
+        }
+
+        aimAtTarget();
+
+        if (!canAttackTarget(target)) {
+            setStage(mc.player.onGround() ? Stage.USE_WIND_CHARGE : Stage.DIVE);
+            return;
+        }
+
+        if (attackTarget(target)) {
+            attackHoldTicks = ATTACK_HOLD_TICKS;
+            setStage(Stage.AFTER_ATTACK);
+        }
+    }
+
+    private void tickAfterAttack() {
+        aimAtTarget();
+
+        if (attackHoldTicks > 0) {
+            attackHoldTicks--;
+            return;
+        }
+
+        if (target == null || !target.isAlive() || target.isRemoved()) {
+            setStage(Stage.ACQUIRE_TARGET);
+            return;
+        }
+
+        if (mc.player.onGround() || stageTicks > AFTER_ATTACK_TIMEOUT_TICKS) {
+            setStage(Stage.USE_WIND_CHARGE);
         }
     }
 
     private DetectedLoadout detectLoadout() {
-        boolean hasElytra = isWearingElytra() || InventoryUtility.findInventorySlot(Items.ELYTRA) != InventoryUtility.NOT_FOUND;
         boolean hasMace = InventoryUtility.findInventorySlot(Items.MACE) != InventoryUtility.NOT_FOUND;
         boolean hasWindCharge = InventoryUtility.findInventorySlot(Items.WIND_CHARGE) != InventoryUtility.NOT_FOUND;
         boolean hasFireworkRocket = InventoryUtility.findInventorySlot(Items.FIREWORK_ROCKET) != InventoryUtility.NOT_FOUND;
 
-        if (!hasElytra || !hasMace || (!hasWindCharge && !hasFireworkRocket)) {
+        if (!hasMace || (!hasWindCharge && !hasFireworkRocket)) {
             return null;
         }
 
@@ -422,15 +410,18 @@ public class MaceAura extends Module {
                 && RotationUtility.getEyeDistanceToEntity(entity) <= range;
     }
 
-    private boolean attackTarget(LivingEntity target) {
-        int windChargeSlot = InventoryUtility.findHotbarSlot(Items.WIND_CHARGE);
+    private boolean selectMaceSlot() {
         int maceSlot = ensureHotbarItem(Items.MACE, windChargeSlot);
         if (!canHoldHotbarItem(maceSlot, Items.MACE)) {
             return false;
         }
 
-        if (InventoryUtility.getSelectedHotbarSlot() != maceSlot
-                && !InventoryUtility.selectHotbarSlot(maceSlot, true)) {
+        return InventoryUtility.getSelectedHotbarSlot() == maceSlot
+                || InventoryUtility.selectHotbarSlot(maceSlot);
+    }
+
+    private boolean attackTarget(LivingEntity target) {
+        if (!InventoryUtility.getSelectedStack().is(Items.MACE)) {
             return false;
         }
 
@@ -443,7 +434,9 @@ public class MaceAura extends Module {
                 "MaceAura attacked ",
                 target.getName().getString(),
                 ": range=",
-                format(RotationUtility.getEyeDistanceToEntity(target))
+                format(RotationUtility.getEyeDistanceToEntity(target)),
+                ", fall=",
+                format(mc.player.fallDistance)
         );
         return true;
     }
@@ -454,7 +447,8 @@ public class MaceAura extends Module {
         }
 
         Vec3 velocity = mc.player.getDeltaMovement();
-        return velocity.y < -0.03D || mc.player.fallDistance > 0.0F || mc.player.getY() > target.getY() + 0.5D;
+        return velocity.y <= FALLING_ATTACK_VELOCITY
+                && (mc.player.fallDistance >= MIN_MACE_FALL_DISTANCE || mc.player.getY() > target.getY() + 1.5D);
     }
 
     private int ensureHotbarItem(Item item, int reservedSlot) {
@@ -532,16 +526,51 @@ public class MaceAura extends Module {
         return false;
     }
 
+    private void tickWindChargeSlotRestore() {
+        if (!Inventory.isHotbarSlot(windChargeOriginalSlot)
+                || !Inventory.isHotbarSlot(windChargeSlot)
+                || windChargeOriginalSlot == windChargeSlot) {
+            return;
+        }
+
+        if (windChargeRestoreSlotDelayTicks > 0) {
+            windChargeRestoreSlotDelayTicks--;
+            return;
+        }
+
+        if (mc.player != null && InventoryUtility.getSelectedHotbarSlot() == windChargeSlot) {
+            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot);
+        }
+
+        clearQueuedWindCharge();
+    }
+
+    private void clearQueuedWindCharge() {
+        windChargeOriginalSlot = InventoryUtility.NOT_FOUND;
+        windChargeSlot = InventoryUtility.NOT_FOUND;
+        windChargeRestoreSlotDelayTicks = 0;
+    }
+
+    private void restoreQueuedWindChargeSlotNow() {
+        if (mc.player != null
+                && Inventory.isHotbarSlot(windChargeOriginalSlot)
+                && Inventory.isHotbarSlot(windChargeSlot)
+                && windChargeOriginalSlot != windChargeSlot
+                && InventoryUtility.getSelectedHotbarSlot() == windChargeSlot) {
+            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot);
+        }
+
+        clearQueuedWindCharge();
+    }
+
     private void rotateDown() {
         RotationManager.INSTANCE.setRotations(new Vector2f(targetYaw(), DOWN_PITCH), 180.0D, Priority.Highest);
     }
 
-    private void rotateClimb() {
-        RotationManager.INSTANCE.setRotations(new Vector2f(targetYaw(), CLIMB_PITCH), 180.0D, Priority.Highest);
-    }
-
     private void aimAtTarget() {
-        RotationManager.INSTANCE.setRotations(RotationUtility.calculate(target.getBoundingBox().getCenter()), 180.0D, Priority.Highest);
+        if (target != null) {
+            RotationManager.INSTANCE.setRotations(RotationUtility.calculate(target.getBoundingBox().getCenter()), 180.0D, Priority.Highest);
+        }
     }
 
     private float targetYaw() {
@@ -552,15 +581,6 @@ public class MaceAura extends Module {
         return RotationUtility.calculate(target.getBoundingBox().getCenter()).x;
     }
 
-    private void applyDiveVelocity() {
-        Vec3 direction = target.getBoundingBox().getCenter().subtract(mc.player.getBoundingBox().getCenter());
-        if (direction.lengthSqr() < 1.0E-6D) {
-            return;
-        }
-
-        mc.player.setDeltaMovement(direction.normalize().scale(diveSpeed.getValue()));
-    }
-
     private boolean hasReachedApex(Vec3 velocity) {
         if (launchTicks < MIN_APEX_TICKS) {
             return false;
@@ -569,46 +589,6 @@ public class MaceAura extends Module {
         return (sawUpwardMotion && velocity.y <= 0.03D)
                 || (mc.player.fallDistance > 0.0F && velocity.y < 0.0D)
                 || launchTicks >= APEX_TIMEOUT_TICKS;
-    }
-
-    private void keepFallFlying() {
-        if (mc.player.isFallFlying() || mc.player.onGround() || !canStartFallFlying()) {
-            return;
-        }
-
-        if (glidePacketDelayTicks > 0) {
-            glidePacketDelayTicks--;
-            return;
-        }
-
-        startFallFlying();
-    }
-
-    private void startFallFlying() {
-        if (mc.player == null || mc.player.connection == null || mc.player.onGround()) {
-            return;
-        }
-
-        mc.player.connection.send(new ServerboundPlayerCommandPacket(
-                mc.player,
-                ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
-        ));
-        mc.player.startFallFlying();
-        glidePacketDelayTicks = GLIDE_PACKET_DELAY_TICKS;
-    }
-
-    private boolean canStartFallFlying() {
-        return mc.player != null
-                && isWearingElytra()
-                && !mc.player.isPassenger()
-                && !mc.player.isSpectator()
-                && !mc.player.getAbilities().flying
-                && !mc.player.isInWater()
-                && !mc.player.isInLava();
-    }
-
-    private boolean isWearingElytra() {
-        return mc.player != null && mc.player.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA);
     }
 
     private boolean canRun() {
@@ -624,9 +604,10 @@ public class MaceAura extends Module {
     }
 
     private void recoverFromTimeout() {
-        switch (stage) {
-            case WAIT_APEX, DIVE, USE_WIND_CHARGE -> setStage(Stage.START_GLIDE);
-            default -> setStage(Stage.ACQUIRE_TARGET);
+        if (mc.player != null && mc.player.onGround()) {
+            setStage(Stage.USE_WIND_CHARGE);
+        } else {
+            setStage(Stage.ACQUIRE_TARGET);
         }
     }
 
@@ -634,17 +615,15 @@ public class MaceAura extends Module {
         target = null;
         stageTicks = 0;
         launchTicks = 0;
+        attackHoldTicks = 0;
         sawUpwardMotion = false;
-        glidePacketDelayTicks = 0;
+        restoreQueuedWindChargeSlotNow();
         stage = Stage.ACQUIRE_TARGET;
     }
 
     private void resetRuntimeState() {
         resetCombatCycle();
         originalSelectedSlot = InventoryUtility.NOT_FOUND;
-        originalChestStack = ItemStack.EMPTY;
-        elytraRestoreSlot = InventoryUtility.NOT_FOUND;
-        equippedElytra = false;
         warnedMissingLoadout = false;
         warnedFireworkOnly = false;
     }
@@ -664,46 +643,9 @@ public class MaceAura extends Module {
         }
     }
 
-    private void restoreChestSlot() {
-        if (!equippedElytra || mc.player == null || !isWearingElytra()) {
-            return;
+    private void drainUseClicks() {
+        while (mc.options.keyUse.consumeClick()) {
         }
-
-        int restoreTarget = findChestRestoreTarget();
-        if (restoreTarget != InventoryUtility.NOT_FOUND) {
-            InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, restoreTarget);
-        }
-    }
-
-    private int findChestRestoreTarget() {
-        if (isUsableChestRestoreSlot(elytraRestoreSlot)) {
-            return elytraRestoreSlot;
-        }
-
-        if (!originalChestStack.isEmpty()) {
-            int originalSlot = InventoryUtility.findSlot(this::isOriginalChestStack);
-            if (originalSlot != InventoryUtility.NOT_FOUND && originalSlot != InventoryUtility.ARMOR_CHEST_SLOT) {
-                return originalSlot;
-            }
-
-            return InventoryUtility.NOT_FOUND;
-        }
-
-        int emptySlot = InventoryUtility.findEmptySlot();
-        return emptySlot == InventoryUtility.ARMOR_CHEST_SLOT ? InventoryUtility.NOT_FOUND : emptySlot;
-    }
-
-    private boolean isUsableChestRestoreSlot(int inventorySlot) {
-        if (!InventoryUtility.isValidInventorySlot(inventorySlot) || inventorySlot == InventoryUtility.ARMOR_CHEST_SLOT) {
-            return false;
-        }
-
-        ItemStack stack = InventoryUtility.getStack(inventorySlot);
-        return originalChestStack.isEmpty() ? stack.isEmpty() : isOriginalChestStack(stack);
-    }
-
-    private boolean isOriginalChestStack(ItemStack stack) {
-        return !stack.isEmpty() && ItemStack.isSameItemSameComponents(stack, originalChestStack);
     }
 
     private String format(double value) {
@@ -720,16 +662,14 @@ public class MaceAura extends Module {
 
     private enum Stage {
         ACQUIRE_TARGET,
-        EQUIP_ELYTRA,
-        WAIT_ELYTRA_EQUIP,
-        START_GLIDE,
-        JUMP_RELEASE,
-        JUMP_PRESS,
-        WAIT_AIRBORNE,
-        WAIT_GLIDE,
         USE_WIND_CHARGE,
+        WIND_CHARGE_USE,
+        WAIT_LAUNCH,
         WAIT_APEX,
-        DIVE
+        DIVE,
+        SWITCH_TO_MACE,
+        ATTACK,
+        AFTER_ATTACK
     }
 
     private record DetectedLoadout(DuelMode duelMode, ItemType itemType) {
