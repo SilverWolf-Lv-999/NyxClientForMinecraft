@@ -5,7 +5,6 @@ import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
 import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
-import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
@@ -19,7 +18,7 @@ import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
@@ -93,6 +92,8 @@ public class MaceAura extends Module {
     private float fireworkAscendPitch;
     private ItemStack fireworkOriginalChestStack = ItemStack.EMPTY;
     private boolean fireworkDiveBoostUsed;
+    private boolean fireworkReleasedJumpForGlide;
+    private boolean fireworkPressJumpForGlide;
     private boolean warnedMissingLoadout;
 
     @Override
@@ -134,20 +135,7 @@ public class MaceAura extends Module {
 
     @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
-        if (!canRun()) {
-            return;
-        }
-
-        switch (stage) {
-            case JUMP -> tickJumpBeforeMove();
-            case WIND_CHARGE_USE -> tickQueuedWindChargeUseBeforeMove();
-            case FIREWORK_START_ASCENT -> tickFireworkStartAscentBeforeMove();
-            case FIREWORK_ASCENT, FIREWORK_AFTER_ATTACK_HOLD_ARMOR -> rotateFireworkAscent();
-            case FIREWORK_START_DIVE, FIREWORK_DIVE_FIREWORK -> aimAtTarget();
-            case ATTACK -> tickAttackBeforeMove();
-            default -> {
-            }
-        }
+        tickCombatCycle();
     }
 
     @EventTarget
@@ -158,8 +146,8 @@ public class MaceAura extends Module {
         }
     }
 
-    @EventTarget
-    public void onPostTick(TickEvent.Post event) {
+    private void tickCombatCycle() {
+        fireworkPressJumpForGlide = false;
         tickActionDelays();
 
         if (!canRun()) {
@@ -181,8 +169,6 @@ public class MaceAura extends Module {
         syncDetectedValues(loadout);
         tickHeldMaceState();
 
-        stageTicks++;
-
         if (stageTicks > STAGE_TIMEOUT_TICKS) {
             recoverFromTimeout();
             return;
@@ -194,7 +180,11 @@ public class MaceAura extends Module {
             return;
         }
 
+        Stage stageBeforeTick = stage;
         tickStage();
+        if (stage == stageBeforeTick) {
+            stageTicks++;
+        }
     }
 
     private void tickStage() {
@@ -206,7 +196,7 @@ public class MaceAura extends Module {
             }
             case USE_WIND_CHARGE -> tickUseWindCharge();
             case JUMP -> tickJumpForWindCharge();
-            case WIND_CHARGE_USE -> tickAwaitQueuedWindChargeUse();
+            case WIND_CHARGE_USE -> tickQueuedWindChargeUse();
             case WAIT_LAUNCH -> tickWaitLaunch();
             case FIREWORK_PREPARE -> tickPrepareFireworkRocket();
             case FIREWORK_EQUIP_ELYTRA -> tickEquipFireworkElytra();
@@ -219,7 +209,7 @@ public class MaceAura extends Module {
             case FIREWORK_AFTER_ATTACK_HOLD_ARMOR -> tickPostAttackFireworkArmorHold();
             case APPROACH_TARGET -> tickApproachTarget();
             case SWITCH_TO_MACE -> tickSwitchToMace();
-            case ATTACK -> tickAwaitAttack();
+            case ATTACK -> tickAttack();
             case AFTER_ATTACK -> tickAfterAttack();
         }
     }
@@ -257,15 +247,12 @@ public class MaceAura extends Module {
         setStage(Stage.JUMP);
     }
 
-    private void tickJumpBeforeMove() {
+    private void tickJumpForWindCharge() {
         rotateDown();
+
         if (stageTicks == 0 && canJumpFromGround()) {
             jumpForWindCharge();
         }
-    }
-
-    private void tickJumpForWindCharge() {
-        rotateDown();
 
         if (InventoryUtility.getSelectedHotbarSlot() != windChargeSlot
                 || !canUseHotbarItem(windChargeSlot, Items.WIND_CHARGE)) {
@@ -292,7 +279,7 @@ public class MaceAura extends Module {
         }
     }
 
-    private void tickAwaitQueuedWindChargeUse() {
+    private void tickQueuedWindChargeUse() {
         rotateDown();
 
         if (stageTicks > WIND_CHARGE_USE_TIMEOUT_TICKS) {
@@ -310,26 +297,6 @@ public class MaceAura extends Module {
 
         if (windChargeUseDelayTicks > 0) {
             windChargeUseDelayTicks--;
-        }
-    }
-
-    private void tickQueuedWindChargeUseBeforeMove() {
-        rotateDown();
-
-        if (stageTicks > WIND_CHARGE_USE_TIMEOUT_TICKS) {
-            restoreQueuedWindChargeSlotNow();
-            setStage(Stage.USE_WIND_CHARGE);
-            return;
-        }
-
-        if (InventoryUtility.getSelectedHotbarSlot() != windChargeSlot
-                || !canUseHotbarItem(windChargeSlot, Items.WIND_CHARGE)) {
-            restoreQueuedWindChargeSlotNow();
-            setStage(Stage.USE_WIND_CHARGE);
-            return;
-        }
-
-        if (windChargeUseDelayTicks > 0) {
             return;
         }
 
@@ -425,13 +392,6 @@ public class MaceAura extends Module {
         }
     }
 
-    private void tickFireworkStartAscentBeforeMove() {
-        rotateFireworkAscent();
-        if (mc.player.onGround() && canJumpFromGround()) {
-            jumpForWindCharge();
-        }
-    }
-
     private void tickStartFireworkAscent() {
         rotateFireworkAscent();
 
@@ -450,9 +410,10 @@ public class MaceAura extends Module {
         }
 
         if (!mc.player.isFallFlying()) {
-            startFallFlying();
+            requestFallFlyingStart();
             return;
         }
+        resetFireworkGlideJumpState();
 
         if (!ensureFireworkRocketSlot()) {
             return;
@@ -483,7 +444,7 @@ public class MaceAura extends Module {
         }
 
         if (!mc.player.onGround() && !mc.player.isFallFlying()) {
-            startFallFlying();
+            requestFallFlyingStart();
         }
 
         if (mc.player.getY() >= fireworkStartY + blockheight.getValue()) {
@@ -573,9 +534,10 @@ public class MaceAura extends Module {
         }
 
         if (!mc.player.isFallFlying()) {
-            startFallFlying();
+            requestFallFlyingStart();
             return;
         }
+        resetFireworkGlideJumpState();
 
         setStage(Stage.FIREWORK_DIVE_FIREWORK);
     }
@@ -595,9 +557,10 @@ public class MaceAura extends Module {
         }
 
         if (!mc.player.isFallFlying()) {
-            startFallFlying();
+            requestFallFlyingStart();
             return;
         }
+        resetFireworkGlideJumpState();
 
         if (!ensureFireworkRocketSlot()) {
             return;
@@ -754,28 +717,11 @@ public class MaceAura extends Module {
         }
     }
 
-    private void tickAttackBeforeMove() {
-        tickAttack();
-    }
-
     private void attackOrEnterAttackStage() {
         if (isFireworkDiveAttack()) {
             tickAttack();
         } else {
             setStage(Stage.ATTACK);
-        }
-    }
-
-    private void tickAwaitAttack() {
-        if (target == null) {
-            setStage(Stage.ACQUIRE_TARGET);
-            return;
-        }
-
-        aimAtTarget();
-
-        if (!canAttackTarget(target)) {
-            waitForAttackWindowOrRetry();
         }
     }
 
@@ -966,7 +912,7 @@ public class MaceAura extends Module {
         }
 
         Vector2f rotations = RotationUtility.calculate(target, true, attackRange.getValue());
-        RotationManager.INSTANCE.setRotations(rotations, 180.0D, Priority.Highest);
+        applyCombatRotation(rotations);
 
         mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
@@ -1148,16 +1094,23 @@ public class MaceAura extends Module {
         return -(float) ThreadLocalRandom.current().nextDouble(FIREWORK_MIN_ASCEND_ANGLE, FIREWORK_MAX_ASCEND_ANGLE);
     }
 
-    private void startFallFlying() {
-        if (mc.player == null || mc.player.onGround() || mc.player.isFallFlying()) {
+    private void requestFallFlyingStart() {
+        if (mc.player == null || mc.player.onGround()) {
             return;
         }
 
-        mc.player.connection.send(new ServerboundPlayerCommandPacket(
-                mc.player,
-                ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
-        ));
-        mc.player.startFallFlying();
+        if (mc.player.isFallFlying()) {
+            resetFireworkGlideJumpState();
+            return;
+        }
+
+        if (!fireworkReleasedJumpForGlide) {
+            fireworkReleasedJumpForGlide = true;
+            return;
+        }
+
+        fireworkPressJumpForGlide = true;
+        fireworkReleasedJumpForGlide = false;
     }
 
     private boolean useSelectedItem() {
@@ -1211,32 +1164,45 @@ public class MaceAura extends Module {
     }
 
     private void rotateDown() {
-        RotationManager.INSTANCE.setRotations(new Vector2f(targetYaw(), DOWN_PITCH), 180.0D, Priority.Highest);
+        applyCombatRotation(new Vector2f(targetYaw(), DOWN_PITCH));
     }
 
     private void rotateFireworkAscent() {
         Vector2f rotations = new Vector2f(fireworkAscendYaw, fireworkAscendPitch);
-        RotationManager.INSTANCE.setRotations(rotations, 180.0D, Priority.Highest);
-        syncPlayerRotation(rotations);
+        applyCombatRotation(rotations);
     }
 
     private void aimAtTarget() {
         if (target != null) {
             Vector2f rotations = RotationUtility.calculate(target.getBoundingBox().getCenter());
-            RotationManager.INSTANCE.setRotations(rotations, 180.0D, Priority.Highest);
-            if (shouldSyncPlayerRotationForFireworkDive()) {
-                syncPlayerRotation(rotations);
-            }
+            applyCombatRotation(rotations);
         }
     }
 
-    private boolean shouldSyncPlayerRotationForFireworkDive() {
-        return itemType.getValue() == ItemType.FIREWORK_ROCKET
-                && !mc.player.onGround()
-                && isFireworkRouteInProgress();
+    private Vector2f applyCombatRotation(Vector2f rotations) {
+        Vector2f fixedRotations = legitimizeRotations(rotations);
+        RotationManager.INSTANCE.setRotations(fixedRotations, 180.0D, Priority.Highest);
+
+        Vector2f appliedRotations = RotationManager.INSTANCE.getRotation();
+        syncPlayerRotation(appliedRotations);
+        return appliedRotations;
+    }
+
+    private Vector2f legitimizeRotations(Vector2f rotations) {
+        if (mc.player == null || rotations == null) {
+            return new Vector2f();
+        }
+
+        float yaw = mc.player.getYRot() + Mth.wrapDegrees(rotations.x - mc.player.getYRot());
+        float pitch = Mth.clamp(rotations.y, -90.0F, 90.0F);
+        return new Vector2f(yaw, pitch);
     }
 
     private void syncPlayerRotation(Vector2f rotations) {
+        if (mc.player == null || rotations == null) {
+            return;
+        }
+
         mc.player.setYRot(rotations.x);
         mc.player.setXRot(rotations.y);
     }
@@ -1246,7 +1212,7 @@ public class MaceAura extends Module {
             return mc.player.getYRot();
         }
 
-        return RotationUtility.calculate(target.getBoundingBox().getCenter()).x;
+        return legitimizeRotations(RotationUtility.calculate(target.getBoundingBox().getCenter())).x;
     }
 
     private boolean canRun() {
@@ -1296,7 +1262,15 @@ public class MaceAura extends Module {
     }
 
     private boolean shouldJump() {
-        return stage == Stage.JUMP || stage == Stage.FIREWORK_START_ASCENT;
+        if (stage == Stage.JUMP) {
+            return true;
+        }
+
+        if (stage == Stage.FIREWORK_START_ASCENT && mc.player != null && mc.player.onGround()) {
+            return true;
+        }
+
+        return fireworkPressJumpForGlide;
     }
 
     private boolean shouldMoveForward() {
@@ -1351,6 +1325,12 @@ public class MaceAura extends Module {
         fireworkAscendPitch = 0.0F;
         fireworkOriginalChestStack = ItemStack.EMPTY;
         fireworkDiveBoostUsed = false;
+        resetFireworkGlideJumpState();
+    }
+
+    private void resetFireworkGlideJumpState() {
+        fireworkReleasedJumpForGlide = false;
+        fireworkPressJumpForGlide = false;
     }
 
     private boolean isFireworkRouteInProgress() {
@@ -1374,6 +1354,9 @@ public class MaceAura extends Module {
 
         this.stage = stage;
         stageTicks = 0;
+        if (stage == Stage.FIREWORK_START_ASCENT || stage == Stage.FIREWORK_START_DIVE) {
+            resetFireworkGlideJumpState();
+        }
     }
 
     private void restoreOriginalSelectedSlot() {
