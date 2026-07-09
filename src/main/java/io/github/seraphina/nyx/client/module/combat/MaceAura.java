@@ -1,9 +1,12 @@
 package io.github.seraphina.nyx.client.module.combat;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.bus.EventHandler;
+import io.github.seraphina.nyx.client.events.bus.EventPriority;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
+import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
@@ -18,6 +21,8 @@ import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -64,6 +69,9 @@ public class MaceAura extends Module {
     private static final int FIREWORK_MACE_SWITCH_SETTLE_TICKS = 1;
     private static final double FIREWORK_MACE_SWITCH_RANGE_BUFFER = 5.0D;
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
+    private static final double GRIM_ATTACK_RANGE = 2.90D;
+    private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 2;
+    private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
     public final EnumValue<ItemType> itemType = ValueBuild.enumSetting("item type", ItemType.WIND_CHARGE, this);
@@ -94,12 +102,20 @@ public class MaceAura extends Module {
     private boolean fireworkDiveBoostUsed;
     private boolean fireworkReleasedJumpForGlide;
     private boolean fireworkPressJumpForGlide;
+    private Vector2f forcedUseItemRotations;
+    private Vector2f forcedOutgoingRotations;
+    private Vector2f lastOutgoingRotations;
+    private boolean usedItemThisTick;
+    private boolean waitingForMovePacketAfterUse;
+    private int postUseItemSlotDelayTicks;
+    private int queuedHotbarSlot = InventoryUtility.NOT_FOUND;
     private boolean warnedMissingLoadout;
 
     @Override
     public void onEnable() {
         resetRuntimeState();
         originalSelectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        lastOutgoingRotations = currentPlayerRotations();
         DebugUtility.msg("MaceAura enabled");
     }
 
@@ -146,14 +162,57 @@ public class MaceAura extends Module {
         }
     }
 
+    @EventHandler(priority = EventPriority.LOWEST - 1)
+    public void onPacketSend(PacketEvent.Send event) {
+        if (forcedUseItemRotations != null && event.getPacket() instanceof ServerboundUseItemPacket packet) {
+            event.setPacket(new ServerboundUseItemPacket(
+                    packet.getHand(),
+                    packet.getSequence(),
+                    forcedUseItemRotations.x,
+                    forcedUseItemRotations.y
+            ));
+        }
+
+        if (event.getPacket() instanceof ServerboundMovePlayerPacket packet) {
+            ServerboundMovePlayerPacket outgoingPacket = packet;
+            if (forcedOutgoingRotations != null) {
+                outgoingPacket = applyForcedMovePacketRotations(packet);
+                event.setPacket(outgoingPacket);
+                clearForcedOutgoingRotations();
+            }
+
+            if (outgoingPacket.hasRotation()) {
+                updateLastOutgoingRotations(outgoingPacket);
+                if (waitingForMovePacketAfterUse) {
+                    waitingForMovePacketAfterUse = false;
+                    postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
+                }
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST - 1)
+    public void onSendPosition(SendPositionEvent event) {
+        if (forcedOutgoingRotations == null) {
+            return;
+        }
+
+        event.setYaw(forcedOutgoingRotations.x);
+        event.setPitch(forcedOutgoingRotations.y);
+        syncPlayerRotation(forcedOutgoingRotations);
+    }
+
     private void tickCombatCycle() {
         fireworkPressJumpForGlide = false;
+        usedItemThisTick = false;
         tickActionDelays();
 
         if (!canRun()) {
             resetCombatCycle();
             return;
         }
+
+        applyQueuedHotbarSlot();
 
         DetectedLoadout loadout = detectLoadout();
         if (loadout == null) {
@@ -239,7 +298,11 @@ public class MaceAura extends Module {
         windChargeOriginalSlot = selectedSlot;
         maceSlot = foundMaceSlot;
         windChargeSlot = foundWindChargeSlot;
-        if (!InventoryUtility.selectHotbarSlot(foundWindChargeSlot)) {
+        if (!selectHotbarSlot(foundWindChargeSlot)) {
+            if (isQueuedHotbarSlot(foundWindChargeSlot)) {
+                return;
+            }
+
             clearQueuedWindCharge();
             return;
         }
@@ -357,7 +420,11 @@ public class MaceAura extends Module {
         maceSwitchDelayTicks = 0;
         windChargeAttackDelayTicks = 0;
 
-        if (!InventoryUtility.selectHotbarSlot(elytraSlot)) {
+        if (!selectHotbarSlot(elytraSlot)) {
+            if (isQueuedHotbarSlot(elytraSlot)) {
+                return;
+            }
+
             resetFireworkState();
             return;
         }
@@ -380,7 +447,11 @@ public class MaceAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
-                && !InventoryUtility.selectHotbarSlot(elytraSlot)) {
+                && !selectHotbarSlot(elytraSlot)) {
+            if (isQueuedHotbarSlot(elytraSlot)) {
+                return;
+            }
+
             resetFireworkState();
             setStage(Stage.FIREWORK_PREPARE);
             return;
@@ -420,7 +491,7 @@ public class MaceAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != fireworkRocketSlot
-                && !InventoryUtility.selectHotbarSlot(fireworkRocketSlot)) {
+                && !selectHotbarSlot(fireworkRocketSlot)) {
             return;
         }
 
@@ -481,7 +552,7 @@ public class MaceAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
-                && !InventoryUtility.selectHotbarSlot(elytraSlot)) {
+                && !selectHotbarSlot(elytraSlot)) {
             return;
         }
 
@@ -512,7 +583,7 @@ public class MaceAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
-                && !InventoryUtility.selectHotbarSlot(elytraSlot)) {
+                && !selectHotbarSlot(elytraSlot)) {
             return;
         }
 
@@ -567,7 +638,7 @@ public class MaceAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != fireworkRocketSlot
-                && !InventoryUtility.selectHotbarSlot(fireworkRocketSlot)) {
+                && !selectHotbarSlot(fireworkRocketSlot)) {
             return;
         }
 
@@ -614,7 +685,11 @@ public class MaceAura extends Module {
 
         prepareNextFireworkAscent();
         if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
-                && !InventoryUtility.selectHotbarSlot(elytraSlot)) {
+                && !selectHotbarSlot(elytraSlot)) {
+            if (isQueuedHotbarSlot(elytraSlot)) {
+                return;
+            }
+
             setStage(Stage.FIREWORK_EQUIP_ELYTRA);
             return;
         }
@@ -839,7 +914,7 @@ public class MaceAura extends Module {
         }
 
         boolean selected = InventoryUtility.getSelectedHotbarSlot() == maceSlot
-                || InventoryUtility.selectHotbarSlot(maceSlot);
+                || selectHotbarSlot(maceSlot);
         if (selected) {
             heldMaceTicks = 0;
         }
@@ -853,7 +928,7 @@ public class MaceAura extends Module {
         }
 
         return InventoryUtility.getSelectedHotbarSlot() == elytraSlot
-                || InventoryUtility.selectHotbarSlot(elytraSlot);
+                || selectHotbarSlot(elytraSlot);
     }
 
     private boolean equipFireworkChestArmor() {
@@ -911,8 +986,9 @@ public class MaceAura extends Module {
             return false;
         }
 
-        Vector2f rotations = RotationUtility.calculate(target, true, attackRange.getValue());
-        applyCombatRotation(rotations);
+        Vector2f rotations = RotationUtility.calculate(target, true, effectiveAttackRange());
+        Vector2f appliedRotations = applyCombatRotation(rotations);
+        forceOutgoingRotations(appliedRotations);
 
         mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
@@ -928,7 +1004,11 @@ public class MaceAura extends Module {
     }
 
     private boolean isTargetInAttackRange(LivingEntity target) {
-        return RotationUtility.getEyeDistanceToEntity(target) <= attackRange.getValue();
+        return RotationUtility.getEyeDistanceToEntity(target) <= effectiveAttackRange();
+    }
+
+    private double effectiveAttackRange() {
+        return Math.min(attackRange.getValue(), GRIM_ATTACK_RANGE);
     }
 
     private boolean canAttackTarget(LivingEntity target) {
@@ -1065,7 +1145,7 @@ public class MaceAura extends Module {
         }
 
         if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
-                && !InventoryUtility.selectHotbarSlot(elytraSlot)) {
+                && !selectHotbarSlot(elytraSlot)) {
             return true;
         }
 
@@ -1114,7 +1194,20 @@ public class MaceAura extends Module {
     }
 
     private boolean useSelectedItem() {
-        InteractionResult result = mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        Vector2f useItemRotations = makeUniqueOutgoingRotations(currentOutgoingRotations());
+        syncPlayerRotation(useItemRotations);
+        forcedUseItemRotations = new Vector2f(useItemRotations);
+        forcedOutgoingRotations = new Vector2f(useItemRotations);
+
+        InteractionResult result;
+        try {
+            result = mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        } finally {
+            forcedUseItemRotations = null;
+            usedItemThisTick = true;
+            waitingForMovePacketAfterUse = true;
+        }
+
         if (result instanceof InteractionResult.Success useSuccess) {
             if (useSuccess.swingSource() == InteractionResult.SwingSource.CLIENT) {
                 mc.player.swing(InteractionHand.MAIN_HAND);
@@ -1125,6 +1218,133 @@ public class MaceAura extends Module {
         }
 
         return false;
+    }
+
+    private Vector2f currentOutgoingRotations() {
+        if (mc.player == null) {
+            return new Vector2f();
+        }
+
+        Vector2f rotations = RotationManager.INSTANCE.isActive()
+                ? RotationManager.INSTANCE.getRotation()
+                : new Vector2f(mc.player.getYRot(), mc.player.getXRot());
+        return legitimizeRotations(rotations);
+    }
+
+    private Vector2f makeUniqueOutgoingRotations(Vector2f rotations) {
+        Vector2f uniqueRotations = legitimizeRotations(rotations);
+        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
+            return uniqueRotations;
+        }
+
+        Vector2f steppedRotations = RotationUtility.applySensitivityPatch(
+                new Vector2f(uniqueRotations.x + OUTGOING_ROTATION_DEDUP_YAW_STEP, uniqueRotations.y),
+                lastOutgoingRotations
+        );
+        uniqueRotations = legitimizeRotations(steppedRotations);
+        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
+            return uniqueRotations;
+        }
+
+        return legitimizeRotations(new Vector2f(
+                lastOutgoingRotations.x + OUTGOING_ROTATION_DEDUP_YAW_STEP,
+                lastOutgoingRotations.y
+        ));
+    }
+
+    private boolean sameRotations(Vector2f first, Vector2f second) {
+        return first != null
+                && second != null
+                && Float.compare(first.x, second.x) == 0
+                && Float.compare(first.y, second.y) == 0;
+    }
+
+    private void forceOutgoingRotations(Vector2f rotations) {
+        if (rotations == null) {
+            return;
+        }
+
+        forcedOutgoingRotations = makeUniqueOutgoingRotations(rotations);
+    }
+
+    private void clearForcedOutgoingRotations() {
+        forcedOutgoingRotations = null;
+    }
+
+    private ServerboundMovePlayerPacket applyForcedMovePacketRotations(ServerboundMovePlayerPacket packet) {
+        if (forcedOutgoingRotations == null) {
+            return packet;
+        }
+
+        if (packet.hasPosition()) {
+            return new ServerboundMovePlayerPacket.PosRot(
+                    packet.getX(0.0D),
+                    packet.getY(0.0D),
+                    packet.getZ(0.0D),
+                    forcedOutgoingRotations.x,
+                    forcedOutgoingRotations.y,
+                    packet.isOnGround(),
+                    packet.horizontalCollision()
+            );
+        }
+
+        return new ServerboundMovePlayerPacket.Rot(
+                forcedOutgoingRotations.x,
+                forcedOutgoingRotations.y,
+                packet.isOnGround(),
+                packet.horizontalCollision()
+        );
+    }
+
+    private void updateLastOutgoingRotations(ServerboundMovePlayerPacket packet) {
+        Vector2f fallbackRotations = currentPlayerRotations();
+        lastOutgoingRotations = new Vector2f(
+                packet.getYRot(fallbackRotations.x),
+                packet.getXRot(fallbackRotations.y)
+        );
+    }
+
+    private Vector2f currentPlayerRotations() {
+        if (mc.player == null) {
+            return new Vector2f();
+        }
+
+        return new Vector2f(mc.player.getYRot(), mc.player.getXRot());
+    }
+
+    private boolean selectHotbarSlot(int hotbarSlot) {
+        if (!Inventory.isHotbarSlot(hotbarSlot)) {
+            return false;
+        }
+
+        if (InventoryUtility.getSelectedHotbarSlot() == hotbarSlot) {
+            return true;
+        }
+
+        if (usedItemThisTick || waitingForMovePacketAfterUse || postUseItemSlotDelayTicks > 0) {
+            queuedHotbarSlot = hotbarSlot;
+            return false;
+        }
+
+        return InventoryUtility.selectHotbarSlot(hotbarSlot);
+    }
+
+    private void applyQueuedHotbarSlot() {
+        if (!Inventory.isHotbarSlot(queuedHotbarSlot)) {
+            queuedHotbarSlot = InventoryUtility.NOT_FOUND;
+            return;
+        }
+
+        if (waitingForMovePacketAfterUse || postUseItemSlotDelayTicks > 0) {
+            return;
+        }
+
+        InventoryUtility.selectHotbarSlot(queuedHotbarSlot);
+        queuedHotbarSlot = InventoryUtility.NOT_FOUND;
+    }
+
+    private boolean isQueuedHotbarSlot(int hotbarSlot) {
+        return Inventory.isHotbarSlot(hotbarSlot) && queuedHotbarSlot == hotbarSlot;
     }
 
     private void clearQueuedWindCharge() {
@@ -1139,7 +1359,7 @@ public class MaceAura extends Module {
                 && Inventory.isHotbarSlot(windChargeSlot)
                 && windChargeOriginalSlot != windChargeSlot
                 && InventoryUtility.getSelectedHotbarSlot() == windChargeSlot) {
-            InventoryUtility.selectHotbarSlot(windChargeOriginalSlot);
+            selectHotbarSlot(windChargeOriginalSlot);
         }
 
         clearQueuedWindCharge();
@@ -1160,6 +1380,10 @@ public class MaceAura extends Module {
 
         if (windChargeAttackDelayTicks > 0) {
             windChargeAttackDelayTicks--;
+        }
+
+        if (postUseItemSlotDelayTicks > 0) {
+            postUseItemSlotDelayTicks--;
         }
     }
 
@@ -1304,6 +1528,12 @@ public class MaceAura extends Module {
         windChargeAttackDelayTicks = 0;
         heldMaceTicks = 0;
         attackHoldTicks = 0;
+        forcedUseItemRotations = null;
+        clearForcedOutgoingRotations();
+        usedItemThisTick = false;
+        waitingForMovePacketAfterUse = false;
+        postUseItemSlotDelayTicks = 0;
+        queuedHotbarSlot = InventoryUtility.NOT_FOUND;
         restoreQueuedWindChargeSlotNow();
         resetFireworkState();
         stage = Stage.ACQUIRE_TARGET;
