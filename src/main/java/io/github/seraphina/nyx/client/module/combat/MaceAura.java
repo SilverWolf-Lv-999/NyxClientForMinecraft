@@ -21,6 +21,7 @@ import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.util.Mth;
@@ -70,7 +71,7 @@ public class MaceAura extends Module {
     private static final double FIREWORK_MACE_SWITCH_RANGE_BUFFER = 5.0D;
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
-    private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 2;
+    private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
@@ -183,11 +184,16 @@ public class MaceAura extends Module {
 
             if (outgoingPacket.hasRotation()) {
                 updateLastOutgoingRotations(outgoingPacket);
-                if (waitingForMovePacketAfterUse) {
-                    waitingForMovePacketAfterUse = false;
-                    postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
-                }
             }
+
+            if (waitingForMovePacketAfterUse) {
+                waitingForMovePacketAfterUse = false;
+                postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
+            }
+        }
+
+        if (event.getPacket() instanceof ServerboundClientTickEndPacket) {
+            sendPendingPostUseMovePacket();
         }
     }
 
@@ -1269,6 +1275,22 @@ public class MaceAura extends Module {
 
     private void clearForcedOutgoingRotations() {
         forcedOutgoingRotations = null;
+    }
+
+    private void sendPendingPostUseMovePacket() {
+        if (!waitingForMovePacketAfterUse
+                || forcedOutgoingRotations == null
+                || mc.player == null
+                || mc.player.connection == null) {
+            return;
+        }
+
+        mc.player.connection.send(new ServerboundMovePlayerPacket.Rot(
+                forcedOutgoingRotations.x,
+                forcedOutgoingRotations.y,
+                mc.player.onGround(),
+                mc.player.horizontalCollision
+        ));
     }
 
     private ServerboundMovePlayerPacket applyForcedMovePacketRotations(ServerboundMovePlayerPacket packet) {
