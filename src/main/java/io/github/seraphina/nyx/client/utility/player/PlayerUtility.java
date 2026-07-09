@@ -45,8 +45,21 @@ public class PlayerUtility implements IMinecraft {
         return raycastForEntity(level, originEntity, start, end, checkForBlocks);
     }
 
+    public static HitResult raycastForEntity(Level level, Entity originEntity, float distance, boolean checkForBlocks, Predicate<? super Entity> filter) {
+        Vec3 start = originEntity.getEyePosition();
+        Vec3 end = originEntity.getLookAngle().normalize().scale(distance).add(start);
+        return raycastForEntity(level, originEntity, start, end, checkForBlocks, filter);
+    }
+
     public static HitResult raycastForEntity(Level level, Entity originEntity, Vec3 start, Vec3 end, boolean checkForBlocks) {
         return internalRaycastForEntity(level, originEntity, start, end, checkForBlocks, 0.0f, PlayerUtility::canHitWithRaycast);
+    }
+
+    public static HitResult raycastForEntity(Level level, Entity originEntity, Vec3 start, Vec3 end, boolean checkForBlocks, Predicate<? super Entity> filter) {
+        Predicate<? super Entity> raycastFilter = filter == null
+                ? PlayerUtility::canHitWithRaycast
+                : entity -> canHitWithRaycast(entity) && filter.test(entity);
+        return internalRaycastForEntity(level, originEntity, start, end, checkForBlocks, 0.0f, raycastFilter);
     }
 
     private static boolean canHitWithRaycast(Entity entity) {

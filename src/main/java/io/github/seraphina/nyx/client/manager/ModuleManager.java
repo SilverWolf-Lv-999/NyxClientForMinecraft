@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.client.*;
 import io.github.seraphina.nyx.client.module.combat.*;
 import io.github.seraphina.nyx.client.module.movement.*;
+import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.*;
 import io.github.seraphina.nyx.client.module.visual.Animations;
@@ -57,7 +58,8 @@ public final class ModuleManager {
         );
         //Other
         registerModule(
-                Test.INSTANCE
+                Test.INSTANCE,
+                Target.INSTANCE
         );
         //Player
         registerModule(

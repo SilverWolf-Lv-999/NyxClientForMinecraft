@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.player.MovingUtility;
 import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -60,17 +61,29 @@ public class SpearThrust extends Module {
 
     private LivingEntity crosshairLivingTarget() {
         if (mc.player == null) return null;
-        HitResult hitResult = PlayerUtility.raycastForEntity(mc.level, mc.player, range.getValue(), true);
+        HitResult hitResult = PlayerUtility.raycastForEntity(
+                mc.level,
+                mc.player,
+                range.getValue(),
+                true,
+                entity -> entity instanceof LivingEntity livingEntity && isValidThrustTarget(livingEntity)
+        );
         if (!(hitResult instanceof EntityHitResult entityHitResult)) {
             return null;
         }
 
         Entity entity = entityHitResult.getEntity();
-        if (entity instanceof LivingEntity livingEntity && livingEntity.isAlive()) {
+        if (entity instanceof LivingEntity livingEntity && isValidThrustTarget(livingEntity)) {
             return livingEntity;
         }
 
         return null;
+    }
+
+    private boolean isValidThrustTarget(LivingEntity entity) {
+        return entity != mc.player
+                && entity.isAlive()
+                && Target.isTarget(entity);
     }
 
     private KineticWeapon getSpearKineticWeapon(ItemStack stack) {

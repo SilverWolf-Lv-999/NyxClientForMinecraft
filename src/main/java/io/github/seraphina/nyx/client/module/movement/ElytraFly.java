@@ -23,7 +23,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 
-@ModuleInfo(name = "nyxclient.module.elytrafly.name", description = "Controls elytra flight speed and uses fireworks in Grim mode", category = Category.MOVEMENT)
+@ModuleInfo(name = "nyxclient.module.elytrafly.name", description = "nyxclient.module.elytrafly.description", category = Category.MOVEMENT)
 public class ElytraFly extends Module {
     public static final ElytraFly INSTANCE = new ElytraFly();
 

@@ -13,6 +13,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.client.SilentRotation;
+import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.DebugUtility;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -909,6 +910,7 @@ public class MaceAura extends Module {
         return entity != null
                 && entity != mc.player
                 && entity.isAlive()
+                && Target.isTarget(entity)
                 && !entity.isRemoved()
                 && !entity.isSpectator()
                 && entity.isPickable()

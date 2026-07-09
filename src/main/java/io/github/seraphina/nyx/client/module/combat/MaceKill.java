@@ -9,6 +9,7 @@ import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.DebugUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
@@ -131,6 +132,7 @@ public class MaceKill extends Module {
     private boolean isValidTarget(LivingEntity entity, double attackRange) {
         return entity != mc.player
                 && entity.isAlive()
+                && Target.isTarget(entity)
                 && !entity.isSpectator()
                 && entity.isPickable()
                 && !entity.isInvulnerable()
