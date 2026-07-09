@@ -5,6 +5,7 @@ import com.mojang.math.Axis;
 import io.github.seraphina.nyx.client.events.api.EventManager;
 import io.github.seraphina.nyx.client.events.impl.RenderItemInHandEvent;
 import io.github.seraphina.nyx.client.module.visual.Animations;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemInHandRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemModelResolver;
@@ -18,13 +19,28 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ItemInHandRenderer.class)
 public abstract class ItemInHandRendererMixin {
     @Shadow
     @Final
+    private Minecraft minecraft;
+
+    @Shadow
+    @Final
     private ItemModelResolver itemModelResolver;
+
+    @Shadow
+    private ItemStack mainHandItem;
+
+    @Shadow
+    private float mainHandHeight;
+
+    @Shadow
+    private float oMainHandHeight;
 
     @Redirect(
             method = "applyEatTransform",
@@ -33,6 +49,15 @@ public abstract class ItemInHandRendererMixin {
     private void nyx$disableEatBobbing(PoseStack poseStack, float x, float y, float z) {
         if (!Animations.INSTANCE.shouldDisableEatBobbing()) {
             poseStack.translate(x, y, z);
+        }
+    }
+
+    @Inject(method = "tick", at = @At("RETURN"))
+    private void nyx$keepMainHandRaisedForOldHit(CallbackInfo info) {
+        if (Animations.INSTANCE.shouldUseOldHit() && this.minecraft.player != null && !this.minecraft.player.isHandsBusy()) {
+            this.mainHandItem = this.minecraft.player.getMainHandItem();
+            this.mainHandHeight = 1.0F;
+            this.oMainHandHeight = 1.0F;
         }
     }
 

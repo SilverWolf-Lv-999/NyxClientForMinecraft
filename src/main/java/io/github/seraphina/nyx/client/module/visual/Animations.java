@@ -14,6 +14,7 @@ public class Animations extends Module {
     public static final Animations INSTANCE = new Animations();
 
     public final BoolValue noEatBobbing = ValueBuild.boolSetting("noeatbobbing", false, this);
+    public final BoolValue oldHit = ValueBuild.boolSetting("oldhit", false, this);
     public final DoubleValue value = ValueBuild.doubleValue("scale", 1.0, 0.1, 10.0, 0.1, this);
     public final DoubleValue xPos = ValueBuild.doubleValue("xpos", 0.0, -10.0, 10.0, 0.01, this);
     public final DoubleValue yPos = ValueBuild.doubleValue("ypos", 0.0, -10.0, 10.0, 0.01, this);
@@ -24,6 +25,10 @@ public class Animations extends Module {
 
     public boolean shouldDisableEatBobbing() {
         return isEnabled() && noEatBobbing.getValue();
+    }
+
+    public boolean shouldUseOldHit() {
+        return isEnabled() && oldHit.getValue();
     }
 
     @EventTarget

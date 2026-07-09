@@ -6,14 +6,20 @@ import io.github.seraphina.nyx.client.module.visual.hud.HUD;
 import io.github.seraphina.nyx.client.ui.UIComponent;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.phys.AABB;
+
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 
 public final class WatermarkComponent implements UIComponent<HUD> {
     private static final String ID = "watermark";
     private static final float HEIGHT = 24.0F;
     private static final float HORIZONTAL_PADDING = 8.0F;
     private static final float GAP = 5.0F;
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     @Override
     public String getId() {
@@ -28,7 +34,8 @@ public final class WatermarkComponent implements UIComponent<HUD> {
     @Override
     public void render(GuiGraphics graphics, float partialTicks, float scale) {
         FontRenderer titleFont = FontManager.getAppleDisplayRenderer(13.0F);
-        float width = width(titleFont);
+        String text = watermarkText();
+        float width = width(titleFont, text);
 
         Render2DUtility.drawDropShadow(0.0F, 0.0F, width, HEIGHT, 6.0F, 0.0F, 0.0F, 10.0F, 0x80000000);
         Render2DUtility.drawRoundedRect(0.0F, 0.0F, width, HEIGHT, 6.0F, 0xCC0C0D11);
@@ -37,18 +44,38 @@ public final class WatermarkComponent implements UIComponent<HUD> {
 
         float titleY = (HEIGHT - titleFont.getLineHeight()) * 0.5F - 0.5F;
         float titleX = HORIZONTAL_PADDING + 5.0F;
-        titleFont.drawString(NyxClient.CLIENT_NAME, titleX, titleY, 0xFFFFFFFF);
+        titleFont.drawString(text, titleX, titleY, 0xFFFFFFFF);
     }
 
     @Override
     public AABB getBoundingBox() {
-        return new AABB(0.0D, 0.0D, 0.0D, width(FontManager.getAppleDisplayRenderer(13.0F)), HEIGHT, 1.0D);
+        FontRenderer titleFont = FontManager.getAppleDisplayRenderer(13.0F);
+        return new AABB(0.0D, 0.0D, 0.0D, width(titleFont, watermarkText()), HEIGHT, 1.0D);
     }
 
-    private float width(FontRenderer titleFont) {
+    private String watermarkText() {
+        return String.join(" | ",
+                NyxClient.CLIENT_NAME,
+                mc.getFps() + " FPS",
+                mc.getUser().getName(),
+                LocalTime.now().format(TIME_FORMATTER),
+                latencyText());
+    }
+
+    private String latencyText() {
+        ClientPacketListener connection = mc.getConnection();
+        if (connection == null) {
+            return "N/A ms";
+        }
+
+        PlayerInfo playerInfo = connection.getPlayerInfo(mc.getUser().getProfileId());
+        return playerInfo == null ? "N/A ms" : playerInfo.getLatency() + " ms";
+    }
+
+    private float width(FontRenderer titleFont, String text) {
         return HORIZONTAL_PADDING * 2.0F
                 + 5.0F
-                + titleFont.getStringWidth(NyxClient.CLIENT_NAME)
+                + titleFont.getStringWidth(text)
                 + GAP;
     }
 }

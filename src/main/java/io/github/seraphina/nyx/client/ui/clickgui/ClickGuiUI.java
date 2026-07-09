@@ -41,7 +41,7 @@ import static org.lwjgl.glfw.GLFW.glfwGetKey;
 public class ClickGuiUI extends Screen {
     private static final float PANEL_WIDTH = 820.0F;
     private static final float PANEL_HEIGHT = 540.0F;
-    private static final float UI_SCALE = 1.4F;
+    private static final float UI_SCALE = 1.7F;
     private static final float MIN_MARGIN = 16.0F;
     private static final float SIDEBAR_WIDTH = 220.0F;
     private static final float SIDEBAR_WIDTH_COMPACT = 172.0F;
