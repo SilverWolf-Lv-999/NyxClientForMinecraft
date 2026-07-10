@@ -1,12 +1,9 @@
 package io.github.seraphina.nyx.client.module.combat;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
-import io.github.seraphina.nyx.client.events.bus.EventHandler;
-import io.github.seraphina.nyx.client.events.bus.EventPriority;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
-import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
@@ -21,13 +18,11 @@ import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
+import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
-import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -73,7 +68,6 @@ public class MaceAura extends Module {
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
     private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
-    private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
     public final EnumValue<ItemType> itemType = ValueBuild.enumSetting("item type", ItemType.WIND_CHARGE, this);
@@ -104,13 +98,6 @@ public class MaceAura extends Module {
     private boolean fireworkDiveBoostUsed;
     private boolean fireworkReleasedJumpForGlide;
     private boolean fireworkPressJumpForGlide;
-    private Vector2f forcedUseItemRotations;
-    private Vector2f forcedOutgoingRotations;
-    private Vector2f postUseItemRotations;
-    private Vector2f lastOutgoingRotations;
-    private Vector2f syncedRotations;
-    private boolean usedItemThisTick;
-    private boolean waitingForMovePacketAfterUse;
     private int postUseItemSlotDelayTicks;
     private int queuedHotbarSlot = InventoryUtility.NOT_FOUND;
     private boolean warnedMissingLoadout;
@@ -119,7 +106,6 @@ public class MaceAura extends Module {
     public void onEnable() {
         resetRuntimeState();
         originalSelectedSlot = InventoryUtility.getSelectedHotbarSlot();
-        lastOutgoingRotations = currentPlayerRotations();
         DebugUtility.msg("MaceAura enabled");
     }
 
@@ -161,76 +147,17 @@ public class MaceAura extends Module {
     @EventTarget
     public void onPacketReceive(PacketEvent.Receive event) {
         if (event.getPacket() instanceof ClientboundPlayerPositionPacket) {
-            DebugUtility.msg("MaceAura disabled: server corrected position");
             setEnabled(false);
+            DebugUtility.msg("MaceAura disabled: server corrected position");
         }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST - 1)
-    public void onPacketSend(PacketEvent.Send event) {
-        if (forcedUseItemRotations != null && event.getPacket() instanceof ServerboundUseItemPacket packet) {
-            event.setPacket(new ServerboundUseItemPacket(
-                    packet.getHand(),
-                    packet.getSequence(),
-                    forcedUseItemRotations.x,
-                    forcedUseItemRotations.y
-            ));
-        }
-
-        if (event.getPacket() instanceof ServerboundMovePlayerPacket packet) {
-            ServerboundMovePlayerPacket outgoingPacket = packet;
-            if (postUseItemRotations != null) {
-                outgoingPacket = applyMovePacketRotations(packet, postUseItemRotations);
-                event.setPacket(outgoingPacket);
-                clearForcedOutgoingRotations();
-                completePostUseMoveAlignment();
-            } else if (forcedOutgoingRotations != null) {
-                outgoingPacket = applyMovePacketRotations(packet, forcedOutgoingRotations);
-                event.setPacket(outgoingPacket);
-                clearForcedOutgoingRotations();
-            }
-
-            if (outgoingPacket.hasRotation()) {
-                updateLastOutgoingRotations(outgoingPacket);
-            }
-
-            if (waitingForMovePacketAfterUse) {
-                completePostUseMoveAlignment();
-            }
-        }
-
-        if (event.getPacket() instanceof ServerboundClientTickEndPacket) {
-            sendPendingPostUseMovePacket();
-            if (waitingForMovePacketAfterUse) {
-                event.setCancelled(true);
-            }
-        }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST - 1)
-    public void onSendPosition(SendPositionEvent event) {
-        Vector2f forcedRotations = activeForcedOutgoingRotations();
-        if (forcedRotations == null) {
-            return;
-        }
-
-        event.setYaw(forcedRotations.x);
-        event.setPitch(forcedRotations.y);
-        syncPlayerRotation(forcedRotations);
     }
 
     private void tickCombatCycle() {
         fireworkPressJumpForGlide = false;
-        usedItemThisTick = false;
         tickActionDelays();
 
         if (!canRun()) {
             resetCombatCycle();
-            return;
-        }
-
-        if (waitingForMovePacketAfterUse) {
-            holdPostUseRotations();
             return;
         }
 
@@ -1010,10 +937,9 @@ public class MaceAura extends Module {
         }
 
         Vector2f rotations = RotationUtility.calculate(target, true, effectiveAttackRange());
-        Vector2f appliedRotations = applyCombatRotation(rotations);
-        forceOutgoingRotations(appliedRotations);
+        applyCombatRotation(rotations);
 
-        attackWithRotations(appliedRotations, target);
+        mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
         DebugUtility.msg(
                 "MaceAura attacked ",
@@ -1217,150 +1143,27 @@ public class MaceAura extends Module {
     }
 
     private boolean useSelectedItem() {
-        Vector2f useItemRotations = makeUniqueOutgoingRotations(currentOutgoingRotations());
-        syncPlayerRotation(useItemRotations);
-        forcedUseItemRotations = new Vector2f(useItemRotations);
-        forcedOutgoingRotations = new Vector2f(useItemRotations);
-        postUseItemRotations = new Vector2f(useItemRotations);
-
-        InteractionResult result;
-        try {
-            result = useItemWithRotations(useItemRotations);
-        } finally {
-            forcedUseItemRotations = null;
-            usedItemThisTick = true;
-            waitingForMovePacketAfterUse = true;
+        if (mc.player == null || mc.player.connection == null || mc.level == null) {
+            return false;
         }
 
-        if (result instanceof InteractionResult.Success useSuccess) {
-            if (useSuccess.swingSource() == InteractionResult.SwingSource.CLIENT) {
-                mc.player.swing(InteractionHand.MAIN_HAND);
-            }
-
-            mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
-            return true;
+        if (!InventoryUtility.syncSelectedSlot()) {
+            return false;
         }
 
-        return false;
-    }
-
-    private Vector2f currentOutgoingRotations() {
-        if (mc.player == null) {
-            return new Vector2f();
-        }
-
-        Vector2f rotations = RotationManager.INSTANCE.isActive()
-                ? RotationManager.INSTANCE.getRotation()
-                : currentSyncedRotations();
-        return legitimizeRotations(rotations);
-    }
-
-    private Vector2f makeUniqueOutgoingRotations(Vector2f rotations) {
-        Vector2f uniqueRotations = legitimizeRotations(rotations);
-        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
-            return uniqueRotations;
-        }
-
-        Vector2f steppedRotations = RotationUtility.applySensitivityPatch(
-                new Vector2f(uniqueRotations.x + OUTGOING_ROTATION_DEDUP_YAW_STEP, uniqueRotations.y),
-                lastOutgoingRotations
-        );
-        uniqueRotations = legitimizeRotations(steppedRotations);
-        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
-            return uniqueRotations;
-        }
-
-        return legitimizeRotations(new Vector2f(
-                lastOutgoingRotations.x + OUTGOING_ROTATION_DEDUP_YAW_STEP,
-                lastOutgoingRotations.y
-        ));
-    }
-
-    private boolean sameRotations(Vector2f first, Vector2f second) {
-        return first != null
-                && second != null
-                && Float.compare(first.x, second.x) == 0
-                && Float.compare(first.y, second.y) == 0;
-    }
-
-    private void forceOutgoingRotations(Vector2f rotations) {
-        if (rotations == null) {
-            return;
-        }
-
-        forcedOutgoingRotations = makeUniqueOutgoingRotations(rotations);
-    }
-
-    private void clearForcedOutgoingRotations() {
-        forcedOutgoingRotations = null;
-    }
-
-    private Vector2f activeForcedOutgoingRotations() {
-        return postUseItemRotations != null ? postUseItemRotations : forcedOutgoingRotations;
-    }
-
-    private void completePostUseMoveAlignment() {
-        waitingForMovePacketAfterUse = false;
-        postUseItemRotations = null;
-        postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
-    }
-
-    private void holdPostUseRotations() {
-        Vector2f rotations = activeForcedOutgoingRotations();
-        if (rotations != null) {
-            syncPlayerRotation(rotations);
-        }
-    }
-
-    private void sendPendingPostUseMovePacket() {
-        Vector2f rotations = activeForcedOutgoingRotations();
-        if (!waitingForMovePacketAfterUse
-                || rotations == null
-                || mc.player == null
-                || mc.player.connection == null) {
-            return;
-        }
-
-        syncPlayerRotation(rotations);
-        mc.player.connection.send(new ServerboundMovePlayerPacket.Rot(
-                rotations.x,
-                rotations.y,
-                mc.player.onGround(),
-                mc.player.horizontalCollision
-        ));
-    }
-
-    private ServerboundMovePlayerPacket applyMovePacketRotations(ServerboundMovePlayerPacket packet, Vector2f rotations) {
-        if (rotations == null) {
-            return packet;
-        }
-
-        if (packet.hasPosition()) {
-            return new ServerboundMovePlayerPacket.PosRot(
-                    packet.getX(0.0D),
-                    packet.getY(0.0D),
-                    packet.getZ(0.0D),
+        Vector2f rotations = legitimizeRotations(RotationManager.INSTANCE.getRotation());
+        try (BlockStatePredictionHandler prediction = mc.level.getBlockStatePredictionHandler().startPredicting()) {
+            mc.player.connection.send(new ServerboundUseItemPacket(
+                    InteractionHand.MAIN_HAND,
+                    prediction.currentSequence(),
                     rotations.x,
-                    rotations.y,
-                    packet.isOnGround(),
-                    packet.horizontalCollision()
-            );
+                    rotations.y
+            ));
         }
-
-        return new ServerboundMovePlayerPacket.Rot(
-                rotations.x,
-                rotations.y,
-                packet.isOnGround(),
-                packet.horizontalCollision()
-        );
-    }
-
-    private void updateLastOutgoingRotations(ServerboundMovePlayerPacket packet) {
-        Vector2f fallbackRotations = currentPlayerRotations();
-        lastOutgoingRotations = new Vector2f(
-                packet.getYRot(fallbackRotations.x),
-                packet.getXRot(fallbackRotations.y)
-        );
+        mc.player.swing(InteractionHand.MAIN_HAND);
+        mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
+        postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
+        return true;
     }
 
     private Vector2f currentPlayerRotations() {
@@ -1369,10 +1172,6 @@ public class MaceAura extends Module {
         }
 
         return new Vector2f(mc.player.getYRot(), mc.player.getXRot());
-    }
-
-    private Vector2f currentSyncedRotations() {
-        return syncedRotations != null ? new Vector2f(syncedRotations) : currentPlayerRotations();
     }
 
     private boolean selectHotbarSlot(int hotbarSlot) {
@@ -1384,12 +1183,12 @@ public class MaceAura extends Module {
             return true;
         }
 
-        if (usedItemThisTick || waitingForMovePacketAfterUse || postUseItemSlotDelayTicks > 0) {
+        if (postUseItemSlotDelayTicks > 0) {
             queuedHotbarSlot = hotbarSlot;
             return false;
         }
 
-        return InventoryUtility.selectHotbarSlot(hotbarSlot);
+        return InventoryUtility.selectHotbarSlot(hotbarSlot, true);
     }
 
     private void applyQueuedHotbarSlot() {
@@ -1398,11 +1197,11 @@ public class MaceAura extends Module {
             return;
         }
 
-        if (waitingForMovePacketAfterUse || postUseItemSlotDelayTicks > 0) {
+        if (postUseItemSlotDelayTicks > 0) {
             return;
         }
 
-        InventoryUtility.selectHotbarSlot(queuedHotbarSlot);
+        InventoryUtility.selectHotbarSlot(queuedHotbarSlot, true);
         queuedHotbarSlot = InventoryUtility.NOT_FOUND;
     }
 
@@ -1469,10 +1268,7 @@ public class MaceAura extends Module {
     private Vector2f applyCombatRotation(Vector2f rotations) {
         Vector2f fixedRotations = legitimizeRotations(rotations);
         RotationManager.INSTANCE.setRotations(fixedRotations, 180.0D, Priority.Highest);
-
-        Vector2f appliedRotations = RotationManager.INSTANCE.getRotation();
-        syncPlayerRotation(appliedRotations);
-        return appliedRotations;
+        return RotationManager.INSTANCE.getRotation();
     }
 
     private Vector2f legitimizeRotations(Vector2f rotations) {
@@ -1480,63 +1276,17 @@ public class MaceAura extends Module {
             return new Vector2f();
         }
 
-        Vector2f baseRotations = currentSyncedRotations();
+        Vector2f baseRotations = RotationManager.INSTANCE.isActive()
+                ? RotationManager.INSTANCE.getRotation()
+                : currentPlayerRotations();
         float yaw = baseRotations.x + Mth.wrapDegrees(rotations.x - baseRotations.x);
         float pitch = Mth.clamp(rotations.y, -90.0F, 90.0F);
         return new Vector2f(yaw, pitch);
     }
 
-    private void syncPlayerRotation(Vector2f rotations) {
-        if (mc.player == null || rotations == null) {
-            return;
-        }
-
-        syncedRotations = new Vector2f(rotations);
-
-        mc.player.setYRot(rotations.x);
-        mc.player.setXRot(rotations.y);
-    }
-
-    private InteractionResult useItemWithRotations(Vector2f rotations) {
-        if (mc.player == null || rotations == null) {
-            return mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
-        }
-
-        float yaw = mc.player.getYRot();
-        float pitch = mc.player.getXRot();
-        mc.player.setYRot(rotations.x);
-        mc.player.setXRot(rotations.y);
-
-        try {
-            return mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
-        } finally {
-            mc.player.setYRot(yaw);
-            mc.player.setXRot(pitch);
-        }
-    }
-
-    private void attackWithRotations(Vector2f rotations, LivingEntity target) {
-        if (mc.player == null || rotations == null) {
-            mc.gameMode.attack(mc.player, target);
-            return;
-        }
-
-        float yaw = mc.player.getYRot();
-        float pitch = mc.player.getXRot();
-        mc.player.setYRot(rotations.x);
-        mc.player.setXRot(rotations.y);
-
-        try {
-            mc.gameMode.attack(mc.player, target);
-        } finally {
-            mc.player.setYRot(yaw);
-            mc.player.setXRot(pitch);
-        }
-    }
-
     private float targetYaw() {
         if (target == null) {
-            return currentSyncedRotations().x;
+            return RotationManager.INSTANCE.getRotation().x;
         }
 
         return legitimizeRotations(RotationUtility.calculate(target.getBoundingBox().getCenter())).x;
@@ -1631,12 +1381,6 @@ public class MaceAura extends Module {
         windChargeAttackDelayTicks = 0;
         heldMaceTicks = 0;
         attackHoldTicks = 0;
-        forcedUseItemRotations = null;
-        clearForcedOutgoingRotations();
-        postUseItemRotations = null;
-        syncedRotations = null;
-        usedItemThisTick = false;
-        waitingForMovePacketAfterUse = false;
         postUseItemSlotDelayTicks = 0;
         queuedHotbarSlot = InventoryUtility.NOT_FOUND;
         restoreQueuedWindChargeSlotNow();

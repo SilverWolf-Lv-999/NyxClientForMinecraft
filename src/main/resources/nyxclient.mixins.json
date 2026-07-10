@@ -25,6 +25,7 @@
     "LivingEntityMixin",
     "LocalPlayerMixin",
     "MinecraftMixin",
+    "MixinLivingEntityRenderer",
     "MouseHandlerMixin",
     "MultiPlayerGameModeMixin",
     "OptionScreenMixin",

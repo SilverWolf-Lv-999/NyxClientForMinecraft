@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.mixins;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.AttackYawEvent;
+import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.module.combat.Reach;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Player;
@@ -17,6 +18,16 @@ public class PlayerMixin {
     private float modifyAttackYaw(float original) {
         AttackYawEvent event = EventBus.INSTANCE.post(new AttackYawEvent(original));
         return event.getYaw();
+    }
+
+    @ModifyExpressionValue(method = "aiStep", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;getYRot()F", ordinal = 0))
+    private float modifyHeadYaw(float original) {
+        if ((Object) this instanceof LocalPlayer) {
+            RotationAnimationEvent event = EventBus.INSTANCE.post(new RotationAnimationEvent(original, 0.0F, 0.0F, 0.0F));
+            return event.getYaw();
+        }
+
+        return original;
     }
 
     @Inject(method = "entityInteractionRange()D", at = @At("RETURN"), cancellable = true)

@@ -1,6 +1,5 @@
 package io.github.seraphina.nyx.client.mixins;
 
-import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
@@ -12,6 +11,8 @@ import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 
 @Mixin(LivingEntityRenderer.class)
@@ -29,31 +30,37 @@ public abstract class MixinLivingEntityRenderer<S extends LivingEntityRenderStat
 //        return Chams.INSTANCE.getRenderType(getTextureLocation(state));
 //    }
 
-    @ModifyExpressionValue(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;solveBodyRot(Lnet/minecraft/world/entity/LivingEntity;FF)F"))
-    private float modifyBodyYaw(float original, LivingEntity entity, S state, float partialTicks) {
-        if (entity == mc.player) {
-            RotationAnimationEvent event = EventBus.INSTANCE.post(new RotationAnimationEvent(entity.yBodyRot, entity.yBodyRotO, 0.0f, 0.0f));
-            return Mth.rotLerp(partialTicks, event.getLastYaw(), event.getYaw());
+    @Inject(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At("TAIL"))
+    private void modifyRotationAnimation(LivingEntity entity, S state, float partialTicks, CallbackInfo info) {
+        if (entity != mc.player) {
+            return;
         }
-        return original;
-    }
 
-    @ModifyExpressionValue(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Mth;rotLerp(FFF)F"))
-    private float modifyHeadYaw(float original, LivingEntity entity, S state, float partialTicks) {
-        if (entity == mc.player) {
-            RotationAnimationEvent event = EventBus.INSTANCE.post(new RotationAnimationEvent(entity.yHeadRot, entity.yHeadRotO, 0.0f, 0.0f));
-            return Mth.rotLerp(partialTicks, event.getLastYaw(), event.getYaw());
-        }
-        return original;
-    }
+        RotationAnimationEvent headEvent = EventBus.INSTANCE.post(new RotationAnimationEvent(
+                entity.yHeadRot,
+                entity.yHeadRotO,
+                entity.getXRot(),
+                entity.getXRot(0.0F)
+        ));
+        RotationAnimationEvent bodyEvent = EventBus.INSTANCE.post(new RotationAnimationEvent(
+                entity.yBodyRot,
+                entity.yBodyRotO,
+                0.0F,
+                0.0F
+        ));
 
-    @ModifyExpressionValue(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;getXRot(F)F"))
-    private float modifyPitch(float original, LivingEntity entity, S state, float partialTicks) {
-        if (entity == mc.player) {
-            RotationAnimationEvent event = EventBus.INSTANCE.post(new RotationAnimationEvent(0.0f, 0.0f, entity.getXRot(), entity.getXRot(0.0f)));
-            return Mth.rotLerp(partialTicks, event.getLastPitch(), event.getPitch());
+        float bodyRot = Mth.rotLerp(partialTicks, bodyEvent.getLastYaw(), bodyEvent.getYaw());
+        float headRot = Mth.rotLerp(partialTicks, headEvent.getLastYaw(), headEvent.getYaw());
+        float pitch = Mth.rotLerp(partialTicks, headEvent.getLastPitch(), headEvent.getPitch());
+
+        state.bodyRot = bodyRot;
+        state.yRot = Mth.wrapDegrees(headRot - bodyRot);
+        state.xRot = pitch;
+
+        if (state.isUpsideDown) {
+            state.yRot *= -1.0F;
+            state.xRot *= -1.0F;
         }
-        return original;
     }
 
 }

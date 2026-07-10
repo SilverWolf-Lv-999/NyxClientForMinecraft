@@ -274,14 +274,14 @@ public final class RotationManager {
 
     @EventHandler
     private void onFallFlying(FallFlyingEvent event) {
-        if (active && rotations != null) {
+        if (rotations != null) {
             event.setPitch(rotations.y);
         }
     }
 
     @EventHandler
     private void onAttack(AttackYawEvent event) {
-        if (active && rotations != null) {
+        if (rotations != null) {
             event.setYaw(rotations.x);
         }
     }
