@@ -34,8 +34,7 @@ public final class ModuleManager {
                 ClickGui.INSTANCE,
                 Client.INSTANCE,
                 NoChattingAllowed.INSTANCE,
-                Debug.INSTANCE,
-                SilentRotation.INSTANCE
+                Debug.INSTANCE
         );
         //Combat
         registerModule(

@@ -10,7 +10,6 @@ import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
-import io.github.seraphina.nyx.client.module.client.SilentRotation;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -863,10 +862,6 @@ public class CrystalAura extends Module {
 
         syncedRotations = new Vector2f(rotations);
 
-        if (SilentRotation.INSTANCE.isEnabled()) {
-            return;
-        }
-
         mc.player.setYRot(rotations.x);
         mc.player.setXRot(rotations.y);
     }
@@ -918,7 +913,7 @@ public class CrystalAura extends Module {
             return InteractionResult.FAIL;
         }
 
-        if (!SilentRotation.INSTANCE.isEnabled() || rotations == null) {
+        if (rotations == null) {
             return mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
         }
 
@@ -940,7 +935,7 @@ public class CrystalAura extends Module {
             return;
         }
 
-        if (!SilentRotation.INSTANCE.isEnabled() || rotations == null) {
+        if (rotations == null) {
             mc.gameMode.attack(mc.player, entity);
             return;
         }
