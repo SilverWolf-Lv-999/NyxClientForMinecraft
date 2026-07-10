@@ -10,7 +10,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
-import io.github.seraphina.nyx.client.utility.DebugUtility;
+import io.github.seraphina.nyx.client.utility.MsgUtility;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -112,7 +112,7 @@ public class MaceAura extends Module {
     public void onEnable() {
         resetRuntimeState();
         originalSelectedSlot = InventoryUtility.getSelectedHotbarSlot();
-        DebugUtility.msg("MaceAura enabled");
+        MsgUtility.debug("MaceAura enabled");
     }
 
     @Override
@@ -120,7 +120,7 @@ public class MaceAura extends Module {
         restoreOriginalSelectedSlot();
         RotationManager.INSTANCE.setActive(false);
         resetRuntimeState();
-        DebugUtility.msg("MaceAura disabled");
+        MsgUtility.debug("MaceAura disabled");
     }
 
     @EventTarget
@@ -155,7 +155,7 @@ public class MaceAura extends Module {
         if (event.getPacket() instanceof ClientboundPlayerPositionPacket) {
             RotationManager.INSTANCE.setActive(false);
             resetCombatCycle();
-            DebugUtility.msg("MaceAura recovered: server corrected position");
+            MsgUtility.debug("MaceAura recovered: server corrected position");
         }
     }
 
@@ -173,7 +173,7 @@ public class MaceAura extends Module {
         DetectedLoadout loadout = detectLoadout();
         if (loadout == null) {
             if (!warnedMissingLoadout) {
-                DebugUtility.msg("MaceAura waiting: need mace and wind charge/firework rocket");
+                MsgUtility.debug("MaceAura waiting: need mace and wind charge/firework rocket");
                 warnedMissingLoadout = true;
             }
             resetCombatCycle();
@@ -1059,7 +1059,7 @@ public class MaceAura extends Module {
 
         mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
-        DebugUtility.msg(
+        MsgUtility.debug(
                 "MaceAura attacked ",
                 target.getName().getString(),
                 ": range=",

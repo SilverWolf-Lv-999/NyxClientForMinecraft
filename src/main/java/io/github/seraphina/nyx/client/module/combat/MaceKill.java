@@ -10,7 +10,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
-import io.github.seraphina.nyx.client.utility.DebugUtility;
+import io.github.seraphina.nyx.client.utility.MsgUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -43,13 +43,13 @@ public class MaceKill extends Module {
     @Override
     public void onEnable() {
         attackProgress = TICKS_PER_SECOND;
-        DebugUtility.msg("MaceKill enabled: range=", format(range.getValue()), ", cps=", cps.getValue());
+        MsgUtility.debug("MaceKill enabled: range=", format(range.getValue()), ", cps=", cps.getValue());
     }
 
     @Override
     public void onDisable() {
         attackProgress = 0;
-        DebugUtility.msg("MaceKill disabled");
+        MsgUtility.debug("MaceKill disabled");
     }
 
     @EventTarget
@@ -61,7 +61,7 @@ public class MaceKill extends Module {
     @EventTarget
     public void onPacketReceive(PacketEvent.Receive event) {
         if (event.getPacket() instanceof ClientboundPlayerPositionPacket) {
-            DebugUtility.msg("MaceKill disabled: server corrected position");
+            MsgUtility.debug("MaceKill disabled: server corrected position");
             setEnabled(false);
         }
     }
@@ -99,7 +99,7 @@ public class MaceKill extends Module {
 
         mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
-        DebugUtility.msg(
+        MsgUtility.debug(
                 "MaceKill attacked ",
                 target.getName().getString(),
                 ": range=",
@@ -107,7 +107,7 @@ public class MaceKill extends Module {
         );
         if (this.autodisble.getValue()) {
             this.setEnabled(false);
-            DebugUtility.msg("MaceKill disabled");
+            MsgUtility.debug("MaceKill disabled");
         }
     }
 

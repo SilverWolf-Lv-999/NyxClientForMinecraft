@@ -5,19 +5,28 @@ import io.github.seraphina.nyx.client.module.client.Debug;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
-public class DebugUtility {
+public class MsgUtility {
     public static final String PREFIX = "Nyx >> ";
 
-    public static void msg(Object... msg) {
+    public static void debug(Object... msg) {
         if (!Debug.INSTANCE.isEnabled()) return;
         StringBuilder sb = new StringBuilder();
         if (msg != null) {
             for (Object o : msg) {
-                sb.append(String.valueOf(o));
+                sb.append(o);
             }
         }
         String message = sb.toString();
-        Minecraft.getInstance().gui.getChat().addMessage(Component.literal(PREFIX + message));
-        NotificationManager.pushDebug(message);
+        Minecraft minecraft = Minecraft.getInstance();
+        Runnable action = () -> {
+            minecraft.gui.getChat().addMessage(Component.literal(PREFIX + message));
+            NotificationManager.pushDebug(message);
+        };
+
+        if (minecraft.isSameThread()) {
+            action.run();
+        } else {
+            minecraft.execute(action);
+        }
     }
 }
