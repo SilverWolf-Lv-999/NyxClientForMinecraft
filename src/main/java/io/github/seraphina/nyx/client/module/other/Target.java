@@ -1,8 +1,10 @@
 package io.github.seraphina.nyx.client.module.other;
 
+import io.github.seraphina.nyx.client.manager.FriendManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.client.Friend;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import net.minecraft.world.entity.Entity;
@@ -32,6 +34,7 @@ public class Target extends Module {
 
     public static boolean isTarget(LivingEntity entity) {
         if (entity == null) return false;
+        if (Friend.INSTANCE.isEnabled() && FriendManager.isFriend(entity)) return false;
         if (entity.isDeadOrDying() && !INSTANCE.dead.getValue()) return false;
         return switch (entity) {
             case Player ignored2 when INSTANCE.player.getValue() -> true;

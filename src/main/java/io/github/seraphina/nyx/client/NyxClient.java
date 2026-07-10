@@ -27,6 +27,7 @@ public class NyxClient {
         ModuleManager.init();
         CommandManager.init();
         ConfigManager.init();
+        FriendManager.init();
         AltManager.init();
         HUDManager.load();
         EventManager.register(this);

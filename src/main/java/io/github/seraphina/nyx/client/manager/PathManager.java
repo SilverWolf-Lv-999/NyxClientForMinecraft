@@ -13,6 +13,7 @@ public final class PathManager {
     public static final Path CAGE_PATH = CLIENT_PATH.resolve("cages");
     public static final Path HUD_PATH = CLIENT_PATH.resolve("gui");
     public static final Path BACK_GROUND_PATH = HUD_PATH.resolve("background");
+    public static final Path FRIEND = HUD_PATH.resolve("friend");
 
     public static final String CLIENT = CLIENT_PATH.toString();
     public static final String CONFIG = CONFIG_PATH.toString();
@@ -20,6 +21,7 @@ public final class PathManager {
     public static final String CAGE = CAGE_PATH.toString();
     public static final String HUD = HUD_PATH.toString();
     public static final String BACKGROUND = BACK_GROUND_PATH.toString();
+    public static final String friend = FRIEND.toString();
 
     private PathManager() {
     }
@@ -31,5 +33,6 @@ public final class PathManager {
         Files.createDirectories(CAGE_PATH);
         Files.createDirectories(HUD_PATH);
         Files.createDirectories(BACK_GROUND_PATH);
+        Files.createDirectories(FRIEND);
     }
 }

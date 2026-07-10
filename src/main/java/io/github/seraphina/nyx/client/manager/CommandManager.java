@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import io.github.seraphina.nyx.client.command.NyxCommand;
 import io.github.seraphina.nyx.client.command.impl.BindCommand;
+import io.github.seraphina.nyx.client.command.impl.FriendCommand;
 import io.github.seraphina.nyx.client.command.impl.ToggleCommand;
 import io.github.seraphina.nyx.client.module.client.Client;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
@@ -41,6 +42,7 @@ public final class CommandManager implements IMinecraft {
 
         registerCommand(
                 new BindCommand(),
+                new FriendCommand(),
                 new ToggleCommand()
         );
 

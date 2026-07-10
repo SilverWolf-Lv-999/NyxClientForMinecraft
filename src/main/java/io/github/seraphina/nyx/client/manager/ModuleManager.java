@@ -31,7 +31,8 @@ public final class ModuleManager {
                 ClickGui.INSTANCE,
                 Client.INSTANCE,
                 NoChattingAllowed.INSTANCE,
-                Debug.INSTANCE
+                Debug.INSTANCE,
+                Friend.INSTANCE
         );
         //Combat
         registerModule(
