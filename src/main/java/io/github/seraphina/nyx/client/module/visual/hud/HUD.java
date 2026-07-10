@@ -6,26 +6,27 @@ import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.visual.hud.component.NotificationComponent;
 import io.github.seraphina.nyx.client.module.visual.hud.component.WatermarkComponent;
 import io.github.seraphina.nyx.client.ui.UIComponent;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import net.minecraft.client.gui.screens.ChatScreen;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 @ModuleInfo(name = "nyxclient.module.hud.name", description = "nyxclient.module.hud.description", category = Category.VISUAL)
 public class HUD extends Module {
-    public static final List<UIComponent> components = new ArrayList<>();
+    public static final Set<UIComponent<?>> components = new HashSet<>();
     public static final HUD INSTANCE = new HUD();
 
     public final BoolValue watermark = ValueBuild.boolSetting("watermaker", true, this);
+    public final BoolValue notification = ValueBuild.boolSetting("notification", true, this);
 
     public HUD() {
-        if (components.stream().noneMatch(WatermarkComponent.class::isInstance)) {
-            components.add(new WatermarkComponent());
-        }
+        components.add(new WatermarkComponent());
+        components.add(new NotificationComponent());
     }
 
     @EventTarget

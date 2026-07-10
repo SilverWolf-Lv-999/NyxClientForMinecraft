@@ -8,10 +8,7 @@ import io.github.seraphina.nyx.client.module.movement.*;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.module.other.Test;
 import io.github.seraphina.nyx.client.module.player.*;
-import io.github.seraphina.nyx.client.module.visual.Animations;
-import io.github.seraphina.nyx.client.module.visual.Cape;
-import io.github.seraphina.nyx.client.module.visual.FullBright;
-import io.github.seraphina.nyx.client.module.visual.NoRenderer;
+import io.github.seraphina.nyx.client.module.visual.*;
 import io.github.seraphina.nyx.client.module.visual.hud.HUD;
 
 import java.util.*;
@@ -79,7 +76,8 @@ public final class ModuleManager {
                 NoRenderer.INSTANCE,
                 HUD.INSTANCE,
                 Animations.INSTANCE,
-                FullBright.INSTANCE
+                FullBright.INSTANCE,
+                ModernGui.INSTANCE
         );
 
         initialized = true;

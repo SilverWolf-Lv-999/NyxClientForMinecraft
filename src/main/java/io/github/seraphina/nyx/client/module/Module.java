@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.module;
 
 import io.github.seraphina.nyx.client.events.api.EventManager;
+import io.github.seraphina.nyx.client.manager.NotificationManager;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import io.github.seraphina.nyx.client.utility.LanguageUtility;
 import io.github.seraphina.nyx.client.value.AbstractValue;
@@ -50,10 +51,16 @@ public abstract class Module implements IMinecraft {
             this.enabled = true;
             EventManager.register(this);
             this.onEnable();
+            if (this.enabled) {
+                NotificationManager.pushModule(this.getName(), true);
+            }
         } else  {
             this.enabled = false;
             EventManager.unregister(this);
             this.onDisable();
+            if (!this.enabled) {
+                NotificationManager.pushModule(this.getName(), false);
+            }
         }
     }
 

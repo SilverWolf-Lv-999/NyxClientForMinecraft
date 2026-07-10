@@ -34,15 +34,30 @@ public final class HUDManager implements IMinecraft {
     private static final float MIN_SCALE = 0.5F;
     private static final float MAX_SCALE = 3.0F;
     private static final float SCALE_STEP = 0.08F;
+    private static final float GUIDE_GRID_SPACING = 16.0F;
+    private static final int GUIDE_GRID_MAJOR_INTERVAL = 4;
+    private static final float GUIDE_GRID_DASH = 4.0F;
+    private static final float GUIDE_GRID_GAP = 6.0F;
+    private static final float GUIDE_CENTER_DASH = 8.0F;
+    private static final float GUIDE_CENTER_GAP = 5.0F;
+    private static final float SNAP_GRID_RANGE = 3.0F;
+    private static final float SNAP_ALIGNMENT_RANGE = 6.0F;
+    private static final float SNAP_CENTER_RANGE = 8.0F;
     private static final int EDIT_OUTLINE = 0xAA3D81F7;
     private static final int EDIT_HOVER_OUTLINE = 0xFFFFFFFF;
     private static final int EDIT_FILL = 0x183D81F7;
+    private static final int GUIDE_GRID = 0x303D81F7;
+    private static final int GUIDE_GRID_MAJOR = 0x4C3D81F7;
+    private static final int GUIDE_CENTER = 0xB83D81F7;
+    private static final int GUIDE_SNAP = 0xE8FFD166;
     private static final Path HUD_FILE = PathManager.HUD_PATH.resolve("hud.json");
 
     private static final Map<String, Layout> layouts = new LinkedHashMap<>();
-    private static UIComponent draggingComponent;
+    private static UIComponent<?> draggingComponent;
     private static float dragOffsetX;
     private static float dragOffsetY;
+    private static float activeVerticalSnapLine = Float.NaN;
+    private static float activeHorizontalSnapLine = Float.NaN;
     private static boolean loaded;
     private static boolean dirty;
     private static boolean shutdownHookRegistered;
@@ -117,7 +132,7 @@ public final class HUDManager implements IMinecraft {
         }
     }
 
-    public static List<UIComponent> getVisibleComponents() {
+    public static List<UIComponent<?>> getVisibleComponents() {
         if (!HUD.INSTANCE.isEnabled()) {
             return Collections.emptyList();
         }
@@ -133,7 +148,7 @@ public final class HUDManager implements IMinecraft {
         }
 
         Render2DUtility.withGuiGraphics(graphics, () -> {
-            for (UIComponent component : getVisibleComponents()) {
+            for (UIComponent<?> component : getVisibleComponents()) {
                 renderComponent(graphics, component, partialTicks);
             }
         });
@@ -146,7 +161,11 @@ public final class HUDManager implements IMinecraft {
         }
 
         Render2DUtility.withGuiGraphics(graphics, () -> {
-            for (UIComponent component : getVisibleComponents()) {
+            if (draggingComponent != null) {
+                renderDragGuides();
+            }
+
+            for (UIComponent<?> component : getVisibleComponents()) {
                 AABB bounds = getDisplayBounds(component);
                 float x = (float)bounds.minX;
                 float y = (float)bounds.minY;
@@ -168,7 +187,7 @@ public final class HUDManager implements IMinecraft {
             return false;
         }
 
-        UIComponent component = getComponentAt(mouseX, mouseY);
+        UIComponent<?> component = getComponentAt(mouseX, mouseY);
         if (component == null) {
             return false;
         }
@@ -177,6 +196,7 @@ public final class HUDManager implements IMinecraft {
         draggingComponent = component;
         dragOffsetX = (float)mouseX - layout.x;
         dragOffsetY = (float)mouseY - layout.y;
+        clearSnapGuides();
         return true;
     }
 
@@ -189,6 +209,8 @@ public final class HUDManager implements IMinecraft {
         layout.x = (float)mouseX - dragOffsetX;
         layout.y = (float)mouseY - dragOffsetY;
         clampLayoutToScreen(draggingComponent, layout);
+        applySnapping(draggingComponent, layout);
+        clampLayoutToScreen(draggingComponent, layout);
         dirty = true;
         return true;
     }
@@ -199,6 +221,7 @@ public final class HUDManager implements IMinecraft {
         }
 
         draggingComponent = null;
+        clearSnapGuides();
         if (dirty) {
             save();
         }
@@ -210,7 +233,7 @@ public final class HUDManager implements IMinecraft {
             return false;
         }
 
-        UIComponent component = getComponentAt(mouseX, mouseY);
+        UIComponent<?> component = getComponentAt(mouseX, mouseY);
         if (component == null) {
             return false;
         }
@@ -233,7 +256,7 @@ public final class HUDManager implements IMinecraft {
         return true;
     }
 
-    public static AABB getDisplayBounds(UIComponent component) {
+    public static AABB getDisplayBounds(UIComponent<?> component) {
         Layout layout = layoutFor(component);
         AABB base = component.getBoundingBox();
         float scale = layout.scale;
@@ -247,11 +270,203 @@ public final class HUDManager implements IMinecraft {
         );
     }
 
-    public static float getScale(UIComponent component) {
+    public static float getScale(UIComponent<?> component) {
         return layoutFor(component).scale;
     }
 
-    private static void renderComponent(GuiGraphics graphics, UIComponent component, float partialTicks) {
+    private static void renderDragGuides() {
+        if (mc.getWindow() == null) {
+            return;
+        }
+
+        float screenWidth = mc.getWindow().getGuiScaledWidth();
+        float screenHeight = mc.getWindow().getGuiScaledHeight();
+        renderGuideGrid(screenWidth, screenHeight);
+        renderCenterCross(screenWidth, screenHeight);
+        renderActiveSnapGuides(screenWidth, screenHeight);
+    }
+
+    private static void renderGuideGrid(float screenWidth, float screenHeight) {
+        for (int index = 1; ; index++) {
+            float x = index * GUIDE_GRID_SPACING;
+            if (x >= screenWidth) {
+                break;
+            }
+
+            boolean major = index % GUIDE_GRID_MAJOR_INTERVAL == 0;
+            drawDashedVerticalLine(x, 0.0F, screenHeight, GUIDE_GRID_DASH, GUIDE_GRID_GAP, 0.75F, major ? GUIDE_GRID_MAJOR : GUIDE_GRID);
+        }
+
+        for (int index = 1; ; index++) {
+            float y = index * GUIDE_GRID_SPACING;
+            if (y >= screenHeight) {
+                break;
+            }
+
+            boolean major = index % GUIDE_GRID_MAJOR_INTERVAL == 0;
+            drawDashedHorizontalLine(0.0F, screenWidth, y, GUIDE_GRID_DASH, GUIDE_GRID_GAP, 0.75F, major ? GUIDE_GRID_MAJOR : GUIDE_GRID);
+        }
+    }
+
+    private static void renderCenterCross(float screenWidth, float screenHeight) {
+        float centerX = screenWidth * 0.5F;
+        float centerY = screenHeight * 0.5F;
+        drawDashedVerticalLine(centerX, 0.0F, screenHeight, GUIDE_CENTER_DASH, GUIDE_CENTER_GAP, 1.25F, GUIDE_CENTER);
+        drawDashedHorizontalLine(0.0F, screenWidth, centerY, GUIDE_CENTER_DASH, GUIDE_CENTER_GAP, 1.25F, GUIDE_CENTER);
+    }
+
+    private static void renderActiveSnapGuides(float screenWidth, float screenHeight) {
+        if (!Float.isNaN(activeVerticalSnapLine)) {
+            drawDashedVerticalLine(activeVerticalSnapLine, 0.0F, screenHeight, GUIDE_CENTER_DASH, GUIDE_CENTER_GAP, 1.4F, GUIDE_SNAP);
+        }
+
+        if (!Float.isNaN(activeHorizontalSnapLine)) {
+            drawDashedHorizontalLine(0.0F, screenWidth, activeHorizontalSnapLine, GUIDE_CENTER_DASH, GUIDE_CENTER_GAP, 1.4F, GUIDE_SNAP);
+        }
+    }
+
+    private static void drawDashedVerticalLine(float x, float startY, float endY, float dashLength, float gapLength, float strokeWidth, int color) {
+        float step = dashLength + gapLength;
+        for (float y = startY; y < endY; y += step) {
+            Render2DUtility.drawLine(x, y, x, Math.min(y + dashLength, endY), strokeWidth, color);
+        }
+    }
+
+    private static void drawDashedHorizontalLine(float startX, float endX, float y, float dashLength, float gapLength, float strokeWidth, int color) {
+        float step = dashLength + gapLength;
+        for (float x = startX; x < endX; x += step) {
+            Render2DUtility.drawLine(x, y, Math.min(x + dashLength, endX), y, strokeWidth, color);
+        }
+    }
+
+    private static void applySnapping(UIComponent<?> component, Layout layout) {
+        clearSnapGuides();
+        SnapCandidate horizontal = findHorizontalSnap(component, layout);
+        if (horizontal != null) {
+            layout.x += horizontal.delta;
+            activeVerticalSnapLine = horizontal.guide;
+        }
+
+        SnapCandidate vertical = findVerticalSnap(component, layout);
+        if (vertical != null) {
+            layout.y += vertical.delta;
+            activeHorizontalSnapLine = vertical.guide;
+        }
+    }
+
+    private static SnapCandidate findHorizontalSnap(UIComponent<?> component, Layout layout) {
+        if (mc.getWindow() == null) {
+            return null;
+        }
+
+        AABB base = component.getBoundingBox();
+        float scale = layout.scale;
+        float left = layout.x + (float)base.minX * scale;
+        float width = Math.max(1.0F, (float)base.getXsize() * scale);
+        float center = left + width * 0.5F;
+        float right = left + width;
+        float screenWidth = mc.getWindow().getGuiScaledWidth();
+
+        SnapCandidate best = null;
+        best = considerSnap(best, left, 0.0F, SNAP_ALIGNMENT_RANGE, 30);
+        best = considerSnap(best, right, screenWidth, SNAP_ALIGNMENT_RANGE, 30);
+        best = considerSnap(best, center, screenWidth * 0.5F, SNAP_CENTER_RANGE, 40);
+        best = considerGridSnap(best, left, center, right, screenWidth);
+        best = considerComponentSnaps(best, component, left, center, right, true);
+        return best;
+    }
+
+    private static SnapCandidate findVerticalSnap(UIComponent<?> component, Layout layout) {
+        if (mc.getWindow() == null) {
+            return null;
+        }
+
+        AABB base = component.getBoundingBox();
+        float scale = layout.scale;
+        float top = layout.y + (float)base.minY * scale;
+        float height = Math.max(1.0F, (float)base.getYsize() * scale);
+        float center = top + height * 0.5F;
+        float bottom = top + height;
+        float screenHeight = mc.getWindow().getGuiScaledHeight();
+
+        SnapCandidate best = null;
+        best = considerSnap(best, top, 0.0F, SNAP_ALIGNMENT_RANGE, 30);
+        best = considerSnap(best, bottom, screenHeight, SNAP_ALIGNMENT_RANGE, 30);
+        best = considerSnap(best, center, screenHeight * 0.5F, SNAP_CENTER_RANGE, 40);
+        best = considerGridSnap(best, top, center, bottom, screenHeight);
+        best = considerComponentSnaps(best, component, top, center, bottom, false);
+        return best;
+    }
+
+    private static SnapCandidate considerGridSnap(SnapCandidate best, float first, float center, float last, float screenSize) {
+        for (int index = 1; ; index++) {
+            float guide = index * GUIDE_GRID_SPACING;
+            if (guide >= screenSize) {
+                break;
+            }
+
+            best = considerSnap(best, first, guide, SNAP_GRID_RANGE, 10);
+            best = considerSnap(best, center, guide, SNAP_GRID_RANGE, 10);
+            best = considerSnap(best, last, guide, SNAP_GRID_RANGE, 10);
+        }
+        return best;
+    }
+
+    private static SnapCandidate considerComponentSnaps(SnapCandidate best, UIComponent<?> component, float first, float center, float last, boolean horizontal) {
+        for (UIComponent<?> other : getVisibleComponents()) {
+            if (other == component) {
+                continue;
+            }
+
+            AABB bounds = getDisplayBounds(other);
+            float otherFirst = horizontal ? (float)bounds.minX : (float)bounds.minY;
+            float otherLast = horizontal ? (float)bounds.maxX : (float)bounds.maxY;
+            float otherCenter = (otherFirst + otherLast) * 0.5F;
+
+            best = considerAxisSnaps(best, first, center, last, otherFirst, otherCenter, otherLast);
+        }
+        return best;
+    }
+
+    private static SnapCandidate considerAxisSnaps(SnapCandidate best, float first, float center, float last,
+                                                   float targetFirst, float targetCenter, float targetLast) {
+        best = considerSnap(best, first, targetFirst, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, first, targetCenter, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, first, targetLast, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, center, targetFirst, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, center, targetCenter, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, center, targetLast, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, last, targetFirst, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, last, targetCenter, SNAP_ALIGNMENT_RANGE, 20);
+        best = considerSnap(best, last, targetLast, SNAP_ALIGNMENT_RANGE, 20);
+        return best;
+    }
+
+    private static SnapCandidate considerSnap(SnapCandidate best, float anchor, float guide, float range, int priority) {
+        float distance = Math.abs(guide - anchor);
+        if (distance > range) {
+            return best;
+        }
+
+        if (best != null) {
+            if (priority < best.priority) {
+                return best;
+            }
+
+            if (priority == best.priority && distance >= best.distance) {
+                return best;
+            }
+        }
+
+        return new SnapCandidate(guide - anchor, guide, distance, priority);
+    }
+
+    private static void clearSnapGuides() {
+        activeVerticalSnapLine = Float.NaN;
+        activeHorizontalSnapLine = Float.NaN;
+    }
+
+    private static void renderComponent(GuiGraphics graphics, UIComponent<?> component, float partialTicks) {
         Layout layout = layoutFor(component);
         Render2DUtility.withTranslation(layout.x, layout.y, () ->
             Render2DUtility.withScale(layout.scale, layout.scale, 0.0F, 0.0F, () ->
@@ -260,10 +475,10 @@ public final class HUDManager implements IMinecraft {
         );
     }
 
-    private static UIComponent getComponentAt(double mouseX, double mouseY) {
-        List<UIComponent> components = getVisibleComponents();
+    private static UIComponent<?> getComponentAt(double mouseX, double mouseY) {
+        List<UIComponent<?>> components = getVisibleComponents();
         for (int index = components.size() - 1; index >= 0; index--) {
-            UIComponent component = components.get(index);
+            UIComponent<?> component = components.get(index);
             if (isInside(mouseX, mouseY, getDisplayBounds(component))) {
                 return component;
             }
@@ -275,7 +490,7 @@ public final class HUDManager implements IMinecraft {
         return mouseX >= bounds.minX && mouseX <= bounds.maxX && mouseY >= bounds.minY && mouseY <= bounds.maxY;
     }
 
-    private static Layout layoutFor(UIComponent component) {
+    private static Layout layoutFor(UIComponent<?> component) {
         Layout layout = layouts.computeIfAbsent(component.getId(), ignored -> defaultLayout(component));
         if (clampLayoutToScreen(component, layout)) {
             dirty = true;
@@ -284,12 +499,12 @@ public final class HUDManager implements IMinecraft {
     }
 
     private static void ensureDefaultLayouts() {
-        for (UIComponent component : HUD.components) {
+        for (UIComponent<?> component : HUD.components) {
             layoutFor(component);
         }
     }
 
-    private static Layout defaultLayout(UIComponent component) {
+    private static Layout defaultLayout(UIComponent<?> component) {
         return new Layout(component.getDefaultX(), component.getDefaultY(), component.getDefaultScale());
     }
 
@@ -330,7 +545,7 @@ public final class HUDManager implements IMinecraft {
         JsonObject components = new JsonObject();
 
         ensureDefaultLayouts();
-        for (UIComponent component : HUD.components) {
+        for (UIComponent<?> component : HUD.components) {
             Layout layout = layoutFor(component);
             JsonObject object = new JsonObject();
             object.addProperty("x", layout.x);
@@ -344,7 +559,7 @@ public final class HUDManager implements IMinecraft {
         return root;
     }
 
-    private static boolean clampLayoutToScreen(UIComponent component, Layout layout) {
+    private static boolean clampLayoutToScreen(UIComponent<?> component, Layout layout) {
         if (mc.getWindow() == null) {
             return false;
         }
@@ -425,6 +640,20 @@ public final class HUDManager implements IMinecraft {
             this.x = x;
             this.y = y;
             this.scale = MathUtility.clamp(scale, MIN_SCALE, MAX_SCALE);
+        }
+    }
+
+    private static final class SnapCandidate {
+        private final float delta;
+        private final float guide;
+        private final float distance;
+        private final int priority;
+
+        private SnapCandidate(float delta, float guide, float distance, int priority) {
+            this.delta = delta;
+            this.guide = guide;
+            this.distance = distance;
+            this.priority = priority;
         }
     }
 }
