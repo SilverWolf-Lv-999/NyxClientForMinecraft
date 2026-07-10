@@ -1,18 +1,32 @@
 package io.github.seraphina.nyx.client.utility.font;
 
+import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuSampler;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.font.EmptyArea;
+import net.minecraft.client.gui.font.TextRenderable;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.gui.render.state.GuiElementRenderState;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.client.renderer.texture.MissingTextureAtlasSprite;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.TextColor;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.ARGB;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.util.FormattedCharSink;
 import org.joml.Matrix3x2f;
+import org.joml.Matrix4f;
 
 import java.awt.AlphaComposite;
 import java.awt.Color;
@@ -25,7 +39,9 @@ import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphMetrics;
 import java.awt.font.GlyphVector;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,6 +53,10 @@ public final class FontRenderer implements AutoCloseable {
     private static final float ANTIALIAS_RASTER_SCALE = 2.0F;
     private static final Color TRANSPARENT_WHITE = new Color(255, 255, 255, 0);
     private static final AtomicInteger TEXTURE_IDS = new AtomicInteger();
+    private static final float DEBUG_CHAT_FONT_SIZE = 9.0F;
+    private static final float DEBUG_CHAT_SHADOW_OFFSET = 1.0F;
+    private static final float DEBUG_CHAT_LINE_HEIGHT = 9.0F;
+    private static final Identifier FALLBACK_TEXT_TEXTURE = MissingTextureAtlasSprite.getLocation();
 
     private final Font javaFont;
     private final Font rasterFont;
@@ -89,6 +109,26 @@ public final class FontRenderer implements AutoCloseable {
 
     public static void renderFont(String text, float x, float y, int color) {
         FontManager.getDefaultRenderer().drawString(text, x, y, color);
+    }
+
+    public static net.minecraft.client.gui.Font.PreparedText prepareDebugChatText(
+        FormattedCharSequence text,
+        float x,
+        float y,
+        int color,
+        boolean drawShadow,
+        boolean includeEmpty,
+        int backgroundColor
+    ) {
+        DebugChatPreparedText preparedText = new DebugChatPreparedText(x, y, color, drawShadow, includeEmpty, backgroundColor);
+        text.accept(preparedText);
+        return preparedText;
+    }
+
+    public static int debugChatWidth(FormattedCharSequence text) {
+        DebugChatWidthSink sink = new DebugChatWidthSink();
+        text.accept(sink);
+        return ceil(sink.width());
     }
 
     public Font getJavaFont() {
@@ -217,6 +257,18 @@ public final class FontRenderer implements AutoCloseable {
 
     private Glyph glyph(int codePoint) {
         return glyphs.computeIfAbsent(codePoint, this::createGlyph);
+    }
+
+    private synchronized GpuTextureView textureView() {
+        if (closed) {
+            throw new IllegalStateException("Font renderer is closed");
+        }
+        ensureTexture();
+        return texture.getTextureView();
+    }
+
+    private synchronized float atlasUvScale() {
+        return 1.0F / atlasSize;
     }
 
     private TextLayout layout(String text, float x, float y) {
@@ -429,6 +481,28 @@ public final class FontRenderer implements AutoCloseable {
         return text != null && !text.isEmpty() && ((color >>> 24) & 0xFF) != 0;
     }
 
+    private static FontRenderer debugChatRenderer(Style style) {
+        return style.isBold()
+            ? FontManager.getDebugChatBoldRenderer(DEBUG_CHAT_FONT_SIZE)
+            : FontManager.getDebugChatRenderer(DEBUG_CHAT_FONT_SIZE);
+    }
+
+    private static Glyph debugChatGlyph(FontRenderer renderer, int codePoint) {
+        synchronized (renderer) {
+            return renderer.glyph(codePoint);
+        }
+    }
+
+    private static float debugChatAdvance(Style style, int codePoint) {
+        FontRenderer renderer = debugChatRenderer(style);
+        Glyph glyph = debugChatGlyph(renderer, codePoint);
+        return glyph.advance;
+    }
+
+    private static int normalizeColor(int color) {
+        return ARGB.alpha(color) == 0 ? ARGB.opaque(color) : color;
+    }
+
     private static ScreenRectangle boundsFor(Bounds bounds, Matrix3x2f pose, ScreenRectangle scissorArea,
                                              Render2DUtility.VertexProjector projector) {
         return Render2DUtility.boundsForProjectedRect(
@@ -467,6 +541,207 @@ public final class FontRenderer implements AutoCloseable {
     }
 
     private record TextLayout(GlyphQuad[] quads, Bounds bounds) {
+    }
+
+    private static final class DebugChatWidthSink implements FormattedCharSink {
+        private float lineWidth;
+        private float maxWidth;
+
+        @Override
+        public boolean accept(int positionInCurrentSequence, Style style, int codePoint) {
+            if (codePoint == '\n') {
+                maxWidth = Math.max(maxWidth, lineWidth);
+                lineWidth = 0.0F;
+                return true;
+            }
+            if (codePoint == '\r') {
+                return true;
+            }
+            if (codePoint == '\t') {
+                lineWidth += debugChatAdvance(style, ' ') * 4.0F;
+                return true;
+            }
+
+            lineWidth += debugChatAdvance(style, codePoint);
+            return true;
+        }
+
+        private float width() {
+            return Math.max(maxWidth, lineWidth);
+        }
+    }
+
+    private static final class DebugChatPreparedText implements FormattedCharSink, net.minecraft.client.gui.Font.PreparedText {
+        private final float startX;
+        private final int color;
+        private final boolean drawShadow;
+        private final boolean includeEmpty;
+        private final List<TextRenderable.Styled> glyphs = new ArrayList<>();
+        private List<EmptyArea> emptyAreas;
+        private float x;
+        private float y;
+        private float left = Float.MAX_VALUE;
+        private float top = Float.MAX_VALUE;
+        private float right = -Float.MAX_VALUE;
+        private float bottom = -Float.MAX_VALUE;
+
+        private DebugChatPreparedText(float x, float y, int color, boolean drawShadow, boolean includeEmpty, int backgroundColor) {
+            this.startX = x;
+            this.x = x;
+            this.y = y;
+            this.color = normalizeColor(color);
+            this.drawShadow = drawShadow;
+            this.includeEmpty = includeEmpty;
+        }
+
+        @Override
+        public boolean accept(int positionInCurrentSequence, Style style, int codePoint) {
+            if (codePoint == '\n') {
+                x = startX;
+                y += DEBUG_CHAT_LINE_HEIGHT;
+                return true;
+            }
+            if (codePoint == '\r') {
+                return true;
+            }
+
+            FontRenderer renderer = debugChatRenderer(style);
+            Glyph glyph;
+            float advance;
+            if (codePoint == '\t') {
+                glyph = null;
+                advance = debugChatAdvance(style, ' ') * 4.0F;
+            } else {
+                glyph = debugChatGlyph(renderer, codePoint);
+                advance = glyph.advance;
+            }
+
+            int textColor = textColor(style);
+            int shadowColor = shadowColor(style, textColor);
+            if (glyph != null && glyph.visible) {
+                if (ARGB.alpha(shadowColor) != 0) {
+                    addGlyph(renderer, glyph, x + DEBUG_CHAT_SHADOW_OFFSET, y + DEBUG_CHAT_SHADOW_OFFSET, shadowColor, style);
+                }
+                addGlyph(renderer, glyph, x, y, textColor, style);
+            } else if (includeEmpty) {
+                addEmptyArea(new EmptyArea(x, y, advance, EmptyArea.DEFAULT_ASCENT, EmptyArea.DEFAULT_HEIGHT, style));
+            }
+
+            x += advance;
+            return true;
+        }
+
+        @Override
+        public void visit(net.minecraft.client.gui.Font.GlyphVisitor visitor) {
+            for (TextRenderable.Styled glyph : glyphs) {
+                visitor.acceptGlyph(glyph);
+            }
+            if (emptyAreas != null) {
+                for (EmptyArea emptyArea : emptyAreas) {
+                    visitor.acceptEmptyArea(emptyArea);
+                }
+            }
+        }
+
+        @Override
+        public ScreenRectangle bounds() {
+            if (left >= right || top >= bottom) {
+                return null;
+            }
+
+            int minX = floor(left);
+            int minY = floor(top);
+            int maxX = ceil(right);
+            int maxY = ceil(bottom);
+            return new ScreenRectangle(minX, minY, maxX - minX, maxY - minY);
+        }
+
+        private int textColor(Style style) {
+            TextColor textColor = style.getColor();
+            return textColor == null ? color : ARGB.color(ARGB.alpha(color), textColor.getValue());
+        }
+
+        private int shadowColor(Style style, int textColor) {
+            Integer shadowColor = style.getShadowColor();
+            if (shadowColor != null) {
+                float textAlpha = ARGB.alphaFloat(textColor);
+                float shadowAlpha = ARGB.alphaFloat(shadowColor);
+                return textAlpha == 1.0F ? shadowColor : ARGB.color(ARGB.as8BitChannel(textAlpha * shadowAlpha), shadowColor);
+            }
+            return drawShadow ? ARGB.scaleRGB(textColor, 0.25F) : 0;
+        }
+
+        private void addGlyph(FontRenderer renderer, Glyph glyph, float x, float y, int color, Style style) {
+            if (ARGB.alpha(color) == 0) {
+                return;
+            }
+
+            float x0 = x + glyph.xOffset;
+            float y0 = y + renderer.getAscent() + glyph.yOffset;
+            float x1 = x0 + glyph.width;
+            float y1 = y0 + glyph.height;
+            DebugChatGlyphRenderable renderable = new DebugChatGlyphRenderable(renderer, glyph, x0, y0, x1, y1, color, style);
+            glyphs.add(renderable);
+            markSize(x0, y0, x1, y1);
+        }
+
+        private void addEmptyArea(EmptyArea emptyArea) {
+            if (emptyAreas == null) {
+                emptyAreas = new ArrayList<>();
+            }
+            emptyAreas.add(emptyArea);
+        }
+
+        private void markSize(float left, float top, float right, float bottom) {
+            this.left = Math.min(this.left, left);
+            this.top = Math.min(this.top, top);
+            this.right = Math.max(this.right, right);
+            this.bottom = Math.max(this.bottom, bottom);
+        }
+    }
+
+    private record DebugChatGlyphRenderable(
+        FontRenderer renderer,
+        Glyph glyph,
+        float left,
+        float top,
+        float right,
+        float bottom,
+        int color,
+        Style style
+    ) implements TextRenderable.Styled {
+        @Override
+        public void render(Matrix4f pose, VertexConsumer consumer, int packedLight, boolean noDepth) {
+            float uvScale = renderer.atlasUvScale();
+            float u0 = glyph.textureX * uvScale;
+            float v0 = glyph.textureY * uvScale;
+            float u1 = (glyph.textureX + glyph.textureWidth) * uvScale;
+            float v1 = (glyph.textureY + glyph.textureHeight) * uvScale;
+
+            consumer.addVertex(pose, left, top, 0.0F).setColor(color).setUv(u0, v0).setLight(packedLight);
+            consumer.addVertex(pose, left, bottom, 0.0F).setColor(color).setUv(u0, v1).setLight(packedLight);
+            consumer.addVertex(pose, right, bottom, 0.0F).setColor(color).setUv(u1, v1).setLight(packedLight);
+            consumer.addVertex(pose, right, top, 0.0F).setColor(color).setUv(u1, v0).setLight(packedLight);
+        }
+
+        @Override
+        public RenderType renderType(net.minecraft.client.gui.Font.DisplayMode displayMode) {
+            return switch (displayMode) {
+                case SEE_THROUGH -> RenderTypes.textSeeThrough(FALLBACK_TEXT_TEXTURE);
+                case POLYGON_OFFSET -> RenderTypes.textPolygonOffset(FALLBACK_TEXT_TEXTURE);
+                default -> RenderTypes.text(FALLBACK_TEXT_TEXTURE);
+            };
+        }
+
+        @Override
+        public GpuTextureView textureView() {
+            return renderer.textureView();
+        }
+
+        @Override
+        public RenderPipeline guiPipeline() {
+            return RenderPipelines.GUI_TEXT;
+        }
     }
 
     private record FontTextRenderState(

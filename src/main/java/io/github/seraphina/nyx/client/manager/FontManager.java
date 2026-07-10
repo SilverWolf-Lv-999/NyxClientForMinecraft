@@ -17,6 +17,7 @@ import java.util.Optional;
 public final class FontManager {
     public static final float DEFAULT_FONT_SIZE = 18.0F;
     private static final String CLICK_GUI_FONT_RESOURCE = "/assets/nyxclient/fonts/MapleMono-CN-Medium.ttf";
+    private static final String DEBUG_CHAT_FONT_RESOURCE = "/assets/nyxclient/fonts/MapleMono-CN-Medium.ttf";
 
     private static final String[] APPLE_DISPLAY_FONTS = {
         "SF Pro Display",
@@ -48,6 +49,8 @@ public final class FontManager {
     private static Font appleDisplayFont;
     private static Font appleTextFont;
     private static Font clickGuiFont;
+    private static Font debugChatFont;
+    private static Font debugChatBoldFont;
 
     private FontManager() {
     }
@@ -103,6 +106,26 @@ public final class FontManager {
         return getRenderer(clickGuiFont, size);
     }
 
+    public static synchronized void initDebugChatFonts() {
+        if (debugChatFont == null) {
+            debugChatFont = loadResourceFont(DEBUG_CHAT_FONT_RESOURCE)
+                .orElseGet(() -> preferredFont(APPLE_TEXT_FONTS));
+            debugChatBoldFont = debugChatFont.deriveFont(Font.BOLD);
+        }
+        getRenderer(debugChatFont, DEFAULT_FONT_SIZE);
+        getRenderer(debugChatBoldFont, DEFAULT_FONT_SIZE);
+    }
+
+    public static synchronized FontRenderer getDebugChatRenderer(float size) {
+        initDebugChatFonts();
+        return getRenderer(debugChatFont, size);
+    }
+
+    public static synchronized FontRenderer getDebugChatBoldRenderer(float size) {
+        initDebugChatFonts();
+        return getRenderer(debugChatBoldFont, size);
+    }
+
     public static List<Font> getSystemFonts() {
         return SystemFonts.getFonts();
     }
@@ -120,6 +143,8 @@ public final class FontManager {
         appleDisplayFont = null;
         appleTextFont = null;
         clickGuiFont = null;
+        debugChatFont = null;
+        debugChatBoldFont = null;
         FontRenderer.closeSharedResources();
     }
 
