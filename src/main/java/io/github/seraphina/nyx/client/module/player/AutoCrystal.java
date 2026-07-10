@@ -6,7 +6,7 @@ import io.github.seraphina.nyx.client.events.bus.EventPriority;
 import io.github.seraphina.nyx.client.events.impl.ClickEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
-import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
+import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
@@ -49,7 +49,7 @@ public class AutoCrystal extends Module {
     private int rightClickProgress = TICKS_PER_SECOND;
     private int leftClickProgress = TICKS_PER_SECOND;
     private boolean usedInteractionThisTick;
-    private Vector2f forcedOutgoingRotations;
+    private boolean waitForUseRelease;
     private Vector2f lastOutgoingRotations;
     private Vector2f syncedRotations;
 
@@ -65,6 +65,12 @@ public class AutoCrystal extends Module {
 
     @EventTarget
     public void onClick(ClickEvent event) {
+        if (shouldBlockUseInput()) {
+            event.setCancelled(true);
+            drainUseClicks();
+            return;
+        }
+
         if (!shouldHandleInput()) {
             return;
         }
@@ -74,8 +80,24 @@ public class AutoCrystal extends Module {
     }
 
     @EventTarget
+    public void onStartUseItem(StartUseItemEvent event) {
+        if (!shouldBlockUseInput()) {
+            return;
+        }
+
+        event.setCancelled(true);
+        drainUseClicks();
+    }
+
+    @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
+        tickUseReleaseLock();
         usedInteractionThisTick = false;
+
+        if (waitForUseRelease) {
+            refillClickProgress();
+            return;
+        }
 
         if (!shouldHandleInput()) {
             refillClickProgress();
@@ -101,35 +123,24 @@ public class AutoCrystal extends Module {
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onPacketSend(PacketEvent.Send event) {
         if (event.getPacket() instanceof ServerboundMovePlayerPacket packet) {
-            ServerboundMovePlayerPacket outgoingPacket = packet;
-            if (forcedOutgoingRotations != null) {
-                outgoingPacket = applyMovePacketRotations(packet, forcedOutgoingRotations);
-                event.setPacket(outgoingPacket);
-                forcedOutgoingRotations = null;
-            }
-
-            if (outgoingPacket.hasRotation()) {
-                updateLastOutgoingRotations(outgoingPacket);
+            if (packet.hasRotation()) {
+                updateLastOutgoingRotations(packet);
             }
         }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST - 1)
-    public void onSendPosition(SendPositionEvent event) {
-        if (forcedOutgoingRotations == null) {
-            return;
-        }
-
-        event.setYaw(forcedOutgoingRotations.x);
-        event.setPitch(forcedOutgoingRotations.y);
-        syncPlayerRotation(forcedOutgoingRotations);
     }
 
     private boolean shouldHandleInput() {
         return canRun()
+                && !waitForUseRelease
                 && mc.options.keyUse.isDown()
                 && crystalHand() != null
                 && currentBaseTarget() != null;
+    }
+
+    private boolean shouldBlockUseInput() {
+        return canRun()
+                && waitForUseRelease
+                && mc.options.keyUse.isDown();
     }
 
     private boolean canRun() {
@@ -175,6 +186,7 @@ public class AutoCrystal extends Module {
     }
 
     private boolean useCrystalOnBlock(BlockHitResult hitResult, InteractionHand hand) {
+        boolean wasLastUsableCrystal = usableCrystalCountInHands() <= 1;
         Vector2f rotations = applyActionRotations(RotationUtility.calculate(hitResult.getLocation()));
         InteractionResult result = useItemOnWithRotations(rotations, hitResult, hand);
         if (!result.consumesAction()) {
@@ -184,6 +196,9 @@ public class AutoCrystal extends Module {
         mc.player.swing(hand);
         mc.gameRenderer.itemInHandRenderer.itemUsed(hand);
         usedInteractionThisTick = true;
+        if (wasLastUsableCrystal || !hasCrystalInHands()) {
+            waitForUseRelease = mc.options.keyUse.isDown();
+        }
         return true;
     }
 
@@ -287,6 +302,30 @@ public class AutoCrystal extends Module {
                 && !mc.player.getCooldowns().isOnCooldown(stack);
     }
 
+    private int usableCrystalCountInHands() {
+        return usableCrystalCount(mc.player.getItemInHand(InteractionHand.MAIN_HAND))
+                + usableCrystalCount(mc.player.getItemInHand(InteractionHand.OFF_HAND));
+    }
+
+    private int usableCrystalCount(ItemStack stack) {
+        return isCrystalStack(stack) ? stack.getCount() : 0;
+    }
+
+    private boolean hasCrystalInHands() {
+        return hasCrystalItem(mc.player.getItemInHand(InteractionHand.MAIN_HAND))
+                || hasCrystalItem(mc.player.getItemInHand(InteractionHand.OFF_HAND));
+    }
+
+    private boolean hasCrystalItem(ItemStack stack) {
+        return !stack.isEmpty() && stack.is(Items.END_CRYSTAL);
+    }
+
+    private void tickUseReleaseLock() {
+        if (!canRun() || !mc.options.keyUse.isDown()) {
+            waitForUseRelease = false;
+        }
+    }
+
     private void drainUseClicks() {
         while (mc.options.keyUse.consumeClick()) {
         }
@@ -302,9 +341,9 @@ public class AutoCrystal extends Module {
         RotationManager.INSTANCE.setRotations(fixedRotations, 180.0D, Priority.Highest);
 
         Vector2f appliedRotations = makeUniqueOutgoingRotations(RotationManager.INSTANCE.getRotation());
-        RotationManager.INSTANCE.setRotations(appliedRotations, 180.0D, Priority.Highest);
+        RotationManager.INSTANCE.setRotations(appliedRotations, 0.0D, Priority.Highest);
         syncPlayerRotation(appliedRotations);
-        forcedOutgoingRotations = new Vector2f(appliedRotations);
+        sendActionRotationPacket(appliedRotations);
         return appliedRotations;
     }
 
@@ -395,31 +434,6 @@ public class AutoCrystal extends Module {
         syncedRotations = new Vector2f(lastOutgoingRotations);
     }
 
-    private ServerboundMovePlayerPacket applyMovePacketRotations(ServerboundMovePlayerPacket packet, Vector2f rotations) {
-        if (rotations == null) {
-            return packet;
-        }
-
-        if (packet.hasPosition()) {
-            return new ServerboundMovePlayerPacket.PosRot(
-                    packet.getX(0.0D),
-                    packet.getY(0.0D),
-                    packet.getZ(0.0D),
-                    rotations.x,
-                    rotations.y,
-                    packet.isOnGround(),
-                    packet.horizontalCollision()
-            );
-        }
-
-        return new ServerboundMovePlayerPacket.Rot(
-                rotations.x,
-                rotations.y,
-                packet.isOnGround(),
-                packet.horizontalCollision()
-        );
-    }
-
     private InteractionResult useItemOnWithRotations(Vector2f rotations, BlockHitResult hitResult, InteractionHand hand) {
         if (mc.player == null || mc.gameMode == null) {
             return InteractionResult.FAIL;
@@ -465,6 +479,19 @@ public class AutoCrystal extends Module {
         }
     }
 
+    private void sendActionRotationPacket(Vector2f rotations) {
+        if (mc.player == null || mc.player.connection == null || rotations == null) {
+            return;
+        }
+
+        mc.player.connection.send(new ServerboundMovePlayerPacket.Rot(
+                rotations.x,
+                rotations.y,
+                mc.player.onGround(),
+                mc.player.horizontalCollision
+        ));
+    }
+
     private void refillClickProgress() {
         rightClickProgress = Math.min(rightClickProgress + rightCps.getValue(), TICKS_PER_SECOND);
         leftClickProgress = Math.min(leftClickProgress + leftCps.getValue(), TICKS_PER_SECOND);
@@ -474,7 +501,7 @@ public class AutoCrystal extends Module {
         rightClickProgress = TICKS_PER_SECOND;
         leftClickProgress = TICKS_PER_SECOND;
         usedInteractionThisTick = false;
-        forcedOutgoingRotations = null;
+        waitForUseRelease = false;
         lastOutgoingRotations = currentPlayerRotations();
         syncedRotations = new Vector2f(lastOutgoingRotations);
     }
