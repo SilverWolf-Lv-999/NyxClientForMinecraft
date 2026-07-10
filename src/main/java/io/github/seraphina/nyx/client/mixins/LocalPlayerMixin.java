@@ -4,6 +4,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
+import io.github.seraphina.nyx.client.events.impl.PostSendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.SlowdownEvent;
 import io.github.seraphina.nyx.client.events.impl.SwingHandEvent;
@@ -41,6 +42,11 @@ public class LocalPlayerMixin {
         if (nyx$positionEvent.isCancelled()) {
             info.cancel();
         }
+    }
+
+    @Inject(method = "sendPosition", at = @At("TAIL"))
+    private void onPostSendPosition(CallbackInfo info) {
+        EventBus.INSTANCE.post(new PostSendPositionEvent());
     }
 
     @Inject(method = "swing", at = @At("HEAD"), cancellable = true)

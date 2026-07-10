@@ -23,6 +23,7 @@
     "LevelRendererMixin",
     "LightTextureMixin",
     "LivingEntityMixin",
+    "LocalPlayerAccessor",
     "LocalPlayerMixin",
     "MinecraftMixin",
     "MixinLivingEntityRenderer",
