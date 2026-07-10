@@ -149,8 +149,9 @@ public class MaceAura extends Module {
     @EventTarget
     public void onPacketReceive(PacketEvent.Receive event) {
         if (event.getPacket() instanceof ClientboundPlayerPositionPacket) {
-            setEnabled(false);
-            DebugUtility.msg("MaceAura disabled: server corrected position");
+            RotationManager.INSTANCE.setActive(false);
+            resetCombatCycle();
+            DebugUtility.msg("MaceAura recovered: server corrected position");
         }
     }
 
@@ -992,9 +993,10 @@ public class MaceAura extends Module {
 
     private boolean isMaceSmashReady(LivingEntity target) {
         Vec3 velocity = mc.player.getDeltaMovement();
-        return velocity.y <= FALLING_ATTACK_VELOCITY
-                && (mc.player.fallDistance >= MIN_MACE_FALL_DISTANCE
-                || mc.player.getY() > target.getY() + MIN_MACE_FALL_DISTANCE);
+        boolean hasSmashFallDistance = mc.player.fallDistance >= MIN_MACE_FALL_DISTANCE;
+        boolean descendingFromHeight = velocity.y <= FALLING_ATTACK_VELOCITY
+                && mc.player.getY() > target.getY() + MIN_MACE_FALL_DISTANCE;
+        return !mc.player.onGround() && (hasSmashFallDistance || descendingFromHeight);
     }
 
     private void waitForAttackWindowOrRetry() {
@@ -1092,21 +1094,12 @@ public class MaceAura extends Module {
             return false;
         }
 
-        if (!Inventory.isHotbarSlot(elytraSlot) || fireworkOriginalChestStack.isEmpty()) {
+        int restoreSlot = findFireworkChestRestoreSlot();
+        if (!InventoryUtility.isValidInventorySlot(restoreSlot)) {
             return true;
         }
 
-        ItemStack restoreStack = InventoryUtility.getStack(elytraSlot);
-        if (!isOriginalChestStack(restoreStack)) {
-            return true;
-        }
-
-        if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
-                && !selectHotbarSlot(elytraSlot)) {
-            return true;
-        }
-
-        useSelectedItemWithRetryDelay();
+        InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, restoreSlot);
         return true;
     }
 
@@ -1125,6 +1118,50 @@ public class MaceAura extends Module {
 
     private boolean isOriginalChestStack(ItemStack stack) {
         return !stack.isEmpty() && ItemStack.isSameItemSameComponents(stack, fireworkOriginalChestStack);
+    }
+
+    private int findFireworkChestRestoreSlot() {
+        if (isKnownFireworkChestRestoreSlot(elytraSlot)) {
+            return elytraSlot;
+        }
+
+        if (!fireworkOriginalChestStack.isEmpty()) {
+            int originalSlot = InventoryUtility.findSlot(this::isOriginalChestStack);
+            if (isUsableFireworkChestRestoreSlot(originalSlot)) {
+                return originalSlot;
+            }
+        }
+
+        int chestArmorSlot = InventoryUtility.findSlot(this::isChestArmorStack);
+        if (isUsableFireworkChestRestoreSlot(chestArmorSlot)) {
+            return chestArmorSlot;
+        }
+
+        int emptySlot = InventoryUtility.findEmptySlot();
+        return isUsableFireworkChestRestoreSlot(emptySlot) ? emptySlot : InventoryUtility.NOT_FOUND;
+    }
+
+    private boolean isKnownFireworkChestRestoreSlot(int inventorySlot) {
+        if (!isUsableFireworkChestRestoreSlot(inventorySlot)) {
+            return false;
+        }
+
+        ItemStack stack = InventoryUtility.getStack(inventorySlot);
+        return fireworkOriginalChestStack.isEmpty()
+                ? stack.isEmpty() || isChestArmorStack(stack)
+                : isOriginalChestStack(stack);
+    }
+
+    private boolean isUsableFireworkChestRestoreSlot(int inventorySlot) {
+        return InventoryUtility.isValidInventorySlot(inventorySlot)
+                && inventorySlot != InventoryUtility.ARMOR_CHEST_SLOT;
+    }
+
+    private boolean isChestArmorStack(ItemStack stack) {
+        return mc.player != null
+                && !stack.isEmpty()
+                && !stack.is(Items.ELYTRA)
+                && mc.player.getEquipmentSlotForItem(stack) == EquipmentSlot.CHEST;
     }
 
     private float randomFireworkAscendPitch() {
