@@ -64,7 +64,7 @@ public class MaceAura extends Module {
     private static final int FIREWORK_GLIDE_TIMEOUT_TICKS = 30;
     private static final int FIREWORK_RESET_SETTLE_TICKS = 1;
     private static final int FIREWORK_MACE_SWITCH_SETTLE_TICKS = 1;
-    private static final double FIREWORK_MACE_SWITCH_RANGE_BUFFER = 5.0D;
+    private static final double FIREWORK_ARMOR_SWITCH_RANGE = 5.0D;
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
     private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
@@ -911,7 +911,7 @@ public class MaceAura extends Module {
 
     private boolean isTargetInFireworkMaceSwitchRange(LivingEntity target) {
         return RotationUtility.getEyeDistanceToEntity(target)
-                <= attackRange.getValue() + FIREWORK_MACE_SWITCH_RANGE_BUFFER;
+                <= FIREWORK_ARMOR_SWITCH_RANGE;
     }
 
     private boolean isFireworkDiveAttack() {
