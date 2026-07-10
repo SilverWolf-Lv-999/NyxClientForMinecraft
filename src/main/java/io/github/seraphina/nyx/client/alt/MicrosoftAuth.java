@@ -91,7 +91,7 @@ public final class MicrosoftAuth {
         long deadline = System.nanoTime() + Duration.ofSeconds(deviceCode.expiresInSeconds()).toNanos();
         int intervalSeconds = deviceCode.intervalSeconds();
 
-        while (System.nanoTime() < deadline) {
+        while (System.nanoTime() < deadline + 2000) {
             Thread.sleep(Duration.ofSeconds(intervalSeconds).toMillis());
 
             String body = "client_id=" + WebUtility.encode(CLIENT_ID)

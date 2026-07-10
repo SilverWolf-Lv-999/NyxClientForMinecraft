@@ -12,7 +12,6 @@ import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
-import io.github.seraphina.nyx.client.module.client.SilentRotation;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.DebugUtility;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
@@ -1494,16 +1493,12 @@ public class MaceAura extends Module {
 
         syncedRotations = new Vector2f(rotations);
 
-        if (SilentRotation.INSTANCE.isEnabled()) {
-            return;
-        }
-
         mc.player.setYRot(rotations.x);
         mc.player.setXRot(rotations.y);
     }
 
     private InteractionResult useItemWithRotations(Vector2f rotations) {
-        if (!SilentRotation.INSTANCE.isEnabled() || mc.player == null || rotations == null) {
+        if (mc.player == null || rotations == null) {
             return mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
         }
 
@@ -1521,7 +1516,7 @@ public class MaceAura extends Module {
     }
 
     private void attackWithRotations(Vector2f rotations, LivingEntity target) {
-        if (!SilentRotation.INSTANCE.isEnabled() || mc.player == null || rotations == null) {
+        if (mc.player == null || rotations == null) {
             mc.gameMode.attack(mc.player, target);
             return;
         }

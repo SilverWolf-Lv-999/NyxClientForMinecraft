@@ -23,8 +23,10 @@ public class AutoElytra extends Module {
 
     private static final long DOUBLE_JUMP_WINDOW_MS = 300L;
     private static final int EQUIP_CONFIRM_TIMEOUT_TICKS = 40;
+    private static final int EQUIP_RETRY_DELAY_TICKS = 4;
     private static final int START_FALL_FLYING_TIMEOUT_TICKS = 40;
     private static final int RESTORE_SELECTED_SLOT_DELAY_TICKS = 2;
+    private static final int RESTORE_CHEST_TIMEOUT_TICKS = 10;
 
     private long lastJumpPressTime;
     private ActiveElytra activeElytra;
@@ -58,6 +60,10 @@ public class AutoElytra extends Module {
         }
 
         if (activeElytra.stage == Stage.RESTORE_CHEST) {
+            if (!shouldClearInputForChestRestore()) {
+                return;
+            }
+
             event.setForward(0.0F);
             event.setStrafe(0.0F);
             event.setJump(false);
@@ -126,6 +132,11 @@ public class AutoElytra extends Module {
             activeElytra.hasBeenAirborne = true;
         }
 
+        if (activeElytra.confirmedEquipped && !isWearingElytra()) {
+            handleLostElytraEquip();
+            return;
+        }
+
         if (mc.player.isFallFlying()) {
             activeElytra.hasBeenAirborne = true;
             activeElytra.stage = Stage.FLIGHT;
@@ -167,7 +178,10 @@ public class AutoElytra extends Module {
     }
 
     private boolean isWearingElytra() {
-        assert mc.player != null;
+        if (mc.player == null) {
+            return false;
+        }
+
         ItemStack chestStack = mc.player.getItemBySlot(EquipmentSlot.CHEST);
         return chestStack.is(Items.ELYTRA);
     }
@@ -190,7 +204,7 @@ public class AutoElytra extends Module {
             return;
         }
 
-        if (!InventoryUtility.selectHotbarSlot(activeElytra.elytraSlot)) {
+        if (!selectQueuedElytraSlot()) {
             cancelActiveElytra();
             return;
         }
@@ -209,16 +223,61 @@ public class AutoElytra extends Module {
             return true;
         }
 
-        if (!activeElytra.confirmedEquipped && activeElytra.equipConfirmTicks > 0) {
-            activeElytra.equipConfirmTicks--;
-            if (mc.player != null && !mc.player.onGround()) {
-                activeElytra.hasBeenAirborne = true;
-            }
+        if (activeElytra.confirmedEquipped || activeElytra.equipConfirmTicks <= 0) {
+            cancelActiveElytra();
             return false;
         }
 
-        cancelActiveElytra();
+        activeElytra.equipConfirmTicks--;
+        if (mc.player != null && !mc.player.onGround()) {
+            activeElytra.hasBeenAirborne = true;
+        }
+
+        retryQueuedElytraUse();
         return false;
+    }
+
+    private void retryQueuedElytraUse() {
+        if (activeElytra == null) {
+            return;
+        }
+
+        if (activeElytra.equipRetryDelayTicks > 0) {
+            activeElytra.equipRetryDelayTicks--;
+            return;
+        }
+
+        activeElytra.equipRetryDelayTicks = EQUIP_RETRY_DELAY_TICKS;
+        if (selectQueuedElytraSlot()) {
+            mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+        }
+    }
+
+    private boolean selectQueuedElytraSlot() {
+        if (mc.player == null || mc.level == null || activeElytra == null || !Inventory.isHotbarSlot(activeElytra.elytraSlot)) {
+            return false;
+        }
+
+        ItemStack stack = InventoryUtility.getStack(activeElytra.elytraSlot);
+        if (stack.isEmpty() || !stack.is(Items.ELYTRA) || !stack.isItemEnabled(mc.level.enabledFeatures())) {
+            return false;
+        }
+
+        return InventoryUtility.selectHotbarSlot(activeElytra.elytraSlot, true);
+    }
+
+    private void handleLostElytraEquip() {
+        if (activeElytra == null) {
+            return;
+        }
+
+        if (activeElytra.stage == Stage.RESTORE_CHEST || activeElytra.stage == Stage.FLIGHT) {
+            cancelActiveElytra();
+            return;
+        }
+
+        activeElytra.confirmedEquipped = false;
+        activeElytra.stage = Stage.WAIT_EQUIP;
     }
 
     private void waitForAirborne() {
@@ -283,8 +342,9 @@ public class AutoElytra extends Module {
             return;
         }
 
-        InventoryUtility.selectHotbarSlot(activeElytra.originalSelectedSlot);
-        activeElytra.selectedSlotRestored = true;
+        if (InventoryUtility.selectHotbarSlot(activeElytra.originalSelectedSlot, true)) {
+            activeElytra.selectedSlotRestored = true;
+        }
     }
 
     private void stopSprinting() {
@@ -296,6 +356,17 @@ public class AutoElytra extends Module {
     private void restoreChestSlotAfterInputClear() {
         stopSprinting();
         restoreSelectedSlot();
+
+        if (!isWearingElytra()) {
+            activeElytra = null;
+            return;
+        }
+
+        if (activeElytra.restoreChestTicks-- <= 0) {
+            cancelActiveElytra();
+            return;
+        }
+
         restoreChestSlot();
     }
 
@@ -312,6 +383,19 @@ public class AutoElytra extends Module {
         if (InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, targetSlot)) {
             activeElytra = null;
         }
+    }
+
+    private boolean shouldClearInputForChestRestore() {
+        if (activeElytra == null || !isWearingElytra()) {
+            activeElytra = null;
+            return false;
+        }
+
+        if (activeElytra.restoreChestTicks <= 0 || InventoryUtility.hasCarriedStack()) {
+            return false;
+        }
+
+        return findRestoreTargetSlot() != InventoryUtility.NOT_FOUND;
     }
 
     private int findRestoreTargetSlot() {
@@ -352,8 +436,10 @@ public class AutoElytra extends Module {
         private boolean confirmedEquipped;
         private boolean selectedSlotRestored;
         private int equipConfirmTicks = EQUIP_CONFIRM_TIMEOUT_TICKS;
+        private int equipRetryDelayTicks = EQUIP_RETRY_DELAY_TICKS;
         private int startFallFlyingTicks = START_FALL_FLYING_TIMEOUT_TICKS;
         private int restoreSelectedSlotDelayTicks = RESTORE_SELECTED_SLOT_DELAY_TICKS;
+        private int restoreChestTicks = RESTORE_CHEST_TIMEOUT_TICKS;
 
         private ActiveElytra(int elytraSlot, int originalSelectedSlot, ItemStack originalChestStack, boolean hasBeenAirborne) {
             this.elytraSlot = elytraSlot;

@@ -12,7 +12,6 @@ import io.github.seraphina.nyx.client.events.impl.RespawnEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.UseItemRaytraceEvent;
-import io.github.seraphina.nyx.client.module.client.SilentRotation;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import net.minecraft.client.Minecraft;
@@ -230,8 +229,6 @@ public final class RotationManager {
             return;
         }
 
-        boolean silentRotation = SilentRotation.INSTANCE.isEnabled();
-
         if (active && rotations != null) {
             float yaw = rotations.x;
             float pitch = rotations.y;
@@ -241,13 +238,10 @@ public final class RotationManager {
                 event.setPitch(pitch);
             }
 
-            if (shouldDeactivateAfterSend(silentRotation)) {
+            if (Math.abs((rotations.x - MC.player.getYRot()) % 360.0F) < 1.0F && Math.abs(rotations.y - MC.player.getXRot()) < 1.0F) {
                 active = false;
                 priority = 0;
-
-                if (!silentRotation) {
-                    correctDisabledRotations();
-                }
+                correctDisabledRotations();
             }
 
             lastRotations = new Vector2f(rotations);
@@ -257,11 +251,7 @@ public final class RotationManager {
 
         lastAnimationRotation = animationRotation;
         animationRotation = new Vector2f(event.getYaw(), event.getPitch());
-
-        if (!silentRotation || !active) {
-            targetRotations = getPlayerRotation();
-        }
-
+        targetRotations = getPlayerRotation();
         raytrace = null;
         smoothed = false;
     }
@@ -297,10 +287,6 @@ public final class RotationManager {
     }
 
     private void correctDisabledRotations() {
-        if (SilentRotation.INSTANCE.isEnabled()) {
-            return;
-        }
-
         if (MC.player == null || lastRotations == null) {
             return;
         }
@@ -320,18 +306,5 @@ public final class RotationManager {
         }
 
         return new Vector2f(MC.player.getYRot(), MC.player.getXRot());
-    }
-
-    private boolean shouldDeactivateAfterSend(boolean silentRotation) {
-        if (rotations == null) {
-            return false;
-        }
-
-        if (silentRotation) {
-            return isDone();
-        }
-
-        return Math.abs((rotations.x - MC.player.getYRot()) % 360.0F) < 1.0F
-                && Math.abs(rotations.y - MC.player.getXRot()) < 1.0F;
     }
 }
