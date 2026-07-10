@@ -70,7 +70,8 @@ public final class ModuleManager {
                 AutoTotem.INSTANCE,
                 AutoWindCharge.INSTANCE,
                 InstantSwitch.INSTANCE,
-                AutoLeave.INSTANCE
+                AutoLeave.INSTANCE,
+                AutoCrystal.INSTANCE
         );
         //Visual
         registerModule(
