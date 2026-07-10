@@ -75,15 +75,18 @@ public class CrystalAura extends Module {
             "switch tick",
             2, 1, 60, 1,
             ()-> target.getValue() == Select.SWITCH,
-            this);
+            this
+    );
 
     public final IntValue placeSpeed = ValueBuild.intSetting("placeTimer",
             10, 1, 40, 1,
-            this);
+            this
+    );
 
     public final IntValue breakSpeed = ValueBuild.intSetting("breakTimer",
             10, 1, 40, 1,
-            this);
+            this
+    );
 
     public final DoubleValue placeRange = ValueBuild.doubleSetting(
             "place range",
@@ -97,11 +100,29 @@ public class CrystalAura extends Module {
             this
     );
 
-    public final BoolValue safePlace = ValueBuild.boolSetting("safe place", true, this);
+    public final BoolValue oneHit = ValueBuild.boolSetting(
+            "one hit",
+            true,
+            this
+    );
 
-    public final BoolValue autoPlaceBlock = ValueBuild.boolSetting("auto place block", true, this);
+    public final BoolValue safePlace = ValueBuild.boolSetting(
+            "safe place",
+            true,
+            this
+    );
 
-    public final BoolValue autoPlaceProtectBlock = ValueBuild.boolSetting("auto place protect block", true, this);
+    public final BoolValue autoPlaceBlock = ValueBuild.boolSetting(
+            "auto place block",
+            true,
+            this
+    );
+
+    public final BoolValue autoPlaceProtectBlock = ValueBuild.boolSetting(
+            "auto place protect block",
+            true,
+            this
+    );
 
     private int placeProgress;
     private int breakProgress;
