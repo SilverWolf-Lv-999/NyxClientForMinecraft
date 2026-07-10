@@ -68,6 +68,7 @@ public class MaceAura extends Module {
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
     private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
+    private static final int FIREWORK_USE_RETRY_DELAY_TICKS = 4;
 
     public final EnumValue<DuelMode> duelMode = ValueBuild.enumSetting("duel mode", DuelMode.ELYTRA, this);
     public final EnumValue<ItemType> itemType = ValueBuild.enumSetting("item type", ItemType.WIND_CHARGE, this);
@@ -99,6 +100,7 @@ public class MaceAura extends Module {
     private boolean fireworkReleasedJumpForGlide;
     private boolean fireworkPressJumpForGlide;
     private int postUseItemSlotDelayTicks;
+    private int fireworkUseRetryDelayTicks;
     private int queuedHotbarSlot = InventoryUtility.NOT_FOUND;
     private boolean warnedMissingLoadout;
 
@@ -406,7 +408,7 @@ public class MaceAura extends Module {
             return;
         }
 
-        if (canHoldHotbarItem(elytraSlot, Items.ELYTRA) && !useSelectedItem()) {
+        if (canHoldHotbarItem(elytraSlot, Items.ELYTRA) && !useSelectedItemWithRetryDelay()) {
             resetFireworkState();
             setStage(Stage.FIREWORK_PREPARE);
         }
@@ -505,7 +507,10 @@ public class MaceAura extends Module {
             return;
         }
 
-        useSelectedItem();
+        if (!useSelectedItemWithRetryDelay()) {
+            resetFireworkState();
+            setStage(Stage.FIREWORK_PREPARE);
+        }
     }
 
     private void tickReequipFireworkElytra() {
@@ -536,7 +541,10 @@ public class MaceAura extends Module {
             return;
         }
 
-        useSelectedItem();
+        if (!useSelectedItemWithRetryDelay()) {
+            resetFireworkState();
+            setStage(Stage.FIREWORK_PREPARE);
+        }
     }
 
     private void tickStartFireworkDive() {
@@ -882,7 +890,7 @@ public class MaceAura extends Module {
     }
 
     private boolean equipFireworkChestArmor() {
-        return selectFireworkArmorSlot() && useSelectedItem();
+        return selectFireworkArmorSlot() && useSelectedItemWithRetryDelay();
     }
 
     private boolean ensureFireworkChestArmorBeforeMace() {
@@ -1098,7 +1106,7 @@ public class MaceAura extends Module {
             return true;
         }
 
-        useSelectedItem();
+        useSelectedItemWithRetryDelay();
         return true;
     }
 
@@ -1163,6 +1171,19 @@ public class MaceAura extends Module {
         mc.player.swing(InteractionHand.MAIN_HAND);
         mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
         postUseItemSlotDelayTicks = POST_USE_ITEM_SLOT_DELAY_TICKS;
+        return true;
+    }
+
+    private boolean useSelectedItemWithRetryDelay() {
+        if (fireworkUseRetryDelayTicks > 0) {
+            return true;
+        }
+
+        if (!useSelectedItem()) {
+            return false;
+        }
+
+        fireworkUseRetryDelayTicks = FIREWORK_USE_RETRY_DELAY_TICKS;
         return true;
     }
 
@@ -1246,6 +1267,10 @@ public class MaceAura extends Module {
 
         if (postUseItemSlotDelayTicks > 0) {
             postUseItemSlotDelayTicks--;
+        }
+
+        if (fireworkUseRetryDelayTicks > 0) {
+            fireworkUseRetryDelayTicks--;
         }
     }
 
@@ -1382,6 +1407,7 @@ public class MaceAura extends Module {
         heldMaceTicks = 0;
         attackHoldTicks = 0;
         postUseItemSlotDelayTicks = 0;
+        fireworkUseRetryDelayTicks = 0;
         queuedHotbarSlot = InventoryUtility.NOT_FOUND;
         restoreQueuedWindChargeSlotNow();
         resetFireworkState();
@@ -1404,6 +1430,7 @@ public class MaceAura extends Module {
         fireworkAscendPitch = 0.0F;
         fireworkOriginalChestStack = ItemStack.EMPTY;
         fireworkDiveBoostUsed = false;
+        fireworkUseRetryDelayTicks = 0;
         resetFireworkGlideJumpState();
     }
 
@@ -1433,6 +1460,7 @@ public class MaceAura extends Module {
 
         this.stage = stage;
         stageTicks = 0;
+        fireworkUseRetryDelayTicks = 0;
         if (stage == Stage.FIREWORK_START_ASCENT || stage == Stage.FIREWORK_START_DIVE) {
             resetFireworkGlideJumpState();
         }

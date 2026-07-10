@@ -27,6 +27,7 @@
     "MinecraftMixin",
     "MixinLivingEntityRenderer",
     "MouseHandlerMixin",
+    "MultiPlayerGameModeAccessor",
     "MultiPlayerGameModeMixin",
     "OptionScreenMixin",
     "ParticleEngineMixin",

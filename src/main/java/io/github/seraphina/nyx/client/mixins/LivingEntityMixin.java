@@ -40,6 +40,10 @@ public class LivingEntityMixin {
 
     @ModifyExpressionValue(method = "updateFallFlyingMovement", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;getXRot()F"))
     private float modifyFallFlyingPitch(float original) {
+        if ((LivingEntity) (Object) this != Minecraft.getInstance().player) {
+            return original;
+        }
+
         FallFlyingEvent event = EventBus.INSTANCE.post(new FallFlyingEvent(original));
         return event.getPitch();
     }

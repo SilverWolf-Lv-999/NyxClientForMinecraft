@@ -9,12 +9,23 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 
 @Mixin(Entity.class)
 public class EntityMixin {
     @WrapOperation(method = "getViewVector", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;calculateViewVector(FF)Lnet/minecraft/world/phys/Vec3;"))
     private Vec3 redirectViewRotation(Entity instance, float xRot, float yRot, Operation<Vec3> original) {
+        return nyx$calculateViewVector(instance, xRot, yRot, original);
+    }
+
+    @WrapOperation(method = "getLookAngle", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;calculateViewVector(FF)Lnet/minecraft/world/phys/Vec3;"))
+    private Vec3 redirectLookAngleRotation(Entity instance, float xRot, float yRot, Operation<Vec3> original) {
+        return nyx$calculateViewVector(instance, xRot, yRot, original);
+    }
+
+    @Unique
+    private Vec3 nyx$calculateViewVector(Entity instance, float xRot, float yRot, Operation<Vec3> original) {
         if (instance == Minecraft.getInstance().player) {
             RaytraceEvent event = EventBus.INSTANCE.post(new RaytraceEvent(instance, yRot, xRot));
             return original.call(instance, event.getPitch(), event.getYaw());

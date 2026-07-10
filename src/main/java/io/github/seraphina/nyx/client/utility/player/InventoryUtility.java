@@ -1,11 +1,11 @@
 package io.github.seraphina.nyx.client.utility.player;
 
+import io.github.seraphina.nyx.client.mixins.MultiPlayerGameModeAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
@@ -160,11 +160,11 @@ public final class InventoryUtility {
     }
 
     public static boolean syncSelectedSlot() {
-        if (MC.player == null) {
+        if (MC.player == null || MC.gameMode == null) {
             return false;
         }
 
-        MC.player.connection.send(new ServerboundSetCarriedItemPacket(MC.player.getInventory().getSelectedSlot()));
+        ((MultiPlayerGameModeAccessor) MC.gameMode).nyx$ensureHasSentCarriedItem();
         return true;
     }
 
