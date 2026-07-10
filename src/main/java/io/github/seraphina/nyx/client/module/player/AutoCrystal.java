@@ -4,6 +4,7 @@ import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.bus.EventHandler;
 import io.github.seraphina.nyx.client.events.bus.EventPriority;
 import io.github.seraphina.nyx.client.events.impl.ClickEvent;
+import io.github.seraphina.nyx.client.events.impl.JumpEvent;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
@@ -48,7 +49,8 @@ public class AutoCrystal extends Module {
     private static final int TICKS_PER_SECOND = 20;
     private static final double INSTANT_ROTATION_SPEED = 180.0D;
     private static final float ACTION_ROTATION_SYNC_EPSILON = 1.0F;
-    private static final float ACTION_TARGET_ROTATION_EPSILON = 2.0F;
+    private static final float ACTION_TARGET_ROTATION_EPSILON = 3.0F;
+    private static final double PREDICTED_CRYSTAL_HEIGHT = 2.0D;
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DEDUP_PITCH_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DUPLICATE_EPSILON = 1.0E-4F;
@@ -58,13 +60,20 @@ public class AutoCrystal extends Module {
 
     private int rightClickProgress = TICKS_PER_SECOND;
     private int leftClickProgress = TICKS_PER_SECOND;
-    private boolean usedInteractionThisTick;
+    private boolean attackedThisTick;
+    private boolean placedThisTick;
     private boolean waitForUseRelease;
     private Vector2f lastOutgoingRotations;
     private Vector2f lastControlledRotations;
     private Vector2f movementFixRotations;
     private boolean controllingRotations;
     private ActionTarget preparedActionTarget;
+    private ActionTarget movementFixTarget;
+    private BlockTarget lastBlockTarget;
+    private BlockPos attackedBasePosThisTick;
+    private BlockPos pendingAttackBasePos;
+    private BlockTarget pendingPlaceTarget;
+    private int placeRotationVariant;
 
     @Override
     public void onEnable() {
@@ -105,6 +114,7 @@ public class AutoCrystal extends Module {
     @EventHandler(priority = EventPriority.LOWEST)
     public void onMoveInput(MoveInputEvent event) {
         movementFixRotations = null;
+        movementFixTarget = null;
 
         if (!shouldFixMovement(event)) {
             return;
@@ -131,9 +141,11 @@ public class AutoCrystal extends Module {
         event.setStrafe(fixedInput.strafe());
         if (fixedInput.forward() <= 0.0F) {
             event.setSprint(false);
+            stopSprintingForMovementFix();
         }
 
         movementFixRotations = new Vector2f(rotations);
+        movementFixTarget = new ActionTarget(target.kind(), target.blockTarget(), target.basePos(), new Vector2f(rotations));
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -143,14 +155,23 @@ public class AutoCrystal extends Module {
         }
     }
 
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onJump(JumpEvent event) {
+        if (movementFixRotations != null && shouldFixMovement()) {
+            event.setYaw(movementFixRotations.x);
+        }
+    }
+
     @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
         tickUseReleaseLock();
-        usedInteractionThisTick = false;
+        attackedThisTick = false;
+        placedThisTick = false;
+        attackedBasePosThisTick = null;
 
         if (!canRun()) {
             releaseControlledRotations();
-            clearPreparedAction();
+            clearQueuedActions();
             refillClickProgress();
             return;
         }
@@ -159,14 +180,14 @@ public class AutoCrystal extends Module {
 
         if (waitForUseRelease || !mc.options.keyUse.isDown()) {
             releaseControlledRotations();
-            clearPreparedAction();
+            clearQueuedActions();
             return;
         }
 
         InteractionHand hand = crystalHand();
         if (hand == null) {
             releaseControlledRotations();
-            clearPreparedAction();
+            clearQueuedActions();
             return;
         }
 
@@ -179,23 +200,70 @@ public class AutoCrystal extends Module {
             return;
         }
 
-        if (!hasReadyInteraction(target)) {
+        if (!isActionRotationSynced(target.rotations())) {
+            return;
+        }
+
+        if (target.kind() == ActionKind.ATTACK) {
+            if (runPreparedAttack(target)) {
+                runFollowUpPlace(target, hand);
+            }
+        } else {
+            runPreparedPlace(target, hand);
+        }
+    }
+
+    private boolean runPreparedAttack(ActionTarget target) {
+        if (!canAttackCrystalNow(target.basePos())) {
+            if (!hasActionOpportunity(target)) {
+                clearPreparedAction();
+            }
+            return false;
+        }
+
+        clearPreparedAction();
+        if (tryAttackCrystal(target.basePos(), target.rotations())) {
+            pendingAttackBasePos = null;
+            BlockTarget nextPlaceTarget = blockTargetForBase(target.basePos(), target.blockTarget());
+            if (nextPlaceTarget != null) {
+                pendingPlaceTarget = nextPlaceTarget;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private void runPreparedPlace(ActionTarget target, InteractionHand hand) {
+        if (!canPlaceCrystalNow(target.blockTarget())) {
             if (!hasActionOpportunity(target)) {
                 clearPreparedAction();
             }
             return;
         }
 
-        if (!isActionRotationSynced(target.rotations())) {
-            return;
-        }
-
         clearPreparedAction();
-        if (tryAttackCrystal(target.basePos(), target.rotations())) {
+        if (tryPlaceCrystal(target.blockTarget(), hand, target.rotations())) {
+            handlePlacedCrystal(target.blockTarget());
+        }
+    }
+
+    private void runFollowUpPlace(ActionTarget attackTarget, InteractionHand hand) {
+        BlockTarget placeTarget = blockTargetForBase(attackTarget.basePos(), attackTarget.blockTarget());
+        if (placeTarget == null || attackedBasePosThisTick == null) {
             return;
         }
 
-        tryPlaceCrystal(target.blockTarget(), hand, target.rotations());
+        if (tryPlaceCrystal(placeTarget, hand, attackTarget.rotations(), attackedBasePosThisTick)) {
+            handlePlacedCrystal(placeTarget);
+        }
+    }
+
+    private void handlePlacedCrystal(BlockTarget blockTarget) {
+        lastBlockTarget = blockTarget;
+        pendingPlaceTarget = null;
+        pendingAttackBasePos = blockTarget.basePos();
+        placeRotationVariant++;
     }
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
@@ -209,18 +277,23 @@ public class AutoCrystal extends Module {
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onSendPosition(SendPositionEvent event) {
+        if (movementFixRotations != null) {
+            setOutgoingRotations(event, movementFixRotations);
+            prepareMovementFixedAction();
+            return;
+        }
+
         ActionTarget target = currentActionTarget();
         if (target == null) {
             releaseControlledRotations();
-            clearPreparedAction();
-            setOutgoingRotations(event, movementFixRotations);
+            clearQueuedActions();
             return;
         }
 
         Vector2f outgoingRotations = outgoingRotationsForAction(target);
         setOutgoingRotations(event, outgoingRotations);
         if (hasActionOpportunity(target)) {
-            preparedActionTarget = new ActionTarget(target.blockTarget(), target.basePos(), outgoingRotations);
+            preparedActionTarget = new ActionTarget(target.kind(), target.blockTarget(), target.basePos(), outgoingRotations);
         } else {
             clearPreparedAction();
         }
@@ -228,6 +301,27 @@ public class AutoCrystal extends Module {
 
     private void clearPreparedAction() {
         preparedActionTarget = null;
+    }
+
+    private void prepareMovementFixedAction() {
+        ActionTarget target = movementFixTarget;
+        if (target == null || movementFixRotations == null) {
+            clearPreparedAction();
+            return;
+        }
+
+        if (!hasActionOpportunity(target) || !isUsableActionRotation(target, movementFixRotations)) {
+            clearPreparedAction();
+            return;
+        }
+
+        preparedActionTarget = new ActionTarget(target.kind(), target.blockTarget(), target.basePos(), new Vector2f(movementFixRotations));
+    }
+
+    private void clearQueuedActions() {
+        clearPreparedAction();
+        pendingAttackBasePos = null;
+        pendingPlaceTarget = null;
     }
 
     private boolean shouldHandleInput() {
@@ -264,8 +358,14 @@ public class AutoCrystal extends Module {
                 && !mc.player.isSpectator();
     }
 
+    private void stopSprintingForMovementFix() {
+        if (mc.player != null && mc.player.isSprinting()) {
+            mc.player.setSprinting(false);
+        }
+    }
+
     private boolean tryAttackCrystal(BlockPos basePos, Vector2f rotations) {
-        if (usedInteractionThisTick || leftClickProgress < TICKS_PER_SECOND) {
+        if (attackedThisTick || placedThisTick || leftClickProgress < TICKS_PER_SECOND) {
             return false;
         }
 
@@ -283,14 +383,19 @@ public class AutoCrystal extends Module {
         }
 
         leftClickProgress = Math.max(0, leftClickProgress - TICKS_PER_SECOND);
+        attackedBasePosThisTick = basePos;
         return true;
     }
 
     private boolean tryPlaceCrystal(BlockTarget blockTarget, InteractionHand hand, Vector2f rotations) {
-        if (usedInteractionThisTick
+        return tryPlaceCrystal(blockTarget, hand, rotations, null);
+    }
+
+    private boolean tryPlaceCrystal(BlockTarget blockTarget, InteractionHand hand, Vector2f rotations, BlockPos ignoredCrystalBasePos) {
+        if (placedThisTick
                 || rightClickProgress < TICKS_PER_SECOND
                 || blockTarget == null
-                || !canPlaceCrystalAt(blockTarget.basePos())) {
+                || !canPlaceCrystalAt(blockTarget.basePos(), ignoredCrystalBasePos)) {
             return false;
         }
 
@@ -298,7 +403,7 @@ public class AutoCrystal extends Module {
             return false;
         }
 
-        if (!useCrystalOnBlock(blockTarget.hitResult(), hand, rotations)) {
+        if (!useCrystalOnBlock(blockTarget.hitResult(), hand, rotations, ignoredCrystalBasePos)) {
             return false;
         }
 
@@ -306,20 +411,20 @@ public class AutoCrystal extends Module {
         return true;
     }
 
-    private boolean useCrystalOnBlock(BlockHitResult hitResult, InteractionHand hand, Vector2f rotations) {
-        if (!canPlaceCrystalAt(hitResult.getBlockPos())) {
+    private boolean useCrystalOnBlock(BlockHitResult hitResult, InteractionHand hand, Vector2f rotations, BlockPos ignoredCrystalBasePos) {
+        if (!canPlaceCrystalAt(hitResult.getBlockPos(), ignoredCrystalBasePos)) {
             return false;
         }
 
         boolean wasLastUsableCrystal = usableCrystalCountInHands() <= 1;
         InteractionResult result = useItemOnWithRotations(rotations, hitResult, hand);
-        if (!result.consumesAction()) {
+        if (!result.consumesAction() && ignoredCrystalBasePos == null) {
             return false;
         }
 
         mc.player.swing(hand);
         mc.gameRenderer.itemInHandRenderer.itemUsed(hand);
-        usedInteractionThisTick = true;
+        placedThisTick = true;
         if (wasLastUsableCrystal || !hasCrystalInHands()) {
             waitForUseRelease = mc.options.keyUse.isDown();
         }
@@ -345,11 +450,16 @@ public class AutoCrystal extends Module {
             mc.player.setXRot(pitch);
         }
 
-        usedInteractionThisTick = true;
+        attackedThisTick = true;
         return true;
     }
 
     private boolean isRotationForCrystal(EndCrystal crystal, Vector2f rotations) {
+        HitResult hitResult = RaytraceUtility.raytrace(rotations, mc.player.entityInteractionRange());
+        if (hitResult instanceof EntityHitResult entityHitResult && entityHitResult.getEntity() == crystal) {
+            return true;
+        }
+
         return closeActionRotations(rotations, legitimizeRotations(RotationUtility.calculate(crystal)));
     }
 
@@ -418,7 +528,22 @@ public class AutoCrystal extends Module {
     }
 
     private boolean canPlaceCrystalAt(BlockPos basePos) {
-        return isCrystalBaseTarget(basePos) && mc.level.getEntities((Entity) null, crystalSpawnBox(basePos)).isEmpty();
+        return canPlaceCrystalAt(basePos, null);
+    }
+
+    private boolean canPlaceCrystalAt(BlockPos basePos, BlockPos ignoredCrystalBasePos) {
+        return isCrystalBaseTarget(basePos)
+                && mc.level.getEntities(
+                        (Entity) null,
+                        crystalSpawnBox(basePos),
+                        entity -> blocksCrystalPlacement(entity, ignoredCrystalBasePos)
+                ).isEmpty();
+    }
+
+    private boolean blocksCrystalPlacement(Entity entity, BlockPos ignoredCrystalBasePos) {
+        return ignoredCrystalBasePos == null
+                || !(entity instanceof EndCrystal crystal)
+                || !crystal.blockPosition().below().equals(ignoredCrystalBasePos);
     }
 
     private boolean isCrystalBase(BlockPos pos) {
@@ -509,23 +634,7 @@ public class AutoCrystal extends Module {
     }
 
     private ActionTarget previewActionTarget() {
-        if (!canRun() || waitForUseRelease || !mc.options.keyUse.isDown()) {
-            return null;
-        }
-
-        InteractionHand hand = crystalHand();
-        if (hand == null) {
-            return null;
-        }
-
-        BlockTarget blockTarget = currentBlockTarget();
-        BlockPos basePos = blockTarget != null ? blockTarget.basePos() : currentCrystalBaseTarget();
-        if (basePos == null) {
-            return null;
-        }
-
-        Vector2f rotations = targetRotations(blockTarget, basePos);
-        return rotations == null ? null : new ActionTarget(blockTarget, basePos, legitimizeRotations(rotations));
+        return selectActionTarget(false);
     }
 
     private ActionTarget currentActionTarget() {
@@ -533,23 +642,119 @@ public class AutoCrystal extends Module {
             return null;
         }
 
-        InteractionHand hand = crystalHand();
-        if (hand == null) {
+        return selectActionTarget(true);
+    }
+
+    private ActionTarget selectActionTarget(boolean updateRotations) {
+        if (!canRun() || waitForUseRelease || !mc.options.keyUse.isDown() || crystalHand() == null) {
             return null;
         }
 
         BlockTarget blockTarget = currentBlockTarget();
-        BlockPos basePos = blockTarget != null ? blockTarget.basePos() : currentCrystalBaseTarget();
-        if (basePos == null) {
+        if (blockTarget != null) {
+            lastBlockTarget = blockTarget;
+        }
+
+        BlockPos crystalBasePos = currentCrystalBaseTarget();
+        BlockPos manualBasePos = blockTarget != null ? blockTarget.basePos() : crystalBasePos;
+        if (manualBasePos == null) {
+            clearQueuedActions();
             return null;
         }
 
-        Vector2f rotations = updateControlledRotations(blockTarget, basePos);
-        return rotations == null ? null : new ActionTarget(blockTarget, basePos, rotations);
+        alignQueuedActionsWithManualTarget(manualBasePos);
+
+        ActionTarget pendingAttack = pendingAttackTarget(blockTarget, manualBasePos, updateRotations);
+        if (pendingAttack != null) {
+            return pendingAttack;
+        }
+
+        ActionTarget pendingPlace = pendingPlaceTarget(manualBasePos, updateRotations);
+        if (pendingPlace != null) {
+            return pendingPlace;
+        }
+
+        if (blockTarget != null) {
+            ActionTarget attackTarget = attackTarget(blockTarget.basePos(), blockTarget, updateRotations);
+            if (attackTarget != null) {
+                return attackTarget;
+            }
+
+            return placeTarget(blockTarget, updateRotations);
+        }
+
+        if (crystalBasePos != null) {
+            ActionTarget attackTarget = attackTarget(crystalBasePos, blockTargetForBase(crystalBasePos, blockTarget), updateRotations);
+            if (attackTarget != null) {
+                return attackTarget;
+            }
+        }
+
+        return null;
     }
 
-    private Vector2f updateControlledRotations(BlockTarget blockTarget, BlockPos basePos) {
-        Vector2f rotations = targetRotations(blockTarget, basePos);
+    private void alignQueuedActionsWithManualTarget(BlockPos manualBasePos) {
+        if (pendingAttackBasePos != null && !pendingAttackBasePos.equals(manualBasePos)) {
+            pendingAttackBasePos = null;
+        }
+
+        if (pendingPlaceTarget != null && !pendingPlaceTarget.basePos().equals(manualBasePos)) {
+            pendingPlaceTarget = null;
+        }
+    }
+
+    private ActionTarget pendingAttackTarget(BlockTarget currentBlockTarget, BlockPos manualBasePos, boolean updateRotations) {
+        if (pendingAttackBasePos == null) {
+            return null;
+        }
+
+        if (manualBasePos != null && !manualBasePos.equals(pendingAttackBasePos) && findCrystalAbove(pendingAttackBasePos) == null) {
+            pendingAttackBasePos = null;
+            return null;
+        }
+
+        return attackTarget(pendingAttackBasePos, blockTargetForBase(pendingAttackBasePos, currentBlockTarget), updateRotations);
+    }
+
+    private ActionTarget pendingPlaceTarget(BlockPos manualBasePos, boolean updateRotations) {
+        if (pendingPlaceTarget == null) {
+            return null;
+        }
+
+        if (manualBasePos != null && !manualBasePos.equals(pendingPlaceTarget.basePos())) {
+            pendingPlaceTarget = null;
+            return null;
+        }
+
+        return placeTarget(pendingPlaceTarget, updateRotations);
+    }
+
+    private ActionTarget attackTarget(BlockPos basePos, BlockTarget blockTarget, boolean updateRotations) {
+        Vector2f rotations = attackTargetRotations(basePos, blockTarget);
+        if (rotations == null) {
+            return null;
+        }
+
+        Vector2f actionRotations = prepareActionRotations(ActionKind.ATTACK, rotations, updateRotations);
+        return actionRotations == null ? null : new ActionTarget(ActionKind.ATTACK, blockTarget, basePos, actionRotations);
+    }
+
+    private ActionTarget placeTarget(BlockTarget blockTarget, boolean updateRotations) {
+        if (blockTarget == null) {
+            return null;
+        }
+
+        Vector2f rotations = RotationUtility.calculate(blockTarget.hitResult().getLocation());
+        Vector2f actionRotations = prepareActionRotations(ActionKind.PLACE, rotations, updateRotations);
+        return actionRotations == null ? null : new ActionTarget(ActionKind.PLACE, blockTarget, blockTarget.basePos(), actionRotations);
+    }
+
+    private Vector2f prepareActionRotations(ActionKind kind, Vector2f rotations, boolean updateRotations) {
+        Vector2f actionRotations = kind == ActionKind.PLACE ? variedPlaceRotations(rotations) : legitimizeRotations(rotations);
+        return updateRotations ? updateControlledRotations(actionRotations) : actionRotations;
+    }
+
+    private Vector2f updateControlledRotations(Vector2f rotations) {
         if (rotations == null) {
             releaseControlledRotations();
             return null;
@@ -571,51 +776,153 @@ public class AutoCrystal extends Module {
         }
 
         if (hasReadyInteraction(target)) {
-            return makeUniqueOutgoingRotations(target.rotations());
+            return uniqueOutgoingRotationsFor(target, target.rotations());
         }
 
         return lastOutgoingRotations == null ? target.rotations() : new Vector2f(lastOutgoingRotations);
     }
 
     private Vector2f outgoingRotationsForAction(ActionTarget target) {
-        Vector2f outgoingRotations = movementFixRotations != null ? movementFixRotations : target.rotations();
+        Vector2f outgoingRotations = target.rotations();
         if (hasReadyInteraction(target) && isActionRotationSynced(outgoingRotations)) {
-            return makeUniqueOutgoingRotations(outgoingRotations);
+            return uniqueOutgoingRotationsFor(target, outgoingRotations);
         }
 
         return outgoingRotations;
     }
 
+    private Vector2f uniqueOutgoingRotationsFor(ActionTarget target, Vector2f rotations) {
+        Vector2f uniqueRotations = makeUniqueOutgoingRotations(rotations);
+        return isUsableActionRotation(target, uniqueRotations) ? uniqueRotations : rotations;
+    }
+
+    private boolean isUsableActionRotation(ActionTarget target, Vector2f rotations) {
+        if (target.kind() == ActionKind.ATTACK) {
+            EndCrystal crystal = findCrystalAbove(target.basePos());
+            if (crystal != null && !isRotationForCrystal(crystal, rotations)) {
+                return false;
+            }
+
+            return target.blockTarget() == null || isRotationForBlockHit(target.blockTarget().hitResult(), rotations);
+        }
+
+        return target.blockTarget() != null && isRotationForBlockHit(target.blockTarget().hitResult(), rotations);
+    }
+
     private boolean hasReadyInteraction(ActionTarget target) {
-        return canAttackCrystalNow(target.basePos()) || canPlaceCrystalNow(target.blockTarget());
+        return target.kind() == ActionKind.ATTACK
+                ? canAttackCrystalNow(target.basePos())
+                : canPlaceCrystalNow(target.blockTarget());
     }
 
     private boolean hasActionOpportunity(ActionTarget target) {
-        return findCrystalAbove(target.basePos()) != null
-                || (target.blockTarget() != null && canPlaceCrystalAt(target.blockTarget().basePos()));
+        if (target.kind() == ActionKind.ATTACK) {
+            return findCrystalAbove(target.basePos()) != null || target.basePos().equals(pendingAttackBasePos);
+        }
+
+        return target.blockTarget() != null && isCrystalBase(target.blockTarget().basePos());
     }
 
     private boolean canAttackCrystalNow(BlockPos basePos) {
-        return !usedInteractionThisTick
+        return !attackedThisTick
+                && !placedThisTick
                 && leftClickProgress >= TICKS_PER_SECOND
                 && findCrystalAbove(basePos) != null;
     }
 
     private boolean canPlaceCrystalNow(BlockTarget blockTarget) {
-        return !usedInteractionThisTick
+        return !placedThisTick
                 && rightClickProgress >= TICKS_PER_SECOND
                 && blockTarget != null
                 && canPlaceCrystalAt(blockTarget.basePos());
     }
 
-    private Vector2f targetRotations(BlockTarget blockTarget, BlockPos basePos) {
+    private Vector2f attackTargetRotations(BlockPos basePos, BlockTarget blockTarget) {
         EndCrystal crystal = findCrystalAbove(basePos);
         if (crystal != null) {
+            Vector2f sharedRotations = sharedAttackPlaceRotations(blockTarget, crystal);
+            if (sharedRotations != null) {
+                return sharedRotations;
+            }
+
             return RotationUtility.calculate(crystal);
         }
 
-        if (blockTarget != null) {
-            return RotationUtility.calculate(blockTarget.hitResult().getLocation());
+        if (basePos.equals(pendingAttackBasePos)) {
+            return RotationUtility.calculate(predictedCrystalAimPosition(basePos));
+        }
+
+        return null;
+    }
+
+    private Vector2f sharedAttackPlaceRotations(BlockTarget blockTarget, EndCrystal crystal) {
+        if (blockTarget == null) {
+            return null;
+        }
+
+        Vector2f blockRotations = legitimizeRotations(RotationUtility.calculate(blockTarget.hitResult().getLocation()));
+        Vector2f variedRotations = variedPlaceRotations(blockRotations);
+        if (isRotationForCrystal(crystal, variedRotations) && isRotationForBlockHit(blockTarget.hitResult(), variedRotations)) {
+            return variedRotations;
+        }
+
+        return isRotationForCrystal(crystal, blockRotations) && isRotationForBlockHit(blockTarget.hitResult(), blockRotations)
+                ? blockRotations
+                : null;
+    }
+
+    private Vec3 predictedCrystalAimPosition(BlockPos basePos) {
+        Vec3 crystalPos = crystalPosition(basePos);
+        if (mc.player == null) {
+            return crystalPos;
+        }
+
+        double aimOffset = Mth.clamp(
+                mc.player.getY() - crystalPos.y + mc.player.getEyeHeight(),
+                0.0D,
+                PREDICTED_CRYSTAL_HEIGHT * 0.9D
+        );
+        return crystalPos.add(0.0D, aimOffset, 0.0D);
+    }
+
+    private Vector2f variedPlaceRotations(Vector2f rotations) {
+        Vector2f baseRotations = legitimizeRotations(rotations);
+        int variant = Math.floorMod(placeRotationVariant, 4);
+        float yawOffset = switch (variant) {
+            case 1 -> 0.35F;
+            case 2 -> -0.35F;
+            case 3 -> 0.2F;
+            default -> -0.2F;
+        };
+        float pitchOffset = switch (variant) {
+            case 1 -> -0.25F;
+            case 2 -> 0.3F;
+            case 3 -> 0.2F;
+            default -> -0.3F;
+        };
+
+        Vector2f variedRotations = legitimizeRotations(RotationUtility.applySensitivityPatch(
+                new Vector2f(baseRotations.x + yawOffset, baseRotations.y + pitchOffset),
+                currentSyncedRotations()
+        ));
+        return closeActionRotations(variedRotations, baseRotations) ? variedRotations : baseRotations;
+    }
+
+    private BlockTarget blockTargetForBase(BlockPos basePos, BlockTarget currentBlockTarget) {
+        if (basePos == null) {
+            return null;
+        }
+
+        if (currentBlockTarget != null && currentBlockTarget.basePos().equals(basePos)) {
+            return currentBlockTarget;
+        }
+
+        if (pendingPlaceTarget != null && pendingPlaceTarget.basePos().equals(basePos)) {
+            return pendingPlaceTarget;
+        }
+
+        if (lastBlockTarget != null && lastBlockTarget.basePos().equals(basePos)) {
+            return lastBlockTarget;
         }
 
         return null;
@@ -773,13 +1080,12 @@ public class AutoCrystal extends Module {
     }
 
     private void setOutgoingRotations(SendPositionEvent event, Vector2f rotations) {
-        Vector2f outgoingRotations = movementFixRotations != null ? movementFixRotations : rotations;
-        if (outgoingRotations == null) {
+        if (rotations == null) {
             return;
         }
 
-        event.setYaw(outgoingRotations.x);
-        event.setPitch(outgoingRotations.y);
+        event.setYaw(rotations.x);
+        event.setPitch(rotations.y);
     }
 
     private MovementInput correctedMovementInput(float forward, float strafe, float fromYaw, float toYaw) {
@@ -848,17 +1154,29 @@ public class AutoCrystal extends Module {
     private void resetState() {
         rightClickProgress = TICKS_PER_SECOND;
         leftClickProgress = TICKS_PER_SECOND;
-        usedInteractionThisTick = false;
+        attackedThisTick = false;
+        placedThisTick = false;
         waitForUseRelease = false;
         releaseControlledRotations();
         lastOutgoingRotations = currentPlayerRotations();
         lastControlledRotations = null;
         movementFixRotations = null;
+        movementFixTarget = null;
         controllingRotations = false;
+        lastBlockTarget = null;
+        attackedBasePosThisTick = null;
+        pendingAttackBasePos = null;
+        pendingPlaceTarget = null;
+        placeRotationVariant = 0;
         clearPreparedAction();
     }
 
-    private record ActionTarget(BlockTarget blockTarget, BlockPos basePos, Vector2f rotations) {
+    private enum ActionKind {
+        ATTACK,
+        PLACE
+    }
+
+    private record ActionTarget(ActionKind kind, BlockTarget blockTarget, BlockPos basePos, Vector2f rotations) {
     }
 
     private record BlockTarget(BlockPos basePos, BlockHitResult hitResult) {
