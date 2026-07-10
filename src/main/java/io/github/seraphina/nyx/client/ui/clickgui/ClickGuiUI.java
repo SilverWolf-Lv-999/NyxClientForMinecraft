@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.ui.clickgui;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import io.github.seraphina.nyx.client.NyxClient;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.ModuleManager;
 import io.github.seraphina.nyx.client.module.Category;
@@ -370,31 +371,17 @@ public class ClickGuiUI extends Screen {
     }
 
     private void renderLogo(float x, float y) {
-        float logoX = x;
-        float logoY = y + 16.0F;
-        Render2DUtility.drawRoundedLinearGradientRect(
-            logoX,
-            logoY,
-            32.0F,
-            32.0F,
-            7.0F,
-            logoX,
-            logoY,
-            logoX + 32.0F,
-            logoY + 32.0F,
-            new int[] {0xFF4489FF, ACCENT_DARK},
-            null
-        );
+        FontRenderer titleFont = clickGuiFont(22.0F);
+        FontRenderer versionFont = clickGuiFont(8.0F);
+        String title = NyxClient.CLIENT_NAME;
+        String version = NyxClient.VERSION;
+        float titleX = x;
+        float titleY = y + centeredTextY(LOGO_AREA_HEIGHT, titleFont) - 1.0F;
+        float versionX = titleX + titleFont.getStringWidth(title) + 3.0F;
+        float versionY = titleY - 3.0F;
 
-        FontRenderer logoFont = clickGuiFont(15.0F);
-        logoFont.drawCenteredString("N", logoX + 16.0F, logoY + centeredTextY(32.0F, logoFont), TEXT);
-
-        if (sidebarWidth >= 175.0F) {
-            FontRenderer titleFont = clickGuiFont(16.0F);
-            FontRenderer subFont = clickGuiFont(9.0F);
-            titleFont.drawString("Nyx", logoX + 44.0F, logoY + 2.0F, TEXT);
-            subFont.drawString("Minecraft", logoX + 44.0F, logoY + 21.0F, TEXT_DIM);
-        }
+        titleFont.drawString(title, titleX, titleY, TEXT);
+        drawOutlinedString(versionFont, version, versionX, versionY, TEXT_DIM, 0xF0000000);
     }
 
     private void renderCategoryNavItem(Category category, float sidebarX, float y, float width, float pad, int mouseX, int mouseY) {
@@ -1232,6 +1219,14 @@ public class ClickGuiUI extends Screen {
             index++;
         }
         return target.ordinal();
+    }
+
+    private static void drawOutlinedString(FontRenderer font, String text, float x, float y, int color, int outlineColor) {
+        font.drawString(text, x - 1.0F, y, outlineColor);
+        font.drawString(text, x + 1.0F, y, outlineColor);
+        font.drawString(text, x, y - 1.0F, outlineColor);
+        font.drawString(text, x, y + 1.0F, outlineColor);
+        font.drawString(text, x, y, color);
     }
 
     private String selectedCategoryLabel() {
