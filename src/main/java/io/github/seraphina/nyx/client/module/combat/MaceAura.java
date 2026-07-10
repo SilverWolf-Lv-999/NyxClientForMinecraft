@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.DebugUtility;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
+import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -31,6 +32,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2f;
 
@@ -97,6 +100,7 @@ public class MaceAura extends Module {
     private float fireworkAscendPitch;
     private ItemStack fireworkOriginalChestStack = ItemStack.EMPTY;
     private boolean fireworkDiveBoostUsed;
+    private boolean fireworkAllowElytraMaceAttack;
     private boolean fireworkReleasedJumpForGlide;
     private boolean fireworkPressJumpForGlide;
     private int postUseItemSlotDelayTicks;
@@ -334,11 +338,20 @@ public class MaceAura extends Module {
             return;
         }
 
-        if (restoreFireworkArmorBeforePrepare()) {
+        fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = false;
+
+        if (tryPrepareActiveFlightWithHotbarElytra()) {
             return;
         }
 
-        fireworkDiveBoostUsed = false;
+        if (tryPrepareWornElytraWithHotbarChestArmor()) {
+            return;
+        }
+
+        if (restoreFireworkArmorBeforePrepare()) {
+            return;
+        }
 
         if (InventoryUtility.count(Items.FIREWORK_ROCKET) < 2 || !hasChestArmorForFireworkReset()) {
             return;
@@ -382,6 +395,91 @@ public class MaceAura extends Module {
         }
 
         setStage(Stage.FIREWORK_EQUIP_ELYTRA);
+    }
+
+    private boolean tryPrepareActiveFlightWithHotbarElytra() {
+        if (!isWearingElytra() || !mc.player.isFallFlying()) {
+            return false;
+        }
+
+        int foundElytraSlot = InventoryUtility.findHotbarSlot(Items.ELYTRA);
+        if (!canHoldHotbarItem(foundElytraSlot, Items.ELYTRA)) {
+            return false;
+        }
+
+        LivingEntity cameraTarget = crosshairFireworkTarget();
+        if (cameraTarget == null) {
+            target = null;
+            return true;
+        }
+
+        int foundMaceSlot = ensureHotbarItem(Items.MACE, foundElytraSlot);
+        if (!canHoldHotbarItem(foundMaceSlot, Items.MACE)) {
+            return true;
+        }
+
+        int foundFireworkSlot = ensureHotbarItem(Items.FIREWORK_ROCKET, foundElytraSlot, foundMaceSlot);
+        if (!canUseHotbarItem(foundFireworkSlot, Items.FIREWORK_ROCKET)) {
+            return true;
+        }
+
+        target = cameraTarget;
+        elytraSlot = foundElytraSlot;
+        maceSlot = foundMaceSlot;
+        fireworkRocketSlot = foundFireworkSlot;
+        fireworkOriginalChestStack = ItemStack.EMPTY;
+        fireworkStartY = mc.player.getY();
+        fireworkAscendYaw = targetYaw();
+        fireworkAscendPitch = randomFireworkAscendPitch();
+        fireworkResetDelayTicks = 0;
+        fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = true;
+        launchTicks = 0;
+        maceSwitchDelayTicks = 0;
+        windChargeAttackDelayTicks = 0;
+        setStage(Stage.FIREWORK_DIVE_FIREWORK);
+        return true;
+    }
+
+    private boolean tryPrepareWornElytraWithHotbarChestArmor() {
+        if (!isWearingElytra()) {
+            return false;
+        }
+
+        int foundChestArmorSlot = findHotbarChestArmorSlot();
+        if (!canHoldChestArmor(foundChestArmorSlot)) {
+            return false;
+        }
+
+        if (InventoryUtility.count(Items.FIREWORK_ROCKET) < 2) {
+            return true;
+        }
+
+        int foundMaceSlot = ensureHotbarItem(Items.MACE, foundChestArmorSlot);
+        if (!canHoldHotbarItem(foundMaceSlot, Items.MACE)) {
+            return true;
+        }
+
+        int foundFireworkSlot = ensureHotbarItem(Items.FIREWORK_ROCKET, foundChestArmorSlot, foundMaceSlot);
+        if (!canUseHotbarItem(foundFireworkSlot, Items.FIREWORK_ROCKET)) {
+            return true;
+        }
+
+        elytraSlot = foundChestArmorSlot;
+        maceSlot = foundMaceSlot;
+        fireworkRocketSlot = foundFireworkSlot;
+        fireworkOriginalChestStack = InventoryUtility.getStack(foundChestArmorSlot).copy();
+        fireworkStartY = mc.player.getY();
+        fireworkAscendYaw = targetYaw();
+        fireworkAscendPitch = randomFireworkAscendPitch();
+        fireworkResetDelayTicks = 0;
+        fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = false;
+        launchTicks = 0;
+        maceSwitchDelayTicks = 0;
+        windChargeAttackDelayTicks = 0;
+        setStage(Stage.FIREWORK_START_ASCENT);
+        return true;
     }
 
     private void tickEquipFireworkElytra() {
@@ -895,7 +993,7 @@ public class MaceAura extends Module {
     }
 
     private boolean ensureFireworkChestArmorBeforeMace() {
-        if (!isFireworkDiveAttack() || !isWearingElytra()) {
+        if (!isFireworkDiveAttack() || fireworkAllowElytraMaceAttack || !isWearingElytra()) {
             return true;
         }
 
@@ -906,6 +1004,7 @@ public class MaceAura extends Module {
     private boolean shouldDelayFireworkMaceSwitch(LivingEntity target) {
         return itemType.getValue() == ItemType.FIREWORK_ROCKET
                 && fireworkDiveBoostUsed
+                && !fireworkAllowElytraMaceAttack
                 && isWearingElytra()
                 && !isTargetInFireworkMaceSwitchRange(target);
     }
@@ -920,10 +1019,19 @@ public class MaceAura extends Module {
     }
 
     private void beginPostAttackFireworkReset() {
+        if (fireworkAllowElytraMaceAttack) {
+            fireworkDiveBoostUsed = false;
+            fireworkAllowElytraMaceAttack = false;
+            attackHoldTicks = ATTACK_HOLD_TICKS;
+            setStage(Stage.AFTER_ATTACK);
+            return;
+        }
+
         fireworkAscendYaw = targetYaw();
         fireworkAscendPitch = randomFireworkAscendPitch();
         fireworkResetDelayTicks = 0;
         fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = false;
         attackHoldTicks = 0;
         setStage(Stage.FIREWORK_AFTER_ATTACK_HOLD_ARMOR);
     }
@@ -934,6 +1042,7 @@ public class MaceAura extends Module {
         fireworkAscendPitch = randomFireworkAscendPitch();
         fireworkResetDelayTicks = 0;
         fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = false;
         launchTicks = 0;
         maceSwitchDelayTicks = 0;
         windChargeAttackDelayTicks = 0;
@@ -978,7 +1087,7 @@ public class MaceAura extends Module {
     }
 
     private boolean isFireworkArmorReadyForAttack() {
-        return !isFireworkDiveAttack() || !isWearingElytra();
+        return !isFireworkDiveAttack() || fireworkAllowElytraMaceAttack || !isWearingElytra();
     }
 
     private boolean isHeldMaceSettled() {
@@ -1103,6 +1212,18 @@ public class MaceAura extends Module {
         return true;
     }
 
+    private int findHotbarChestArmorSlot() {
+        return InventoryUtility.findHotbarSlot(this::isChestArmorStack);
+    }
+
+    private boolean canHoldChestArmor(int hotbarSlot) {
+        if (mc.player == null || !Inventory.isHotbarSlot(hotbarSlot)) {
+            return false;
+        }
+
+        return isChestArmorStack(InventoryUtility.getStack(hotbarSlot));
+    }
+
     private boolean isWearingElytra() {
         return getChestStack().is(Items.ELYTRA);
     }
@@ -1162,6 +1283,28 @@ public class MaceAura extends Module {
                 && !stack.isEmpty()
                 && !stack.is(Items.ELYTRA)
                 && mc.player.getEquipmentSlotForItem(stack) == EquipmentSlot.CHEST;
+    }
+
+    private LivingEntity crosshairFireworkTarget() {
+        double range = targetRange.getValue();
+        HitResult hitResult = PlayerUtility.raycastForEntity(
+                mc.level,
+                mc.player,
+                (float) range,
+                true,
+                entity -> entity instanceof LivingEntity livingEntity
+                        && isValidTarget(livingEntity, range)
+        );
+        if (!(hitResult instanceof EntityHitResult entityHitResult)) {
+            return null;
+        }
+
+        Entity entity = entityHitResult.getEntity();
+        if (entity instanceof LivingEntity livingEntity && isValidTarget(livingEntity, range)) {
+            return livingEntity;
+        }
+
+        return null;
     }
 
     private float randomFireworkAscendPitch() {
@@ -1467,6 +1610,7 @@ public class MaceAura extends Module {
         fireworkAscendPitch = 0.0F;
         fireworkOriginalChestStack = ItemStack.EMPTY;
         fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = false;
         fireworkUseRetryDelayTicks = 0;
         resetFireworkGlideJumpState();
     }
