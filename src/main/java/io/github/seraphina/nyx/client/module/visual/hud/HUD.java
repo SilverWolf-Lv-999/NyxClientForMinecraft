@@ -8,24 +8,36 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.visual.hud.component.NotificationComponent;
 import io.github.seraphina.nyx.client.module.visual.hud.component.WatermarkComponent;
+import io.github.seraphina.nyx.client.module.visual.hud.component.text.BiomeView;
+import io.github.seraphina.nyx.client.module.visual.hud.component.text.LevelTypeView;
+import io.github.seraphina.nyx.client.module.visual.hud.component.text.PlayerPosView;
+import io.github.seraphina.nyx.client.module.visual.hud.component.text.TPSView;
 import io.github.seraphina.nyx.client.ui.UIComponent;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import net.minecraft.client.gui.screens.ChatScreen;
 
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 @ModuleInfo(name = "nyxclient.module.hud.name", description = "nyxclient.module.hud.description", category = Category.VISUAL)
 public class HUD extends Module {
-    public static final Set<UIComponent<?>> components = new HashSet<>();
+    public static final Set<UIComponent<?>> components = new LinkedHashSet<>();
     public static final HUD INSTANCE = new HUD();
 
     public final BoolValue watermark = ValueBuild.boolSetting("watermaker", true, this);
     public final BoolValue notification = ValueBuild.boolSetting("notification", true, this);
+    public final BoolValue tps = ValueBuild.boolSetting("tps", true, this);
+    public final BoolValue levelType = ValueBuild.boolSetting("level type", true, this);
+    public final BoolValue playerPos = ValueBuild.boolSetting("player pos", true, this);
+    public final BoolValue biome = ValueBuild.boolSetting("biome", true, this);
 
     public HUD() {
         components.add(new WatermarkComponent());
+        components.add(new TPSView());
+        components.add(new LevelTypeView());
+        components.add(new PlayerPosView());
+        components.add(new BiomeView());
         components.add(new NotificationComponent());
     }
 
