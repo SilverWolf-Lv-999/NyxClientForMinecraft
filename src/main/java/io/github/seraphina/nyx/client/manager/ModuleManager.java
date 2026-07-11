@@ -84,7 +84,8 @@ public final class ModuleManager {
                 FullBright.INSTANCE,
                 ModernGui.INSTANCE,
                 ContainerESP.INSTANCE,
-                ESP.INSTANCE
+                ESP.INSTANCE,
+                ViewClip.INSTANCE
         );
 
         initialized = true;

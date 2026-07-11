@@ -70,9 +70,11 @@ public class MaceAura extends Module {
     private static final double FIREWORK_ARMOR_SWITCH_RANGE = 5.0D;
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
     private static final int FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS = 12;
-    private static final double FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL = 4.0D;
+    private static final double FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL = 1.0D;
     private static final double FIREWORK_POST_ATTACK_LAUNCH_MIN_HEIGHT = 3.0D;
     private static final double FIREWORK_POST_ATTACK_LAUNCH_UPWARD_VELOCITY = 0.02D;
+    private static final double FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_UPWARD_VELOCITY = 0.08D;
+    private static final int FIREWORK_GRIM_FALL_FLYING_READY_TICKS = 3;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
     private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
     private static final int FIREWORK_USE_RETRY_DELAY_TICKS = 4;
@@ -99,6 +101,7 @@ public class MaceAura extends Module {
     private int heldMaceTicks;
     private int attackHoldTicks;
     private int fireworkResetDelayTicks;
+    private int fireworkFallFlyingTicks;
     private double fireworkStartY;
     private double fireworkPostAttackStartY = Double.NaN;
     private float fireworkAscendYaw;
@@ -730,11 +733,6 @@ public class MaceAura extends Module {
             return;
         }
 
-        double postAttackLaunchHeight = postAttackLaunchHeight();
-        if (target != null && tryUsePostAttackLaunchForDive(postAttackLaunchHeight)) {
-            return;
-        }
-
         if (stageTicks < FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS) {
             return;
         }
@@ -745,7 +743,12 @@ public class MaceAura extends Module {
             return;
         }
 
+        double postAttackLaunchHeight = postAttackLaunchHeight();
         if (shouldWaitForPostAttackLaunch(postAttackLaunchHeight)) {
+            return;
+        }
+
+        if (tryUsePostAttackLaunchForDive(postAttackLaunchHeight)) {
             return;
         }
 

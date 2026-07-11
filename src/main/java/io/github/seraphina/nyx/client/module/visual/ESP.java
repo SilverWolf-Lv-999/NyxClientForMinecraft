@@ -388,8 +388,8 @@ public class ESP extends Module {
     }
 
     public enum RenderType {
-        BOX,// 一个方形
-        BONE, // 骨架
-        GLOW, // 着色器描边发光
+        BOX,
+        BONE,
+        GLOW,
     }
 }
