@@ -5,10 +5,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.client.*;
 import io.github.seraphina.nyx.client.module.combat.*;
 import io.github.seraphina.nyx.client.module.movement.*;
-import io.github.seraphina.nyx.client.module.other.NoInteraction;
-import io.github.seraphina.nyx.client.module.other.PlayerAlert;
-import io.github.seraphina.nyx.client.module.other.Target;
-import io.github.seraphina.nyx.client.module.other.Test;
+import io.github.seraphina.nyx.client.module.other.*;
 import io.github.seraphina.nyx.client.module.player.*;
 import io.github.seraphina.nyx.client.module.visual.*;
 import io.github.seraphina.nyx.client.module.visual.hud.HUD;
@@ -62,7 +59,9 @@ public final class ModuleManager {
                 Test.INSTANCE,
                 Target.INSTANCE,
                 NoInteraction.INSTANCE,
-                PlayerAlert.INSTANCE
+                PlayerAlert.INSTANCE,
+                AutoLogin.INSTANCE,
+                NoDownload.INSTANCE
         );
         //Player
         registerModule(

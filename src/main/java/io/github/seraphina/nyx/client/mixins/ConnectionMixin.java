@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.At;
 public class ConnectionMixin {
     @WrapOperation(method = "channelRead0(Lio/netty/channel/ChannelHandlerContext;Lnet/minecraft/network/protocol/Packet;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/Connection;genericsFtw(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;)V"))
     private void onReceivePacket(Packet<?> packet, PacketListener listener, Operation<Void> original) {
-        PacketEvent.Receive event = EventBus.INSTANCE.post(new PacketEvent.Receive(packet));
+        PacketEvent.Receive event = EventBus.INSTANCE.post(new PacketEvent.Receive(packet, (Connection) (Object) this));
         if (!event.isCancelled()) {
             original.call(event.getPacket(), listener);
         }
