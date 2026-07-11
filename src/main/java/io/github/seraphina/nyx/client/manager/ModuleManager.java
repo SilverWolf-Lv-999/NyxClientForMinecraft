@@ -34,7 +34,8 @@ public final class ModuleManager {
                 Client.INSTANCE,
                 NoChattingAllowed.INSTANCE,
                 Debug.INSTANCE,
-                Friend.INSTANCE
+                Friend.INSTANCE,
+                ClientSpoof.INSTANCE
         );
         //Combat
         registerModule(

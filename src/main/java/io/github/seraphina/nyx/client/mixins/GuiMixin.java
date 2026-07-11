@@ -1,13 +1,17 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.Render2DEvent;
 import io.github.seraphina.nyx.client.module.visual.ModernGui;
+import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import org.spongepowered.asm.mixin.Mixin;
@@ -32,6 +36,26 @@ public class GuiMixin {
     @Inject(method = "render", at = @At("RETURN"))
     private void onRenderReturn(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
         EventBus.INSTANCE.post(new Render2DEvent.HUD(guiGraphics));
+    }
+
+    @WrapOperation(
+        method = "renderCameraOverlays",
+        at = @At(
+            value = "INVOKE",
+            target = "Lnet/minecraft/client/gui/Gui;renderTextureOverlay(Lnet/minecraft/client/gui/GuiGraphics;Lnet/minecraft/resources/Identifier;F)V",
+            ordinal = 0
+        )
+    )
+    private void renderEquipmentCameraOverlay(
+        Gui instance,
+        GuiGraphics guiGraphics,
+        Identifier texture,
+        float alpha,
+        Operation<Void> original
+    ) {
+        if (!NoRenderer.INSTANCE.shouldDisablePumpkinOverlay(texture)) {
+            original.call(instance, guiGraphics, texture, alpha);
+        }
     }
 
     @Inject(method = "renderHearts", at = @At("HEAD"), cancellable = true)

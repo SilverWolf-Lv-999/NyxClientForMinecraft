@@ -170,6 +170,12 @@ public class CrystalAura extends Module {
 
         tickTimers();
         tickActionDelays();
+
+        if (shouldPauseForItemUse()) {
+            pauseForItemUse();
+            return;
+        }
+
         runSyncedAction();
 
         List<LivingEntity> targets = findTargets();
@@ -245,6 +251,11 @@ public class CrystalAura extends Module {
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onSendPosition(SendPositionEvent event) {
+        if (shouldPauseForItemUse()) {
+            pauseForItemUse();
+            return;
+        }
+
         QueuedAction action = queuedAction;
         if (action != null) {
             setOutgoingRotations(event, action.rotations());
@@ -814,6 +825,14 @@ public class CrystalAura extends Module {
         return true;
     }
 
+    private boolean shouldPauseForItemUse() {
+        return mc.player != null && mc.player.isUsingItem();
+    }
+
+    private void pauseForItemUse() {
+        releaseActionRotations();
+    }
+
     private void runSyncedAction() {
         QueuedAction action = syncedAction;
         if (action == null) {
@@ -825,7 +844,7 @@ public class CrystalAura extends Module {
     }
 
     private void runQueuedAction(QueuedAction action) {
-        if (!canRun()) {
+        if (!canRun() || shouldPauseForItemUse()) {
             releaseActionRotations();
             return;
         }

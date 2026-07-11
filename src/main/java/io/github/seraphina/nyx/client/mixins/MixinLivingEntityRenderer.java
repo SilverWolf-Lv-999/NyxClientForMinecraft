@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.module.visual.ESP;
+import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -28,6 +29,13 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
 
     @Shadow
     public abstract Identifier getTextureLocation(S s);
+
+    @Inject(method = "submit", at = @At("HEAD"), cancellable = true)
+    private void hideDeathEntity(S state, PoseStack poseStack, SubmitNodeCollector nodeCollector, CameraRenderState cameraRenderState, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldHideDeathEntity(state.deathTime)) {
+            info.cancel();
+        }
+    }
 
 //    @ModifyReturnValue(method = "getRenderType", at = @At("RETURN"))
 //    private RenderType modifyRenderType(RenderType original, S state, boolean isBodyVisible, boolean forceTransparent, boolean appearGlowing) {

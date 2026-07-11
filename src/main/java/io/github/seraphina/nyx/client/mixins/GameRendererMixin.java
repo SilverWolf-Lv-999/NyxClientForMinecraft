@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.mixins;
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -18,5 +19,10 @@ public abstract class GameRendererMixin {
     @Inject(method = "bobView(Lcom/mojang/blaze3d/vertex/PoseStack;F)V", at = @At("HEAD"), cancellable = true)
     private void bobView(PoseStack poseStack, float partialTicks, CallbackInfo ci) {
         if (NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.noview.getValue()) ci.cancel();
+    }
+
+    @Inject(method = "displayItemActivation(Lnet/minecraft/world/item/ItemStack;)V", at = @At("HEAD"), cancellable = true)
+    private void displayItemActivation(ItemStack stack, CallbackInfo ci) {
+        if (NoRenderer.INSTANCE.shouldDisableTotemAnimation(stack)) ci.cancel();
     }
 }
