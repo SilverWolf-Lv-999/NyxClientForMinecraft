@@ -60,7 +60,6 @@ public class CrystalAura extends Module {
     private static final int PLACE_SCAN_RADIUS = 3;
     private static final int POST_USE_SLOT_DELAY_TICKS = 3;
     private static final int POST_ATTACK_PLACE_DELAY_TICKS = 2;
-    private static final double EXISTING_BASE_DAMAGE_RATIO = 0.75D;
     private static final float ACTION_TARGET_ROTATION_EPSILON = 3.0F;
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DEDUP_PITCH_STEP = 1.0F;
@@ -145,6 +144,7 @@ public class CrystalAura extends Module {
     private QueuedAction syncedAction;
     private boolean controllingRotations;
     private int placeRotationVariant;
+    private BlockPos pendingSupportBasePos;
 
     @Override
     public void onEnable() {
@@ -181,6 +181,7 @@ public class CrystalAura extends Module {
         List<LivingEntity> targets = findTargets();
         if (targets.isEmpty()) {
             lockedTargetId = -1;
+            pendingSupportBasePos = null;
             restoreOriginalHotbarSlot();
             releaseActionRotations();
             return;
@@ -196,8 +197,14 @@ public class CrystalAura extends Module {
         }
 
         if (!usedInteractionThisTick && canPlace() && postAttackPlaceDelayTicks == 0) {
-            PlaceTarget placeTarget = findBestPlace(activeTargets);
-            SupportTarget supportTarget = autoPlaceBlock.getValue() ? findBestSupportBlock(activeTargets) : null;
+            PlaceTarget placeTarget = findPendingSupportPlace(activeTargets);
+            if (placeTarget == null) {
+                placeTarget = findBestPlace(activeTargets);
+            }
+
+            SupportTarget supportTarget = autoPlaceBlock.getValue() && placeTarget == null && pendingSupportBasePos == null
+                    ? findBestSupportBlock(activeTargets)
+                    : null;
             if (placeTarget != null) {
                 if (safePlace.getValue() && !placeTarget.covered()) {
                     if (autoPlaceProtectBlock.getValue() && placeProtectBlock(crystalPosition(placeTarget.basePos()))) {
@@ -208,30 +215,18 @@ public class CrystalAura extends Module {
                     return;
                 }
 
-                if (shouldUseExistingBase(placeTarget, supportTarget)) {
-                    if (placeCrystal(placeTarget.basePos())) {
-                        return;
-                    } else {
-                        restoreOriginalHotbarSlotIfIdle();
-                    }
-                    return;
-                }
-
-                if (supportTarget != null && placeSupportBlock(supportTarget.pos())) {
-                    return;
-                }
-
                 if (placeCrystal(placeTarget.basePos())) {
                     return;
+                } else {
+                    restoreOriginalHotbarSlotIfIdle();
                 }
+                return;
             } else if (supportTarget != null && placeSupportBlock(supportTarget.pos())) {
                 return;
             } else {
                 restoreOriginalHotbarSlotIfIdle();
                 return;
             }
-
-            restoreOriginalHotbarSlotIfIdle();
         }
 
         if (queuedAction == null) {
@@ -500,25 +495,11 @@ public class CrystalAura extends Module {
                     continue;
                 }
 
-                Vec3 explosionPos = crystalPosition(basePos);
-                boolean covered = hasCoverFrom(explosionPos);
-                if (safePlace.getValue() && !covered && !autoPlaceProtectBlock.getValue()) {
+                PlaceTarget candidate = createPlaceTarget(target, basePos);
+                if (candidate == null) {
                     continue;
                 }
 
-                double targetScore = scoreExplosion(target, explosionPos);
-                if (targetScore <= 0.0D) {
-                    continue;
-                }
-
-                double targetDamage = estimateExplosionDamage(target, explosionPos);
-                double selfScore = estimateExplosionDamage(mc.player, explosionPos);
-                double score = targetScore - selfScore * (safePlace.getValue() ? 0.25D : 0.55D);
-                if (score <= 0.0D) {
-                    continue;
-                }
-
-                PlaceTarget candidate = new PlaceTarget(basePos, target, score, targetDamage, covered);
                 if (best == null || candidate.score() > best.score()) {
                     best = candidate;
                 }
@@ -528,10 +509,49 @@ public class CrystalAura extends Module {
         return best;
     }
 
-    private boolean shouldUseExistingBase(PlaceTarget placeTarget, SupportTarget supportTarget) {
-        return supportTarget == null
-                || placeTarget.score() >= supportTarget.score()
-                || placeTarget.targetDamage() >= supportTarget.targetDamage() * EXISTING_BASE_DAMAGE_RATIO;
+    private PlaceTarget findPendingSupportPlace(List<LivingEntity> targets) {
+        if (pendingSupportBasePos == null) {
+            return null;
+        }
+
+        BlockPos basePos = pendingSupportBasePos;
+        if (!canPlaceCrystalAt(basePos)) {
+            if (!isCrystalBase(basePos)) {
+                pendingSupportBasePos = null;
+            }
+            return null;
+        }
+
+        PlaceTarget best = null;
+        for (LivingEntity target : targets) {
+            PlaceTarget candidate = createPlaceTarget(target, basePos);
+            if (candidate != null && (best == null || candidate.score() > best.score())) {
+                best = candidate;
+            }
+        }
+
+        if (best == null) {
+            pendingSupportBasePos = null;
+        }
+        return best;
+    }
+
+    private PlaceTarget createPlaceTarget(LivingEntity target, BlockPos basePos) {
+        Vec3 explosionPos = crystalPosition(basePos);
+        boolean covered = hasCoverFrom(explosionPos);
+        if (safePlace.getValue() && !covered && !autoPlaceProtectBlock.getValue()) {
+            return null;
+        }
+
+        double targetScore = scoreExplosion(target, explosionPos);
+        if (targetScore <= 0.0D) {
+            return null;
+        }
+
+        double targetDamage = estimateExplosionDamage(target, explosionPos);
+        double selfScore = estimateExplosionDamage(mc.player, explosionPos);
+        double score = targetScore - selfScore * (safePlace.getValue() ? 0.25D : 0.55D);
+        return score <= 0.0D ? null : new PlaceTarget(basePos, target, score, targetDamage, covered);
     }
 
     private List<BlockPos> scanBasePositions(LivingEntity target) {
@@ -693,7 +713,12 @@ public class CrystalAura extends Module {
             return false;
         }
 
-        return useHotbarOnBlock(blockSlot, clickFace.blockPos(), clickFace.direction());
+        if (!useHotbarOnBlock(blockSlot, clickFace.blockPos(), clickFace.direction())) {
+            return false;
+        }
+
+        pendingSupportBasePos = pos;
+        return true;
     }
 
     private boolean placeProtectBlock(Vec3 explosionPos) {
@@ -1356,6 +1381,7 @@ public class CrystalAura extends Module {
         lastOutgoingRotations = currentPlayerRotations();
         movementFixRotations = null;
         placeRotationVariant = 0;
+        pendingSupportBasePos = null;
     }
 
     private record CrystalTarget(EndCrystal crystal, LivingEntity target, double score) {
