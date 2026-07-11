@@ -35,9 +35,14 @@ public abstract class PlayerTabOverlayMixin {
     @Shadow
     public abstract Component getNameForDisplay(PlayerInfo playerInfo);
 
+    @Inject(method = "setVisible", at = @At("RETURN"))
+    private void onSetVisible(boolean visible, CallbackInfo info) {
+        ModernGui.INSTANCE.onPlayerTabOverlayVisibilityChanged(visible);
+    }
+
     @Inject(method = "render", at = @At("HEAD"), cancellable = true)
     private void onRender(GuiGraphics graphics, int screenWidth, Scoreboard scoreboard, @Nullable Objective objective, CallbackInfo info) {
-        if (!ModernGui.INSTANCE.shouldReplaceTabList()) {
+        if (!ModernGui.INSTANCE.shouldRenderPlayerTabOverlay()) {
             return;
         }
 

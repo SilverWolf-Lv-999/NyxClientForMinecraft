@@ -4,6 +4,7 @@ import com.google.common.collect.Ordering;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import com.mojang.authlib.GameProfile;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.utility.MathUtility;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.StringUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
@@ -201,6 +202,7 @@ public class ModernGui extends Module {
     private static final float TAB_MESSAGE_LINE_GAP = 1.0F;
     private static final float TAB_SCORE_HEART_WIDTH = 45.0F;
     private static final float TAB_SCORE_HEART_HEIGHT = 5.0F;
+    private static final long TAB_ANIMATION_NANOS = 180_000_000L;
     private static final int TAB_ROW_BACKGROUND = 0x22000000;
     private static final int TAB_ROW_BORDER = 0x14FFFFFF;
     private static final int TAB_TEXT = 0xFFFFFFFF;
@@ -275,6 +277,10 @@ public class ModernGui extends Module {
     private static final String RECIPE_BOOK_TEXTURE = "textures/gui/recipe_book.png";
     private int containerTextureReplacementDepth;
     private int recipeBookTextureReplacementDepth;
+    private boolean tabListTargetVisible;
+    private float tabListAnimationProgress;
+    private float tabListAnimationStartProgress;
+    private long tabListAnimationStartedAtNanos;
 
     public final BoolValue statusBars = ValueBuild.boolSetting("status bars", true, this);
     public final BoolValue hotbar = ValueBuild.boolSetting("hotbar", true, this);
@@ -334,6 +340,46 @@ public class ModernGui extends Module {
 
     public boolean shouldReplaceTabList() {
         return isEnabled() && tabList.getValue();
+    }
+
+    public boolean shouldRenderPlayerTabOverlay() {
+        return shouldReplaceTabList() && (tabListTargetVisible || tabListAnimationProgress() > 0.001F);
+    }
+
+    public boolean shouldContinueRenderingClosedTabList() {
+        return shouldRenderPlayerTabOverlay() && !tabListTargetVisible;
+    }
+
+    public void onPlayerTabOverlayVisibilityChanged(boolean visible) {
+        tabListAnimationProgress();
+        if (tabListTargetVisible == visible) {
+            return;
+        }
+
+        tabListTargetVisible = visible;
+        tabListAnimationStartProgress = tabListAnimationProgress;
+        tabListAnimationStartedAtNanos = System.nanoTime();
+    }
+
+    private float tabListAnimationProgress() {
+        if (tabListAnimationStartedAtNanos == 0L) {
+            return tabListAnimationProgress;
+        }
+
+        float rawProgress = (float)((System.nanoTime() - tabListAnimationStartedAtNanos) / (double)TAB_ANIMATION_NANOS);
+        float target = tabListTargetVisible ? 1.0F : 0.0F;
+        if (rawProgress >= 1.0F) {
+            tabListAnimationProgress = target;
+            tabListAnimationStartProgress = target;
+            tabListAnimationStartedAtNanos = 0L;
+            return tabListAnimationProgress;
+        }
+
+        float eased = tabListTargetVisible
+            ? MathUtility.easeOutCubic(rawProgress)
+            : MathUtility.easeInCubic(rawProgress);
+        tabListAnimationProgress = MathUtility.lerp(tabListAnimationStartProgress, target, eased);
+        return tabListAnimationProgress;
     }
 
     public boolean shouldReplaceContainers() {
@@ -1072,7 +1118,12 @@ public class ModernGui extends Module {
         List<PlayerInfo> players,
         Function<PlayerInfo, Component> nameProvider
     ) {
-        if (!shouldReplaceTabList() || players.isEmpty()) {
+        if (!shouldRenderPlayerTabOverlay() || players.isEmpty()) {
+            return;
+        }
+
+        float animationProgress = tabListAnimationProgress();
+        if (animationProgress <= 0.001F) {
             return;
         }
 
@@ -1116,6 +1167,7 @@ public class ModernGui extends Module {
         float headerWidth = maxLineWidth(font, headerLines);
         float footerWidth = maxLineWidth(font, footerLines);
         float contentWidth = Math.max(gridWidth, Math.max(headerWidth, footerWidth));
+        int finalRowsPerColumn = rowsPerColumn;
         float rowAreaHeight = rowsPerColumn * TAB_ROW_HEIGHT + Math.max(0, rowsPerColumn - 1) * TAB_ROW_GAP;
         float headerHeight = headerLines.length == 0 ? 0.0F : headerLines.length * messageLineHeight + TAB_MESSAGE_GAP;
         float footerHeight = footerLines.length == 0 ? 0.0F : TAB_MESSAGE_GAP + footerLines.length * messageLineHeight;
@@ -1123,6 +1175,50 @@ public class ModernGui extends Module {
         float height = TAB_PADDING_TOP + headerHeight + rowAreaHeight + footerHeight + TAB_PADDING_BOTTOM;
         float x = screenWidth * 0.5F - width * 0.5F;
         float y = TAB_MARGIN_TOP;
+        float scale = animationProgress;
+
+        Render2DUtility.withScale(scale, scale, x + width * 0.5F, y, () ->
+            renderTabListContent(
+                graphics,
+                font,
+                entries,
+                objective,
+                showHeads,
+                headerLines,
+                footerLines,
+                x,
+                y,
+                width,
+                height,
+                contentWidth,
+                gridWidth,
+                columnWidth,
+                finalRowsPerColumn,
+                rowAreaHeight,
+                messageLineHeight
+            )
+        );
+    }
+
+    private void renderTabListContent(
+        GuiGraphics graphics,
+        FontRenderer font,
+        TabListEntry[] entries,
+        @Nullable Objective objective,
+        boolean showHeads,
+        String[] headerLines,
+        String[] footerLines,
+        float x,
+        float y,
+        float width,
+        float height,
+        float contentWidth,
+        float gridWidth,
+        float columnWidth,
+        int rowsPerColumn,
+        float rowAreaHeight,
+        float messageLineHeight
+    ) {
         float contentX = x + TAB_PADDING_X;
         float cursorY = y + TAB_PADDING_TOP;
 
@@ -1138,7 +1234,7 @@ public class ModernGui extends Module {
         }
 
         float gridX = x + (width - gridWidth) * 0.5F;
-        for (int index = 0; index < rowCount; index++) {
+        for (int index = 0; index < entries.length; index++) {
             int column = index / rowsPerColumn;
             int row = index % rowsPerColumn;
             float rowX = gridX + column * (columnWidth + TAB_COLUMN_GAP);

@@ -89,7 +89,9 @@ public final class ModuleManager {
                 ModernGui.INSTANCE,
                 ContainerESP.INSTANCE,
                 ESP.INSTANCE,
-                ViewClip.INSTANCE
+                ViewClip.INSTANCE,
+                HurtMaker.INSTANCE,
+                ModuleList.INSTANCE
         );
 
         initialized = true;

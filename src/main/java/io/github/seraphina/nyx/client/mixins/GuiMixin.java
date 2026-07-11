@@ -12,12 +12,16 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.PlayerTabOverlay;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.Scoreboard;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -31,6 +35,14 @@ public abstract class GuiMixin {
 
     @Shadow
     public int rightHeight;
+
+    @Shadow
+    @Final
+    private Minecraft minecraft;
+
+    @Shadow
+    @Final
+    private PlayerTabOverlay tabList;
 
     @Inject(method = "render", at = @At("HEAD"))
     private void onRenderHead(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
@@ -269,6 +281,18 @@ public abstract class GuiMixin {
             ModernGui.INSTANCE.renderScoreboardSidebar(guiGraphics, objective)
         );
         info.cancel();
+    }
+
+    @Inject(method = "renderTabList", at = @At("RETURN"))
+    private void onRenderTabListReturn(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
+        if (!ModernGui.INSTANCE.shouldContinueRenderingClosedTabList() || minecraft.level == null) {
+            return;
+        }
+
+        Scoreboard scoreboard = minecraft.level.getScoreboard();
+        Objective objective = scoreboard.getDisplayObjective(DisplaySlot.LIST);
+        guiGraphics.nextStratum();
+        tabList.render(guiGraphics, guiGraphics.guiWidth(), scoreboard, objective);
     }
 
     private Player nyx$getCameraPlayer() {
