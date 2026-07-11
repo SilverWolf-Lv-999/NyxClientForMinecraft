@@ -12,22 +12,41 @@ import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import io.github.seraphina.nyx.client.value.impl.ColorValue;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.awt.Color;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @ModuleInfo(name = "nyxclient.module.containeresp.name", description = "nyxclient.module.containeresp.description", category = Category.VISUAL)
 public class ContainerESP extends Module {
     public static final ContainerESP INSTANCE = new ContainerESP();
+    private static final Direction[] FACE_DIRECTIONS = {
+            Direction.DOWN,
+            Direction.UP,
+            Direction.NORTH,
+            Direction.SOUTH,
+            Direction.WEST,
+            Direction.EAST
+    };
+    private static final double LINE_MERGE_EPSILON = 1.0E-7D;
 
     public final BoolValue fill = ValueBuild.boolSetting("fill", true, this);
     public final BoolValue outline = ValueBuild.boolSetting("outline", true, this);
@@ -105,17 +124,20 @@ public class ContainerESP extends Module {
 
     @EventTarget
     public void onRender3D(Render3DEvent event) {
-        if (!canRender()) {
+        if (!canRender() || !shouldRenderGeometry()) {
             return;
         }
 
         ClientLevel level = mc.level;
         LocalPlayer player = mc.player;
+        Vec3 cameraPos = mc.gameRenderer.getMainCamera().position();
         int range = renderRange.getValue();
         double maxDistanceSqr = (double) range * range;
         int chunkRange = Math.max(1, (int) Math.ceil(range / 16.0D));
         int playerChunkX = SectionPos.blockToSectionCoord(player.getBlockX());
         int playerChunkZ = SectionPos.blockToSectionCoord(player.getBlockZ());
+        LongSet occupiedContainers = new LongOpenHashSet();
+        Map<Integer, List<BlockPos>> containersByColor = new HashMap<>();
 
         for (int chunkX = playerChunkX - chunkRange; chunkX <= playerChunkX + chunkRange; chunkX++) {
             for (int chunkZ = playerChunkZ - chunkRange; chunkZ <= playerChunkZ + chunkRange; chunkZ++) {
@@ -125,17 +147,29 @@ public class ContainerESP extends Module {
                 }
 
                 for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
-                    renderContainer(event.getPoseStack(), player, blockEntity, maxDistanceSqr);
+                    collectContainer(player, blockEntity, maxDistanceSqr, occupiedContainers, containersByColor);
                 }
             }
         }
+
+        renderMergedContainers(event.getPoseStack(), cameraPos, occupiedContainers, containersByColor);
     }
 
     private boolean canRender() {
         return mc.player != null && mc.level != null;
     }
 
-    private void renderContainer(PoseStack poseStack, LocalPlayer player, BlockEntity blockEntity, double maxDistanceSqr) {
+    private boolean shouldRenderGeometry() {
+        return fill.getValue() && fillAlpha.getValue() > 0 || outline.getValue() && outlineAlpha.getValue() > 0;
+    }
+
+    private void collectContainer(
+            LocalPlayer player,
+            BlockEntity blockEntity,
+            double maxDistanceSqr,
+            LongSet occupiedContainers,
+            Map<Integer, List<BlockPos>> containersByColor
+    ) {
         if (blockEntity == null || blockEntity.isRemoved()) {
             return;
         }
@@ -150,13 +184,46 @@ public class ContainerESP extends Module {
             return;
         }
 
-        AABB box = new AABB(pos).inflate(boxInflate.getValue());
         Color color = entry.color().getValue();
-        if (fill.getValue()) {
-            Render3DUtility.renderFilledBoxNoDepth(poseStack, box, withAlpha(color, fillAlpha.getValue()));
+        int colorKey = Render3DUtility.rgb(color.getRed(), color.getGreen(), color.getBlue());
+        occupiedContainers.add(pos.asLong());
+        containersByColor.computeIfAbsent(colorKey, ignored -> new ArrayList<>()).add(pos);
+    }
+
+    private void renderMergedContainers(
+            PoseStack poseStack,
+            Vec3 cameraPos,
+            LongSet occupiedContainers,
+            Map<Integer, List<BlockPos>> containersByColor
+    ) {
+        if (occupiedContainers.isEmpty() || containersByColor.isEmpty()) {
+            return;
         }
-        if (outline.getValue()) {
-            Render3DUtility.renderOutlineBoxNoDepth(poseStack, box, withAlpha(color, outlineAlpha.getValue()));
+
+        boolean renderFill = fill.getValue() && fillAlpha.getValue() > 0;
+        boolean renderOutline = outline.getValue() && outlineAlpha.getValue() > 0;
+        double inflate = boxInflate.getValue();
+
+        for (Map.Entry<Integer, List<BlockPos>> entry : containersByColor.entrySet()) {
+            Map<FacePlane, Set<Cell2D>> visibleFaces = collectVisibleFaces(entry.getValue(), occupiedContainers, cameraPos);
+            if (visibleFaces.isEmpty()) {
+                continue;
+            }
+
+            if (renderFill) {
+                Render3DUtility.renderFilledQuadsNoDepth(
+                        poseStack,
+                        buildFillQuads(visibleFaces, inflate),
+                        Render3DUtility.withAlpha(entry.getKey(), fillAlpha.getValue())
+                );
+            }
+            if (renderOutline) {
+                Render3DUtility.renderLineSegmentsNoDepth(
+                        poseStack,
+                        buildOutlineLines(visibleFaces, inflate),
+                        Render3DUtility.withAlpha(entry.getKey(), outlineAlpha.getValue())
+                );
+            }
         }
     }
 
@@ -176,10 +243,331 @@ public class ContainerESP extends Module {
         return x * x + y * y + z * z <= maxDistanceSqr;
     }
 
-    private static Color withAlpha(Color color, int alpha) {
-        return new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.max(0, Math.min(255, alpha)));
+    private static Map<FacePlane, Set<Cell2D>> collectVisibleFaces(
+            Collection<BlockPos> positions,
+            LongSet occupiedContainers,
+            Vec3 cameraPos
+    ) {
+        Map<FacePlane, Set<Cell2D>> visibleFaces = new HashMap<>();
+        for (BlockPos pos : positions) {
+            for (Direction direction : FACE_DIRECTIONS) {
+                if (hasNeighbor(pos, direction, occupiedContainers) || !isFaceCameraVisible(pos, direction, cameraPos)) {
+                    continue;
+                }
+
+                FaceCell cell = faceCell(pos, direction);
+                visibleFaces.computeIfAbsent(new FacePlane(direction, cell.plane()), ignored -> new HashSet<>())
+                        .add(new Cell2D(cell.u(), cell.v()));
+            }
+        }
+        return visibleFaces;
+    }
+
+    private static boolean hasNeighbor(BlockPos pos, Direction direction, LongSet occupiedContainers) {
+        return occupiedContainers.contains(BlockPos.asLong(
+                pos.getX() + direction.getStepX(),
+                pos.getY() + direction.getStepY(),
+                pos.getZ() + direction.getStepZ()
+        ));
+    }
+
+    private static boolean isFaceCameraVisible(BlockPos pos, Direction direction, Vec3 cameraPos) {
+        return switch (direction) {
+            case DOWN -> cameraPos.y < pos.getY();
+            case UP -> cameraPos.y > pos.getY() + 1.0D;
+            case NORTH -> cameraPos.z < pos.getZ();
+            case SOUTH -> cameraPos.z > pos.getZ() + 1.0D;
+            case WEST -> cameraPos.x < pos.getX();
+            case EAST -> cameraPos.x > pos.getX() + 1.0D;
+        };
+    }
+
+    private static FaceCell faceCell(BlockPos pos, Direction direction) {
+        return switch (direction) {
+            case DOWN -> new FaceCell(pos.getY(), pos.getX(), pos.getZ());
+            case UP -> new FaceCell(pos.getY() + 1, pos.getX(), pos.getZ());
+            case NORTH -> new FaceCell(pos.getZ(), pos.getX(), pos.getY());
+            case SOUTH -> new FaceCell(pos.getZ() + 1, pos.getX(), pos.getY());
+            case WEST -> new FaceCell(pos.getX(), pos.getY(), pos.getZ());
+            case EAST -> new FaceCell(pos.getX() + 1, pos.getY(), pos.getZ());
+        };
+    }
+
+    private static List<Render3DUtility.Quad> buildFillQuads(Map<FacePlane, Set<Cell2D>> visibleFaces, double inflate) {
+        List<Render3DUtility.Quad> quads = new ArrayList<>();
+        for (Map.Entry<FacePlane, Set<Cell2D>> entry : visibleFaces.entrySet()) {
+            for (FaceRect rect : mergeCells(entry.getKey(), entry.getValue())) {
+                quads.add(toQuad(rect, inflate));
+            }
+        }
+        return quads;
+    }
+
+    private static List<FaceRect> mergeCells(FacePlane plane, Set<Cell2D> cells) {
+        Set<Cell2D> remaining = new HashSet<>(cells);
+        List<FaceRect> rectangles = new ArrayList<>();
+
+        while (!remaining.isEmpty()) {
+            Cell2D start = firstCell(remaining);
+            int width = 1;
+            while (remaining.contains(new Cell2D(start.u() + width, start.v()))) {
+                width++;
+            }
+
+            int height = 1;
+            boolean canGrow = true;
+            while (canGrow) {
+                for (int x = 0; x < width; x++) {
+                    if (!remaining.contains(new Cell2D(start.u() + x, start.v() + height))) {
+                        canGrow = false;
+                        break;
+                    }
+                }
+                if (canGrow) {
+                    height++;
+                }
+            }
+
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < height; y++) {
+                    remaining.remove(new Cell2D(start.u() + x, start.v() + y));
+                }
+            }
+
+            rectangles.add(new FaceRect(plane.direction(), plane.plane(), start.u(), start.v(), width, height));
+        }
+
+        return rectangles;
+    }
+
+    private static Cell2D firstCell(Set<Cell2D> cells) {
+        Cell2D first = null;
+        for (Cell2D cell : cells) {
+            if (first == null || cell.v() < first.v() || cell.v() == first.v() && cell.u() < first.u()) {
+                first = cell;
+            }
+        }
+        if (first == null) {
+            throw new IllegalStateException("cells is empty");
+        }
+        return first;
+    }
+
+    private static Render3DUtility.Quad toQuad(FaceRect rect, double inflate) {
+        return switch (rect.direction()) {
+            case DOWN -> {
+                double y = shiftedPlane(rect, inflate);
+                double minX = rect.u() - inflate;
+                double maxX = rect.u() + rect.width() + inflate;
+                double minZ = rect.v() - inflate;
+                double maxZ = rect.v() + rect.height() + inflate;
+                yield new Render3DUtility.Quad(minX, y, minZ, maxX, y, minZ, maxX, y, maxZ, minX, y, maxZ);
+            }
+            case UP -> {
+                double y = shiftedPlane(rect, inflate);
+                double minX = rect.u() - inflate;
+                double maxX = rect.u() + rect.width() + inflate;
+                double minZ = rect.v() - inflate;
+                double maxZ = rect.v() + rect.height() + inflate;
+                yield new Render3DUtility.Quad(minX, y, minZ, minX, y, maxZ, maxX, y, maxZ, maxX, y, minZ);
+            }
+            case NORTH -> {
+                double z = shiftedPlane(rect, inflate);
+                double minX = rect.u() - inflate;
+                double maxX = rect.u() + rect.width() + inflate;
+                double minY = rect.v() - inflate;
+                double maxY = rect.v() + rect.height() + inflate;
+                yield new Render3DUtility.Quad(minX, minY, z, minX, maxY, z, maxX, maxY, z, maxX, minY, z);
+            }
+            case SOUTH -> {
+                double z = shiftedPlane(rect, inflate);
+                double minX = rect.u() - inflate;
+                double maxX = rect.u() + rect.width() + inflate;
+                double minY = rect.v() - inflate;
+                double maxY = rect.v() + rect.height() + inflate;
+                yield new Render3DUtility.Quad(minX, minY, z, maxX, minY, z, maxX, maxY, z, minX, maxY, z);
+            }
+            case WEST -> {
+                double x = shiftedPlane(rect, inflate);
+                double minY = rect.u() - inflate;
+                double maxY = rect.u() + rect.width() + inflate;
+                double minZ = rect.v() - inflate;
+                double maxZ = rect.v() + rect.height() + inflate;
+                yield new Render3DUtility.Quad(x, minY, minZ, x, minY, maxZ, x, maxY, maxZ, x, maxY, minZ);
+            }
+            case EAST -> {
+                double x = shiftedPlane(rect, inflate);
+                double minY = rect.u() - inflate;
+                double maxY = rect.u() + rect.width() + inflate;
+                double minZ = rect.v() - inflate;
+                double maxZ = rect.v() + rect.height() + inflate;
+                yield new Render3DUtility.Quad(x, minY, minZ, x, maxY, minZ, x, maxY, maxZ, x, minY, maxZ);
+            }
+        };
+    }
+
+    private static double shiftedPlane(FaceRect rect, double inflate) {
+        return rect.plane() + faceSign(rect.direction()) * inflate;
+    }
+
+    private static List<Render3DUtility.LineSegment> buildOutlineLines(Map<FacePlane, Set<Cell2D>> visibleFaces, double inflate) {
+        Map<LineAxis, List<DoubleInterval>> intervalsByLine = new HashMap<>();
+        for (Map.Entry<FacePlane, Set<Cell2D>> entry : visibleFaces.entrySet()) {
+            for (Edge2D edge : collectPlaneOutlineEdges(entry.getValue())) {
+                addOutlineEdge(intervalsByLine, entry.getKey(), edge, inflate);
+            }
+        }
+        return buildMergedLineSegments(intervalsByLine);
+    }
+
+    private static Collection<Edge2D> collectPlaneOutlineEdges(Set<Cell2D> cells) {
+        Map<Edge2DKey, Edge2D> edges = new HashMap<>();
+        for (Cell2D cell : cells) {
+            toggleEdge(edges, true, cell.v(), cell.u(), -1);
+            toggleEdge(edges, true, cell.v() + 1, cell.u(), 1);
+            toggleEdge(edges, false, cell.u(), cell.v(), -1);
+            toggleEdge(edges, false, cell.u() + 1, cell.v(), 1);
+        }
+        return edges.values();
+    }
+
+    private static void toggleEdge(Map<Edge2DKey, Edge2D> edges, boolean alongU, int fixed, int start, int side) {
+        Edge2DKey key = new Edge2DKey(alongU, fixed, start);
+        if (edges.remove(key) == null) {
+            edges.put(key, new Edge2D(key, side));
+        }
+    }
+
+    private static void addOutlineEdge(
+            Map<LineAxis, List<DoubleInterval>> intervalsByLine,
+            FacePlane plane,
+            Edge2D edge,
+            double inflate
+    ) {
+        Edge2DKey key = edge.key();
+        double planeCoord = plane.plane() + faceSign(plane.direction()) * inflate;
+        double fixedCoord = key.fixed() + edge.side() * inflate;
+        double start = key.start() - inflate;
+        double end = key.start() + 1.0D + inflate;
+
+        switch (plane.direction()) {
+            case DOWN, UP -> {
+                if (key.alongU()) {
+                    addInterval(intervalsByLine, new LineAxis(Axis3D.X, planeCoord, fixedCoord), start, end);
+                } else {
+                    addInterval(intervalsByLine, new LineAxis(Axis3D.Z, fixedCoord, planeCoord), start, end);
+                }
+            }
+            case NORTH, SOUTH -> {
+                if (key.alongU()) {
+                    addInterval(intervalsByLine, new LineAxis(Axis3D.X, fixedCoord, planeCoord), start, end);
+                } else {
+                    addInterval(intervalsByLine, new LineAxis(Axis3D.Y, fixedCoord, planeCoord), start, end);
+                }
+            }
+            case WEST, EAST -> {
+                if (key.alongU()) {
+                    addInterval(intervalsByLine, new LineAxis(Axis3D.Y, planeCoord, fixedCoord), start, end);
+                } else {
+                    addInterval(intervalsByLine, new LineAxis(Axis3D.Z, planeCoord, fixedCoord), start, end);
+                }
+            }
+        }
+    }
+
+    private static void addInterval(Map<LineAxis, List<DoubleInterval>> intervalsByLine, LineAxis axis, double start, double end) {
+        double min = Math.min(start, end);
+        double max = Math.max(start, end);
+        intervalsByLine.computeIfAbsent(axis.clean(), ignored -> new ArrayList<>()).add(new DoubleInterval(min, max));
+    }
+
+    private static List<Render3DUtility.LineSegment> buildMergedLineSegments(Map<LineAxis, List<DoubleInterval>> intervalsByLine) {
+        List<Render3DUtility.LineSegment> lines = new ArrayList<>();
+        for (Map.Entry<LineAxis, List<DoubleInterval>> entry : intervalsByLine.entrySet()) {
+            List<DoubleInterval> intervals = entry.getValue();
+            intervals.sort(Comparator.comparingDouble(DoubleInterval::start).thenComparingDouble(DoubleInterval::end));
+
+            double start = Double.NaN;
+            double end = Double.NaN;
+            for (DoubleInterval interval : intervals) {
+                if (Double.isNaN(start)) {
+                    start = interval.start();
+                    end = interval.end();
+                    continue;
+                }
+
+                if (interval.start() <= end + LINE_MERGE_EPSILON) {
+                    end = Math.max(end, interval.end());
+                } else {
+                    addLineSegment(lines, entry.getKey(), start, end);
+                    start = interval.start();
+                    end = interval.end();
+                }
+            }
+
+            if (!Double.isNaN(start)) {
+                addLineSegment(lines, entry.getKey(), start, end);
+            }
+        }
+        return lines;
+    }
+
+    private static void addLineSegment(List<Render3DUtility.LineSegment> lines, LineAxis axis, double start, double end) {
+        if (end - start <= LINE_MERGE_EPSILON) {
+            return;
+        }
+
+        switch (axis.axis()) {
+            case X -> lines.add(new Render3DUtility.LineSegment(start, axis.fixedA(), axis.fixedB(), end, axis.fixedA(), axis.fixedB()));
+            case Y -> lines.add(new Render3DUtility.LineSegment(axis.fixedA(), start, axis.fixedB(), axis.fixedA(), end, axis.fixedB()));
+            case Z -> lines.add(new Render3DUtility.LineSegment(axis.fixedA(), axis.fixedB(), start, axis.fixedA(), axis.fixedB(), end));
+        }
+    }
+
+    private static int faceSign(Direction direction) {
+        return switch (direction) {
+            case DOWN, NORTH, WEST -> -1;
+            case UP, SOUTH, EAST -> 1;
+        };
+    }
+
+    private static double cleanZero(double value) {
+        return value == 0.0D ? 0.0D : value;
     }
 
     private record ContainerEntry(BlockEntityType<?> type, BoolValue enabled, ColorValue color) {
+    }
+
+    private record FaceCell(int plane, int u, int v) {
+    }
+
+    private record FacePlane(Direction direction, int plane) {
+    }
+
+    private record Cell2D(int u, int v) {
+    }
+
+    private record FaceRect(Direction direction, int plane, int u, int v, int width, int height) {
+    }
+
+    private record Edge2DKey(boolean alongU, int fixed, int start) {
+    }
+
+    private record Edge2D(Edge2DKey key, int side) {
+    }
+
+    private enum Axis3D {
+        X,
+        Y,
+        Z
+    }
+
+    private record LineAxis(Axis3D axis, double fixedA, double fixedB) {
+        private LineAxis clean() {
+            return new LineAxis(axis, cleanZero(fixedA), cleanZero(fixedB));
+        }
+    }
+
+    private record DoubleInterval(double start, double end) {
     }
 }

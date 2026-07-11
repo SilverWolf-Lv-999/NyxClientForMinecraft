@@ -20,6 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3f;
 
 import java.awt.Color;
+import java.util.Collection;
 import java.util.Objects;
 
 public final class Render3DUtility {
@@ -180,6 +181,42 @@ public final class Render3DUtility {
         renderFilledBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color, NO_DEPTH_FILLED_BOX);
     }
 
+    public static void renderFilledQuadsNoDepth(PoseStack poseStack, Collection<Quad> quads, int color) {
+        renderFilledQuads(poseStack, quads, color, NO_DEPTH_FILLED_BOX);
+    }
+
+    private static void renderFilledQuads(PoseStack poseStack, Collection<Quad> quads, int color, RenderType renderType) {
+        Objects.requireNonNull(poseStack, "poseStack");
+        Objects.requireNonNull(quads, "quads");
+        Objects.requireNonNull(renderType, "renderType");
+        if (quads.isEmpty() || isTransparent(color)) {
+            return;
+        }
+
+        PoseStack.Pose pose = poseStack.last();
+        BufferBuilder buffer = Tesselator.getInstance().begin(renderType.mode(), renderType.format());
+        for (Quad quad : quads) {
+            quad(
+                buffer,
+                pose,
+                quad.x0,
+                quad.y0,
+                quad.z0,
+                quad.x1,
+                quad.y1,
+                quad.z1,
+                quad.x2,
+                quad.y2,
+                quad.z2,
+                quad.x3,
+                quad.y3,
+                quad.z3,
+                color
+            );
+        }
+        draw(renderType, buffer);
+    }
+
     private static void renderFilledBox(
         PoseStack poseStack,
         double minX,
@@ -270,6 +307,26 @@ public final class Render3DUtility {
         int color
     ) {
         renderOutlineBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color, NO_DEPTH_LINES);
+    }
+
+    public static void renderLineSegmentsNoDepth(PoseStack poseStack, Collection<LineSegment> lines, int color) {
+        renderLineSegments(poseStack, lines, color, NO_DEPTH_LINES);
+    }
+
+    private static void renderLineSegments(PoseStack poseStack, Collection<LineSegment> lines, int color, RenderType renderType) {
+        Objects.requireNonNull(poseStack, "poseStack");
+        Objects.requireNonNull(lines, "lines");
+        Objects.requireNonNull(renderType, "renderType");
+        if (lines.isEmpty() || isTransparent(color)) {
+            return;
+        }
+
+        PoseStack.Pose pose = poseStack.last();
+        BufferBuilder buffer = Tesselator.getInstance().begin(renderType.mode(), renderType.format());
+        for (LineSegment line : lines) {
+            addLine(buffer, pose, line.fromX, line.fromY, line.fromZ, line.toX, line.toY, line.toZ, color);
+        }
+        draw(renderType, buffer);
     }
 
     private static void renderOutlineBox(
@@ -508,5 +565,24 @@ public final class Render3DUtility {
 
     private static float clamp01(float value) {
         return Math.max(0.0F, Math.min(1.0F, value));
+    }
+
+    public record Quad(
+        double x0,
+        double y0,
+        double z0,
+        double x1,
+        double y1,
+        double z1,
+        double x2,
+        double y2,
+        double z2,
+        double x3,
+        double y3,
+        double z3
+    ) {
+    }
+
+    public record LineSegment(double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
     }
 }
