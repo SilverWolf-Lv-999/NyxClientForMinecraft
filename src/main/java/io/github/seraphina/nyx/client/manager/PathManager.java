@@ -13,7 +13,7 @@ public final class PathManager {
     public static final Path CAGE_PATH = CLIENT_PATH.resolve("cages");
     public static final Path HUD_PATH = CLIENT_PATH.resolve("gui");
     public static final Path BACK_GROUND_PATH = HUD_PATH.resolve("background");
-    public static final Path FRIEND = HUD_PATH.resolve("friend");
+    public static final Path FRIEND = CLIENT_PATH.resolve("friend");
 
     public static final String CLIENT = CLIENT_PATH.toString();
     public static final String CONFIG = CONFIG_PATH.toString();

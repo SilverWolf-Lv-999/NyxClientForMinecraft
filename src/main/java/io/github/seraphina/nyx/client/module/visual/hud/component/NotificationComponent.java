@@ -214,6 +214,7 @@ public final class NotificationComponent implements UIComponent<HUD> {
         return switch (state) {
             case MODULE_ENABLED -> 0xFF53E08C;
             case MODULE_DISABLED -> 0xFFFF6373;
+            case INFO_MSG -> 0xFF57C7FF;
             case DEBUG_MSG -> 0xFF3D81F7;
         };
     }

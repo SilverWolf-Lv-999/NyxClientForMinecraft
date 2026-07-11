@@ -14,7 +14,7 @@ public class Notification implements IMinecraft {
     private final long lifetime;
 
     public Notification(State state, String text) {
-        this.state = state == null ? State.DEBUG_MSG : state;
+        this.state = state == null ? State.INFO_MSG : state;
         this.text = sanitize(text);
         this.createdAt = System.currentTimeMillis();
         this.lifetime = ENTER_TIME_MS + DISPLAY_TIME_MS + EXIT_TIME_MS;
@@ -29,6 +29,10 @@ public class Notification implements IMinecraft {
 
     public static Notification debug(String message) {
         return new Notification(State.DEBUG_MSG, "Debug | " + sanitize(message));
+    }
+
+    public static Notification info(String message) {
+        return new Notification(State.INFO_MSG, "Info | " + sanitize(message));
     }
 
     public State getState() {
@@ -67,6 +71,7 @@ public class Notification implements IMinecraft {
     public enum State {
         MODULE_ENABLED,
         MODULE_DISABLED,
+        INFO_MSG,
         DEBUG_MSG
     }
 }

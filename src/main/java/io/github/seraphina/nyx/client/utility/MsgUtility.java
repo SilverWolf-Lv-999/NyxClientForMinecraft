@@ -22,10 +22,14 @@ public class MsgUtility {
 
     public static void debug(Object... msg) {
         if (!Debug.INSTANCE.isEnabled()) return;
-        info(msg);
+        push(msg, true);
     }
 
     public static void info(Object... msg) {
+        push(msg, false);
+    }
+
+    private static void push(Object[] msg, boolean debug) {
         StringBuilder sb = new StringBuilder();
         if (msg != null) {
             for (Object o : msg) {
@@ -36,7 +40,11 @@ public class MsgUtility {
         Minecraft minecraft = Minecraft.getInstance();
         Runnable action = () -> {
             minecraft.gui.getChat().addMessage(debugComponent(message));
-            NotificationManager.pushDebug(message);
+            if (debug) {
+                NotificationManager.pushDebug(message);
+            } else {
+                NotificationManager.pushInfo(message);
+            }
         };
 
         if (minecraft.isSameThread()) {
@@ -45,8 +53,6 @@ public class MsgUtility {
             minecraft.execute(action);
         }
     }
-
-
 
     private static Component debugComponent(String message) {
         return Component.empty()

@@ -35,6 +35,10 @@ public final class NotificationManager implements IMinecraft {
         pushNotification(Notification.debug(message));
     }
 
+    public static void pushInfo(String message) {
+        pushNotification(Notification.info(message));
+    }
+
     public static synchronized List<Notification> getNotifications() {
         removeExpired(System.currentTimeMillis());
         return List.copyOf(NOTIFICATIONS);
