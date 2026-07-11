@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.module.visual;
 
 import com.google.common.collect.Ordering;
+import com.mojang.authlib.GameProfile;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.StringUtility;
@@ -14,8 +15,11 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.entity.player.AvatarRenderer;
 import net.minecraft.client.resources.WaypointStyle;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
@@ -36,19 +40,25 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.PlayerRideableJumping;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.waypoints.PartialTickSupplier;
 import net.minecraft.world.waypoints.TrackedWaypoint;
 import net.minecraft.world.waypoints.Waypoint;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.ReadOnlyScoreInfo;
+import net.minecraft.world.scores.ScoreHolder;
 import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import net.neoforged.neoforge.client.extensions.common.IClientMobEffectExtensions;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -161,6 +171,37 @@ public class ModernGui extends Module {
     private static final int EFFECT_TEXT = 0xFFFFFFFF;
     private static final int EFFECT_DURATION_TEXT = 0xFFD0D4DE;
     private static final int EFFECT_TOO_LONG_TICKS = 32147;
+    private static final float TAB_FONT_SIZE = 9.0F;
+    private static final float TAB_MARGIN_TOP = 10.0F;
+    private static final float TAB_PADDING_X = 8.0F;
+    private static final float TAB_PADDING_TOP = 7.0F;
+    private static final float TAB_PADDING_BOTTOM = 7.0F;
+    private static final float TAB_RADIUS = 6.0F;
+    private static final float TAB_ROW_HEIGHT = 13.0F;
+    private static final float TAB_ROW_GAP = 2.0F;
+    private static final float TAB_COLUMN_GAP = 5.0F;
+    private static final float TAB_HEAD_SIZE = 9.0F;
+    private static final float TAB_HEAD_GAP = 4.0F;
+    private static final float TAB_PING_WIDTH = 12.0F;
+    private static final float TAB_TEXT_GAP = 5.0F;
+    private static final float TAB_MIN_COLUMN_WIDTH = 78.0F;
+    private static final float TAB_MAX_WIDTH_INSET = 50.0F;
+    private static final float TAB_MESSAGE_GAP = 6.0F;
+    private static final float TAB_MESSAGE_LINE_GAP = 1.0F;
+    private static final float TAB_SCORE_HEART_WIDTH = 45.0F;
+    private static final float TAB_SCORE_HEART_HEIGHT = 5.0F;
+    private static final int TAB_ROW_BACKGROUND = 0x22000000;
+    private static final int TAB_ROW_BORDER = 0x14FFFFFF;
+    private static final int TAB_TEXT = 0xFFFFFFFF;
+    private static final int TAB_SPECTATOR_TEXT = 0x99FFFFFF;
+    private static final int TAB_SCORE_TEXT = 0xFFD0D4DE;
+    private static final int TAB_DIVIDER = 0x33FFFFFF;
+    private static final Identifier PING_UNKNOWN_SPRITE = Identifier.withDefaultNamespace("icon/ping_unknown");
+    private static final Identifier PING_1_SPRITE = Identifier.withDefaultNamespace("icon/ping_1");
+    private static final Identifier PING_2_SPRITE = Identifier.withDefaultNamespace("icon/ping_2");
+    private static final Identifier PING_3_SPRITE = Identifier.withDefaultNamespace("icon/ping_3");
+    private static final Identifier PING_4_SPRITE = Identifier.withDefaultNamespace("icon/ping_4");
+    private static final Identifier PING_5_SPRITE = Identifier.withDefaultNamespace("icon/ping_5");
     private static final Comparator<PlayerScoreEntry> SCORE_DISPLAY_ORDER = Comparator.comparing(PlayerScoreEntry::value)
         .reversed()
         .thenComparing(PlayerScoreEntry::owner, String.CASE_INSENSITIVE_ORDER);
@@ -170,6 +211,7 @@ public class ModernGui extends Module {
     public final BoolValue contextualBar = ValueBuild.boolSetting("contextual bar", true, this);
     public final BoolValue scoreboard = ValueBuild.boolSetting("scoreboard", true, this);
     public final BoolValue potionEffects = ValueBuild.boolSetting("potion effects", true, this);
+    public final BoolValue tabList = ValueBuild.boolSetting("tab list", true, this);
 
     public boolean shouldReplaceStatusHearts() {
         return shouldReplaceStatusBars();
@@ -210,6 +252,10 @@ public class ModernGui extends Module {
             && potionEffects.getValue()
             && minecraft.player != null
             && (minecraft.screen == null || !minecraft.screen.showsActiveEffects());
+    }
+
+    public boolean shouldReplaceTabList() {
+        return isEnabled() && tabList.getValue();
     }
 
     public void renderStatusBars(GuiGraphics graphics, Player player, int x, int y, int rowSpacing, int displayHealth, int absorption, boolean flashing) {
@@ -527,6 +573,279 @@ public class ModernGui extends Module {
         entries.stream()
             .sorted(Comparator.comparingDouble((EffectEntry entry) -> Math.abs(entry.slot)).reversed())
             .forEach(entry -> renderPotionEffect(graphics, player, entry.effect, entry.slot));
+    }
+
+    public void renderPlayerTabOverlay(
+        GuiGraphics graphics,
+        int screenWidth,
+        Scoreboard scoreboard,
+        @Nullable Objective objective,
+        @Nullable Component header,
+        @Nullable Component footer,
+        List<PlayerInfo> players,
+        Function<PlayerInfo, Component> nameProvider
+    ) {
+        if (!shouldReplaceTabList() || players.isEmpty()) {
+            return;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null || minecraft.getConnection() == null) {
+            return;
+        }
+
+        FontRenderer font = FontManager.getAppleTextRenderer(TAB_FONT_SIZE);
+        TabListEntry[] entries = tabListEntries(font, scoreboard, objective, players, nameProvider);
+        int rowCount = entries.length;
+        int rowsPerColumn = rowCount;
+        int columnCount;
+        for (columnCount = 1; rowsPerColumn > 20; rowsPerColumn = (rowCount + columnCount - 1) / columnCount) {
+            columnCount++;
+        }
+
+        boolean showHeads = minecraft.isLocalServer() || minecraft.getConnection().getConnection().isEncrypted();
+        float maxNameWidth = 0.0F;
+        float maxScoreWidth = 0.0F;
+        for (TabListEntry entry : entries) {
+            maxNameWidth = Math.max(maxNameWidth, entry.nameWidth);
+            maxScoreWidth = Math.max(maxScoreWidth, entry.scoreWidth);
+        }
+
+        float scoreWidth = objective == null ? 0.0F
+            : objective.getRenderType() == ObjectiveCriteria.RenderType.HEARTS ? TAB_SCORE_HEART_WIDTH : maxScoreWidth;
+        float baseColumnWidth = (showHeads ? TAB_HEAD_SIZE + TAB_HEAD_GAP : 0.0F)
+            + maxNameWidth
+            + (scoreWidth > 0.0F ? TAB_TEXT_GAP + scoreWidth : 0.0F)
+            + TAB_PING_WIDTH
+            + TAB_TEXT_GAP * 2.0F;
+        float availableWidth = Math.max(TAB_MIN_COLUMN_WIDTH, screenWidth - TAB_MAX_WIDTH_INSET - TAB_PADDING_X * 2.0F);
+        float maxColumnWidth = Math.max(40.0F, (availableWidth - (columnCount - 1) * TAB_COLUMN_GAP) / columnCount);
+        float columnWidth = Math.min(Math.max(TAB_MIN_COLUMN_WIDTH, baseColumnWidth), maxColumnWidth);
+        float gridWidth = columnCount * columnWidth + (columnCount - 1) * TAB_COLUMN_GAP;
+
+        String[] headerLines = messageLines(font, header, availableWidth);
+        String[] footerLines = messageLines(font, footer, availableWidth);
+        float messageLineHeight = font.getLineHeight() + TAB_MESSAGE_LINE_GAP;
+        float headerWidth = maxLineWidth(font, headerLines);
+        float footerWidth = maxLineWidth(font, footerLines);
+        float contentWidth = Math.max(gridWidth, Math.max(headerWidth, footerWidth));
+        float rowAreaHeight = rowsPerColumn * TAB_ROW_HEIGHT + Math.max(0, rowsPerColumn - 1) * TAB_ROW_GAP;
+        float headerHeight = headerLines.length == 0 ? 0.0F : headerLines.length * messageLineHeight + TAB_MESSAGE_GAP;
+        float footerHeight = footerLines.length == 0 ? 0.0F : TAB_MESSAGE_GAP + footerLines.length * messageLineHeight;
+        float width = contentWidth + TAB_PADDING_X * 2.0F;
+        float height = TAB_PADDING_TOP + headerHeight + rowAreaHeight + footerHeight + TAB_PADDING_BOTTOM;
+        float x = screenWidth * 0.5F - width * 0.5F;
+        float y = TAB_MARGIN_TOP;
+        float contentX = x + TAB_PADDING_X;
+        float cursorY = y + TAB_PADDING_TOP;
+
+        Render2DUtility.drawDropShadow(x, y, width, height, TAB_RADIUS, 0.0F, 0.0F, 10.0F, SHADOW);
+        Render2DUtility.drawRoundedRect(x, y, width, height, TAB_RADIUS, BACKGROUND);
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, height, TAB_RADIUS, 1.0F, BORDER);
+
+        if (headerLines.length > 0) {
+            renderCenteredLines(font, headerLines, x + width * 0.5F, cursorY, TAB_TEXT);
+            cursorY += headerLines.length * messageLineHeight + TAB_MESSAGE_GAP * 0.5F;
+            Render2DUtility.drawRoundedRect(contentX, cursorY, contentWidth, 0.75F, 0.5F, TAB_DIVIDER);
+            cursorY += TAB_MESSAGE_GAP * 0.5F;
+        }
+
+        float gridX = x + (width - gridWidth) * 0.5F;
+        for (int index = 0; index < rowCount; index++) {
+            int column = index / rowsPerColumn;
+            int row = index % rowsPerColumn;
+            float rowX = gridX + column * (columnWidth + TAB_COLUMN_GAP);
+            float rowY = cursorY + row * (TAB_ROW_HEIGHT + TAB_ROW_GAP);
+            renderTabListRow(graphics, font, entries[index], objective, showHeads, rowX, rowY, columnWidth);
+        }
+
+        cursorY += rowAreaHeight;
+        if (footerLines.length > 0) {
+            cursorY += TAB_MESSAGE_GAP * 0.5F;
+            Render2DUtility.drawRoundedRect(contentX, cursorY, contentWidth, 0.75F, 0.5F, TAB_DIVIDER);
+            cursorY += TAB_MESSAGE_GAP * 0.5F;
+            renderCenteredLines(font, footerLines, x + width * 0.5F, cursorY, TAB_SCORE_TEXT);
+        }
+    }
+
+    private TabListEntry[] tabListEntries(
+        FontRenderer font,
+        Scoreboard scoreboard,
+        @Nullable Objective objective,
+        List<PlayerInfo> players,
+        Function<PlayerInfo, Component> nameProvider
+    ) {
+        List<TabListEntry> entries = new ArrayList<>(players.size());
+        for (PlayerInfo playerInfo : players) {
+            int defaultNameColor = playerInfo.getGameMode() == GameType.SPECTATOR ? TAB_SPECTATOR_TEXT : TAB_TEXT;
+            TextSegment[] name = textSegments(nameProvider.apply(playerInfo), defaultNameColor);
+            int score = 0;
+            TextSegment[] formattedScore = new TextSegment[0];
+            float scoreWidth = 0.0F;
+
+            if (objective != null) {
+                ScoreHolder scoreHolder = ScoreHolder.fromGameProfile(playerInfo.getProfile());
+                ReadOnlyScoreInfo scoreInfo = scoreboard.getPlayerScoreInfo(scoreHolder, objective);
+                if (scoreInfo != null) {
+                    score = scoreInfo.value();
+                }
+
+                if (objective.getRenderType() != ObjectiveCriteria.RenderType.HEARTS) {
+                    formattedScore = textSegments(
+                        ReadOnlyScoreInfo.safeFormatValue(scoreInfo, objective.numberFormatOrDefault(StyledFormat.PLAYER_LIST_DEFAULT)),
+                        TAB_SCORE_TEXT
+                    );
+                    scoreWidth = textWidth(font, formattedScore);
+                }
+            }
+
+            entries.add(new TabListEntry(playerInfo, name, score, formattedScore, textWidth(font, name), scoreWidth));
+        }
+
+        return entries.toArray(TabListEntry[]::new);
+    }
+
+    private void renderTabListRow(
+        GuiGraphics graphics,
+        FontRenderer font,
+        TabListEntry entry,
+        @Nullable Objective objective,
+        boolean showHead,
+        float x,
+        float y,
+        float width
+    ) {
+        Render2DUtility.drawRoundedRect(x, y, width, TAB_ROW_HEIGHT, 4.0F, TAB_ROW_BACKGROUND);
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, TAB_ROW_HEIGHT, 4.0F, 0.75F, TAB_ROW_BORDER);
+
+        float textX = x + TAB_TEXT_GAP;
+        if (showHead) {
+            renderTabPlayerHead(graphics, entry.playerInfo, textX, y + (TAB_ROW_HEIGHT - TAB_HEAD_SIZE) * 0.5F);
+            textX += TAB_HEAD_SIZE + TAB_HEAD_GAP;
+        }
+
+        float pingX = x + width - TAB_PING_WIDTH;
+        float scoreRight = pingX - TAB_TEXT_GAP;
+        float textY = y + (TAB_ROW_HEIGHT - font.getLineHeight()) * 0.5F - 0.5F;
+        boolean canRenderScore = objective != null && entry.playerInfo.getGameMode() != GameType.SPECTATOR;
+        float scoreWidth = canRenderScore
+            ? objective.getRenderType() == ObjectiveCriteria.RenderType.HEARTS ? TAB_SCORE_HEART_WIDTH : entry.scoreWidth
+            : 0.0F;
+        float scoreLeft = scoreWidth > 0.0F ? scoreRight - scoreWidth : scoreRight;
+        float nameRight = scoreWidth > 0.0F ? scoreLeft - TAB_TEXT_GAP : scoreRight - TAB_TEXT_GAP;
+        drawTrimmedTextSegments(font, entry.name, textX, textY, Math.max(0.0F, nameRight - textX));
+
+        if (canRenderScore && scoreWidth > 0.0F) {
+            if (objective.getRenderType() == ObjectiveCriteria.RenderType.HEARTS) {
+                renderTabHealthScore(entry.score, scoreLeft, y + (TAB_ROW_HEIGHT - TAB_SCORE_HEART_HEIGHT) * 0.5F, scoreWidth);
+            } else {
+                float scoreX = Math.max(textX, scoreLeft);
+                drawTrimmedTextSegments(font, entry.formattedScore, scoreX, textY, scoreRight - scoreX);
+            }
+        }
+
+        graphics.blitSprite(
+            RenderPipelines.GUI_TEXTURED,
+            pingSprite(entry.playerInfo),
+            Math.round(pingX + 1.0F),
+            Math.round(y + (TAB_ROW_HEIGHT - 8.0F) * 0.5F),
+            10,
+            8
+        );
+    }
+
+    private void renderTabPlayerHead(GuiGraphics graphics, PlayerInfo playerInfo, float x, float y) {
+        Minecraft minecraft = Minecraft.getInstance();
+        GameProfile profile = playerInfo.getProfile();
+        Player player = minecraft.level == null ? null : minecraft.level.getPlayerByUUID(profile.id());
+        boolean upsideDown = player != null && AvatarRenderer.isPlayerUpsideDown(player);
+        PlayerFaceRenderer.draw(
+            graphics,
+            playerInfo.getSkin().body().texturePath(),
+            Math.round(x),
+            Math.round(y),
+            Math.round(TAB_HEAD_SIZE),
+            playerInfo.showHat(),
+            upsideDown,
+            -1
+        );
+    }
+
+    private void renderTabHealthScore(int score, float x, float y, float width) {
+        float health = clamp(score, 0.0F, 20.0F);
+        Render2DUtility.drawRoundedRect(x, y, width, TAB_SCORE_HEART_HEIGHT, TAB_SCORE_HEART_HEIGHT * 0.5F, TRACK);
+        float fillWidth = width * health / 20.0F;
+        if (fillWidth > 0.25F) {
+            Render2DUtility.drawRoundedHorizontalGradientRect(
+                x,
+                y,
+                fillWidth,
+                TAB_SCORE_HEART_HEIGHT,
+                TAB_SCORE_HEART_HEIGHT * 0.5F,
+                HEALTH,
+                HEALTH_DARK
+            );
+        }
+
+        FontRenderer smallFont = FontManager.getAppleTextRenderer(6.5F);
+        String text = formatAmount(score * 0.5F);
+        smallFont.drawCenteredString(text, x + width * 0.5F, y - (smallFont.getLineHeight() - TAB_SCORE_HEART_HEIGHT) * 0.5F - 0.25F, TAB_TEXT);
+    }
+
+    private Identifier pingSprite(PlayerInfo playerInfo) {
+        int latency = playerInfo.getLatency();
+        if (latency < 0) {
+            return PING_UNKNOWN_SPRITE;
+        }
+        if (latency < 150) {
+            return PING_5_SPRITE;
+        }
+        if (latency < 300) {
+            return PING_4_SPRITE;
+        }
+        if (latency < 600) {
+            return PING_3_SPRITE;
+        }
+        if (latency < 1000) {
+            return PING_2_SPRITE;
+        }
+        return PING_1_SPRITE;
+    }
+
+    private String[] messageLines(FontRenderer font, @Nullable Component component, float maxWidth) {
+        if (component == null) {
+            return new String[0];
+        }
+
+        String text = component.getString();
+        if (text.isBlank()) {
+            return new String[0];
+        }
+
+        String[] rawLines = text.split("\\R");
+        List<String> lines = new ArrayList<>(rawLines.length);
+        for (String rawLine : rawLines) {
+            if (!rawLine.isBlank()) {
+                lines.add(trimToWidth(font, rawLine, maxWidth));
+            }
+        }
+
+        return lines.toArray(String[]::new);
+    }
+
+    private float maxLineWidth(FontRenderer font, String[] lines) {
+        float width = 0.0F;
+        for (String line : lines) {
+            width = Math.max(width, font.getStringWidth(line));
+        }
+        return width;
+    }
+
+    private void renderCenteredLines(FontRenderer font, String[] lines, float centerX, float y, int color) {
+        float lineHeight = font.getLineHeight() + TAB_MESSAGE_LINE_GAP;
+        for (int index = 0; index < lines.length; index++) {
+            font.drawCenteredString(lines[index], centerX, y + index * lineHeight, color);
+        }
     }
 
     private void renderPotionEffect(GuiGraphics graphics, LocalPlayer player, MobEffectInstance effect, float slot) {
@@ -970,6 +1289,9 @@ public class ModernGui extends Module {
     }
 
     private record ScoreboardEntry(TextSegment[] name, TextSegment[] score, float nameWidth, float scoreWidth) {
+    }
+
+    private record TabListEntry(PlayerInfo playerInfo, TextSegment[] name, int score, TextSegment[] formattedScore, float nameWidth, float scoreWidth) {
     }
 
     private record TextSegment(String text, int color, boolean glitch) {

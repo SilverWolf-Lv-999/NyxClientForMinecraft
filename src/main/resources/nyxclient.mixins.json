@@ -35,7 +35,8 @@
     "MultiPlayerGameModeMixin",
     "OptionScreenMixin",
     "ParticleEngineMixin",
-    "PlayerMixin"
+    "PlayerMixin",
+    "PlayerTabOverlayMixin"
   ],
   "injectors": {
     "defaultRequire": 1
