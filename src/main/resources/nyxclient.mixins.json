@@ -16,6 +16,7 @@
     "EntityMixin",
     "FontMixin",
     "GameRendererMixin",
+    "GuiAccessor",
     "GuiMixin",
     "ItemInHandRendererMixin",
     "ItemMixin",
