@@ -69,11 +69,12 @@ public class MaceAura extends Module {
     private static final int FIREWORK_MACE_SWITCH_SETTLE_TICKS = 1;
     private static final double FIREWORK_ARMOR_SWITCH_RANGE = 5.0D;
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
-    private static final int FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS = 12;
-    private static final double FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL = 1.0D;
-    private static final double FIREWORK_POST_ATTACK_LAUNCH_MIN_HEIGHT = 3.0D;
+    private static final int FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS = 8;
+    private static final int FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_WAIT_TICKS = 8;
+    private static final double FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL = 4.0D;
+    private static final double FIREWORK_POST_ATTACK_DIRECT_DIVE_MIN_HEIGHT = 8.0D;
     private static final double FIREWORK_POST_ATTACK_LAUNCH_UPWARD_VELOCITY = 0.02D;
-    private static final double FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_UPWARD_VELOCITY = 0.08D;
+    private static final double FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_UPWARD_VELOCITY = 0.16D;
     private static final int FIREWORK_GRIM_FALL_FLYING_READY_TICKS = 3;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
     private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
@@ -544,6 +545,10 @@ public class MaceAura extends Module {
             return;
         }
         resetFireworkGlideJumpState();
+
+        if (fireworkFallFlyingTicks < FIREWORK_GRIM_FALL_FLYING_READY_TICKS) {
+            return;
+        }
 
         if (!ensureFireworkRocketSlot()) {
             return;
@@ -1057,7 +1062,8 @@ public class MaceAura extends Module {
     }
 
     private boolean tryUsePostAttackLaunchForDive(double launchHeight) {
-        if (!isPostAttackLaunchEnoughForDive(launchHeight)) {
+        if (!isPostAttackLaunchEnoughForDive(launchHeight)
+                || !isPostAttackLaunchStableForDive()) {
             return false;
         }
 
@@ -1095,18 +1101,35 @@ public class MaceAura extends Module {
 
     private boolean isPostAttackLaunchEnoughForDive(double launchHeight) {
         double requiredHeight = Math.max(
-                FIREWORK_POST_ATTACK_LAUNCH_MIN_HEIGHT,
+                FIREWORK_POST_ATTACK_DIRECT_DIVE_MIN_HEIGHT,
                 blockheight.getValue() - FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL
         );
         return launchHeight >= requiredHeight;
     }
 
     private boolean shouldWaitForPostAttackLaunch(double launchHeight) {
-        return hasPostAttackLaunchStart()
-                && stageTicks < FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS
-                && !mc.player.onGround()
-                && mc.player.getDeltaMovement().y > FIREWORK_POST_ATTACK_LAUNCH_UPWARD_VELOCITY
+        if (!hasPostAttackLaunchStart()
+                || mc.player.onGround()) {
+            return false;
+        }
+
+        double upwardVelocity = mc.player.getDeltaMovement().y;
+        if (upwardVelocity <= FIREWORK_POST_ATTACK_LAUNCH_UPWARD_VELOCITY) {
+            return false;
+        }
+
+        if (isPostAttackLaunchEnoughForDive(launchHeight)) {
+            return upwardVelocity > FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_UPWARD_VELOCITY
+                    && stageTicks < FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_WAIT_TICKS;
+        }
+
+        return stageTicks < FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS
                 && launchHeight < blockheight.getValue();
+    }
+
+    private boolean isPostAttackLaunchStableForDive() {
+        return mc.player.getDeltaMovement().y <= FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_UPWARD_VELOCITY
+                || stageTicks >= FIREWORK_POST_ATTACK_DIRECT_DIVE_MAX_WAIT_TICKS;
     }
 
     private void preparePostAttackLaunchDive() {
@@ -1543,6 +1566,8 @@ public class MaceAura extends Module {
     }
 
     private void tickActionDelays() {
+        tickFireworkFallFlyingState();
+
         if (maceSwitchDelayTicks > 0) {
             maceSwitchDelayTicks--;
         }
@@ -1557,6 +1582,14 @@ public class MaceAura extends Module {
 
         if (fireworkUseRetryDelayTicks > 0) {
             fireworkUseRetryDelayTicks--;
+        }
+    }
+
+    private void tickFireworkFallFlyingState() {
+        if (mc.player != null && mc.player.isFallFlying()) {
+            fireworkFallFlyingTicks++;
+        } else {
+            fireworkFallFlyingTicks = 0;
         }
     }
 
@@ -1694,6 +1727,7 @@ public class MaceAura extends Module {
         attackHoldTicks = 0;
         postUseItemSlotDelayTicks = 0;
         fireworkUseRetryDelayTicks = 0;
+        fireworkFallFlyingTicks = 0;
         queuedHotbarSlot = InventoryUtility.NOT_FOUND;
         restoreQueuedWindChargeSlotNow();
         resetFireworkState();
@@ -1719,6 +1753,7 @@ public class MaceAura extends Module {
         fireworkDiveBoostUsed = false;
         fireworkAllowElytraMaceAttack = false;
         fireworkUseRetryDelayTicks = 0;
+        fireworkFallFlyingTicks = 0;
         resetFireworkGlideJumpState();
     }
 
