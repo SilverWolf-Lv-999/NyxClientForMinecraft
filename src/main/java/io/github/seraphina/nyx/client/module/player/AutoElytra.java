@@ -263,7 +263,7 @@ public class AutoElytra extends Module {
             return false;
         }
 
-        return InventoryUtility.selectHotbarSlot(activeElytra.elytraSlot, true);
+        return InventoryUtility.selectHotbarSlot(activeElytra.elytraSlot);
     }
 
     private void handleLostElytraEquip() {
@@ -342,7 +342,7 @@ public class AutoElytra extends Module {
             return;
         }
 
-        if (InventoryUtility.selectHotbarSlot(activeElytra.originalSelectedSlot, true)) {
+        if (InventoryUtility.selectHotbarSlot(activeElytra.originalSelectedSlot)) {
             activeElytra.selectedSlotRestored = true;
         }
     }
