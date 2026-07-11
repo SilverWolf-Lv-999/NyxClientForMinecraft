@@ -6,6 +6,8 @@
   "mixins": [
   ],
   "client": [
+    "AbstractContainerScreenAccessor",
+    "AbstractContainerScreenMixin",
     "BlockCollisionsMixin",
     "CameraMixin",
     "ChatScreenMixin",
@@ -14,8 +16,10 @@
     "ConnectionMixin",
     "ContainerEventHandlerMixin",
     "EntityMixin",
+    "EffectsInInventoryMixin",
     "FontMixin",
     "GameRendererMixin",
+    "GuiGraphicsMixin",
     "GuiAccessor",
     "GuiMixin",
     "ItemInHandRendererMixin",
@@ -36,7 +40,8 @@
     "OptionScreenMixin",
     "ParticleEngineMixin",
     "PlayerMixin",
-    "PlayerTabOverlayMixin"
+    "PlayerTabOverlayMixin",
+    "RecipeBookComponentMixin"
   ],
   "injectors": {
     "defaultRequire": 1

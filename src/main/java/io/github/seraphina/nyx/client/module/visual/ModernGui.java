@@ -16,13 +16,16 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.entity.player.AvatarRenderer;
 import net.minecraft.client.resources.WaypointStyle;
 import net.minecraft.core.Holder;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.network.chat.numbers.NumberFormat;
@@ -35,10 +38,12 @@ import net.minecraft.util.StringUtil;
 import net.minecraft.world.TickRateManager;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffectUtil;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.PlayerRideableJumping;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.waypoints.PartialTickSupplier;
@@ -58,6 +63,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -159,12 +165,12 @@ public class ModernGui extends Module {
     private static final float EFFECT_RADIUS = 6.0F;
     private static final float EFFECT_LEFT_BASE = 14.0F;
     private static final float EFFECT_LEFT_STEP = 3.25F;
-    private static final float EFFECT_ROW_STEP = 15.0F;
+    private static final float EFFECT_ROW_STEP = 19.5F;
     private static final float EFFECT_ICON_LEFT = 12.0F;
     private static final float EFFECT_ICON_SIZE = 14.0F;
     private static final float EFFECT_ICON_GAP = 6.0F;
     private static final float EFFECT_TEXT_RIGHT = 9.0F;
-    private static final float EFFECT_SIZE_SCALE = 0.6F;
+    private static final float EFFECT_SIZE_SCALE = 0.78F;
     private static final float EFFECT_MAX_SCALE = 0.89F;
     private static final float EFFECT_MIN_SCALE = 0.62F;
     private static final float EFFECT_SCALE_STEP = 0.11F;
@@ -205,6 +211,37 @@ public class ModernGui extends Module {
     private static final Comparator<PlayerScoreEntry> SCORE_DISPLAY_ORDER = Comparator.comparing(PlayerScoreEntry::value)
         .reversed()
         .thenComparing(PlayerScoreEntry::owner, String.CASE_INSENSITIVE_ORDER);
+    private static final float CONTAINER_RADIUS = 8.0F;
+    private static final float CONTAINER_INSET = 5.0F;
+    private static final float CONTAINER_SLOT_SIZE = 18.0F;
+    private static final float CONTAINER_SLOT_RADIUS = 4.0F;
+    private static final int CONTAINER_UNDERLAY = 0xFF08090D;
+    private static final int CONTAINER_OVERLAY = 0xFA0C0D11;
+    private static final int CONTAINER_TITLE_BAR = 0xAA141620;
+    private static final int CONTAINER_SLOT = 0x66141620;
+    private static final int CONTAINER_SLOT_EMPTY = 0x44141620;
+    private static final int CONTAINER_SLOT_BORDER = 0x20FFFFFF;
+    private static final int CONTAINER_SLOT_HOVER = 0x553D81F7;
+    private static final int CONTAINER_SLOT_HOVER_BORDER = 0xCC57C7FF;
+    private static final int CONTAINER_TEXT = 0xFFFFFFFF;
+    private static final int CONTAINER_SECONDARY_TEXT = 0xFFC4CBD8;
+    private static final float CONTAINER_TITLE_SIZE = 9.0F;
+    private static final float CONTAINER_LABEL_SIZE = 8.0F;
+    private static final float INVENTORY_EFFECT_WIDTH = 118.0F;
+    private static final float INVENTORY_EFFECT_COMPACT_WIDTH = 28.0F;
+    private static final float INVENTORY_EFFECT_HEIGHT = 24.0F;
+    private static final float INVENTORY_EFFECT_RADIUS = 6.0F;
+    private static final float INVENTORY_EFFECT_GAP = 3.0F;
+    private static final float INVENTORY_EFFECT_TEXT_SIZE = 8.0F;
+    private static final float RECIPE_BOOK_WIDTH = 147.0F;
+    private static final float RECIPE_BOOK_HEIGHT = 166.0F;
+    private static final float RECIPE_BOOK_RADIUS = 8.0F;
+    private static final float RECIPE_BOOK_HEADER_HEIGHT = 28.0F;
+    private static final String MINECRAFT_NAMESPACE = "minecraft";
+    private static final String CONTAINER_TEXTURE_PREFIX = "textures/gui/container/";
+    private static final String RECIPE_BOOK_TEXTURE = "textures/gui/recipe_book.png";
+    private int containerTextureReplacementDepth;
+    private int recipeBookTextureReplacementDepth;
 
     public final BoolValue statusBars = ValueBuild.boolSetting("status bars", true, this);
     public final BoolValue hotbar = ValueBuild.boolSetting("hotbar", true, this);
@@ -212,6 +249,7 @@ public class ModernGui extends Module {
     public final BoolValue scoreboard = ValueBuild.boolSetting("scoreboard", true, this);
     public final BoolValue potionEffects = ValueBuild.boolSetting("potion effects", true, this);
     public final BoolValue tabList = ValueBuild.boolSetting("tab list", true, this);
+    public final BoolValue containers = ValueBuild.boolSetting("containers", true, this);
 
     public boolean shouldReplaceStatusHearts() {
         return shouldReplaceStatusBars();
@@ -254,8 +292,46 @@ public class ModernGui extends Module {
             && (minecraft.screen == null || !minecraft.screen.showsActiveEffects());
     }
 
+    public boolean shouldReplaceInventoryPotionEffects() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return isEnabled() && potionEffects.getValue() && minecraft.player != null;
+    }
+
     public boolean shouldReplaceTabList() {
         return isEnabled() && tabList.getValue();
+    }
+
+    public boolean shouldReplaceContainers() {
+        return isEnabled() && containers.getValue();
+    }
+
+    public void beginContainerTextureReplacement() {
+        this.containerTextureReplacementDepth++;
+    }
+
+    public void endContainerTextureReplacement() {
+        this.containerTextureReplacementDepth = Math.max(0, this.containerTextureReplacementDepth - 1);
+    }
+
+    public void beginRecipeBookTextureReplacement() {
+        this.recipeBookTextureReplacementDepth++;
+    }
+
+    public void endRecipeBookTextureReplacement() {
+        this.recipeBookTextureReplacementDepth = Math.max(0, this.recipeBookTextureReplacementDepth - 1);
+    }
+
+    public boolean shouldSkipModernizedTexture(Identifier texture) {
+        if (!shouldReplaceContainers() || texture == null || !MINECRAFT_NAMESPACE.equals(texture.getNamespace())) {
+            return false;
+        }
+
+        String path = texture.getPath();
+        return (this.containerTextureReplacementDepth > 0
+            && path.startsWith(CONTAINER_TEXTURE_PREFIX)
+            && path.endsWith(".png"))
+            || (this.recipeBookTextureReplacementDepth > 0
+            && RECIPE_BOOK_TEXTURE.equals(path));
     }
 
     public void renderStatusBars(GuiGraphics graphics, Player player, int x, int y, int rowSpacing, int displayHealth, int absorption, boolean flashing) {
@@ -447,6 +523,88 @@ public class ModernGui extends Module {
         renderLocatorWaypoints(graphics, deltaTracker);
     }
 
+    public void renderContainerBackground(GuiGraphics graphics, int left, int top, int width, int height, List<Slot> slots) {
+        if (!shouldReplaceContainers()) {
+            return;
+        }
+
+        float x = left;
+        float y = top;
+        float w = width;
+        float h = height;
+        Render2DUtility.drawRoundedRect(x, y, w, h, 0.0F, CONTAINER_UNDERLAY);
+        Render2DUtility.drawDropShadow(x, y, w, h, CONTAINER_RADIUS, 0.0F, 6.0F, 18.0F, SHADOW);
+        Render2DUtility.drawRoundedRect(x, y, w, h, CONTAINER_RADIUS, CONTAINER_OVERLAY);
+        Render2DUtility.drawRoundedRect(x + CONTAINER_INSET, y + CONTAINER_INSET, w - CONTAINER_INSET * 2.0F, 16.0F, 5.0F, CONTAINER_TITLE_BAR);
+        Render2DUtility.drawOutlineRoundedRect(x, y, w, h, CONTAINER_RADIUS, 1.0F, BORDER);
+
+        for (Slot slot : slots) {
+            if (slot.isActive()) {
+                renderContainerSlotBackground(graphics, x + slot.x - 1.0F, y + slot.y - 1.0F, slot.hasItem(), false);
+            }
+        }
+    }
+
+    public void renderRecipeBookBackground(GuiGraphics graphics, int x, int y) {
+        if (!shouldReplaceContainers()) {
+            return;
+        }
+
+        Render2DUtility.drawRoundedRect(x, y, RECIPE_BOOK_WIDTH, RECIPE_BOOK_HEIGHT, 0.0F, CONTAINER_UNDERLAY);
+        Render2DUtility.drawDropShadow(x, y, RECIPE_BOOK_WIDTH, RECIPE_BOOK_HEIGHT, RECIPE_BOOK_RADIUS, 0.0F, 6.0F, 18.0F, SHADOW);
+        Render2DUtility.drawRoundedRect(x, y, RECIPE_BOOK_WIDTH, RECIPE_BOOK_HEIGHT, RECIPE_BOOK_RADIUS, CONTAINER_OVERLAY);
+        Render2DUtility.drawRoundedRect(
+            x + CONTAINER_INSET,
+            y + CONTAINER_INSET,
+            RECIPE_BOOK_WIDTH - CONTAINER_INSET * 2.0F,
+            RECIPE_BOOK_HEADER_HEIGHT,
+            5.0F,
+            CONTAINER_TITLE_BAR
+        );
+        Render2DUtility.drawOutlineRoundedRect(x, y, RECIPE_BOOK_WIDTH, RECIPE_BOOK_HEIGHT, RECIPE_BOOK_RADIUS, 1.0F, BORDER);
+    }
+
+    public void renderContainerSlot(GuiGraphics graphics, Slot slot, boolean hovered) {
+        if (!shouldReplaceContainers() || !slot.isActive()) {
+            return;
+        }
+
+        renderContainerSlotBackground(graphics, slot.x - 1.0F, slot.y - 1.0F, slot.hasItem(), hovered);
+    }
+
+    public void renderContainerSlotHighlight(GuiGraphics graphics, Slot slot) {
+        if (!shouldReplaceContainers() || slot == null || !slot.isHighlightable()) {
+            return;
+        }
+
+        float x = slot.x - 3.0F;
+        float y = slot.y - 3.0F;
+        Render2DUtility.drawRoundedRect(x, y, 22.0F, 22.0F, 5.0F, CONTAINER_SLOT_HOVER);
+        Render2DUtility.drawOutlineRoundedRect(x, y, 22.0F, 22.0F, 5.0F, 1.0F, CONTAINER_SLOT_HOVER_BORDER);
+    }
+
+    public void renderContainerLabels(
+        GuiGraphics graphics,
+        Component title,
+        Component inventoryTitle,
+        int titleX,
+        int titleY,
+        int inventoryX,
+        int inventoryY,
+        int width
+    ) {
+        if (!shouldReplaceContainers()) {
+            return;
+        }
+
+        FontRenderer titleFont = FontManager.getAppleTextRenderer(CONTAINER_TITLE_SIZE);
+        FontRenderer labelFont = FontManager.getAppleTextRenderer(CONTAINER_LABEL_SIZE);
+        String titleText = trimToWidth(titleFont, title.getString(), Math.max(12.0F, width - titleX - 8.0F));
+        String inventoryText = trimToWidth(labelFont, inventoryTitle.getString(), Math.max(12.0F, width - inventoryX - 8.0F));
+        titleFont.drawString(titleText, titleX, titleY - 1.0F, CONTAINER_TEXT);
+        labelFont.drawString(inventoryText, inventoryX, inventoryY - 0.5F, CONTAINER_SECONDARY_TEXT);
+    }
+
     public void renderExperienceLevel(GuiGraphics graphics) {
         if (!shouldReplaceExperienceLevel()) {
             return;
@@ -573,6 +731,75 @@ public class ModernGui extends Module {
         entries.stream()
             .sorted(Comparator.comparingDouble((EffectEntry entry) -> Math.abs(entry.slot)).reversed())
             .forEach(entry -> renderPotionEffect(graphics, player, entry.effect, entry.slot));
+    }
+
+    public void renderInventoryPotionEffects(
+        GuiGraphics graphics,
+        AbstractContainerScreen<?> screen,
+        int screenWidth,
+        int left,
+        int top,
+        int imageWidth,
+        int mouseX,
+        int mouseY
+    ) {
+        if (!shouldReplaceInventoryPotionEffects()) {
+            return;
+        }
+
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null || player.getActiveEffects().isEmpty()) {
+            return;
+        }
+
+        List<MobEffectInstance> effects = new ArrayList<>();
+        for (MobEffectInstance effect : Ordering.natural().sortedCopy(player.getActiveEffects())) {
+            IClientMobEffectExtensions renderer = IClientMobEffectExtensions.of(effect);
+            if (!renderer.isVisibleInGui(effect) || !effect.showIcon()) {
+                continue;
+            }
+
+            effects.add(effect);
+        }
+
+        if (effects.isEmpty()) {
+            return;
+        }
+
+        float rightX = left + imageWidth + 2.0F;
+        float rightSpace = screenWidth - rightX;
+        float leftSpace = left - 2.0F;
+        boolean renderRight = rightSpace >= INVENTORY_EFFECT_WIDTH || rightSpace >= leftSpace;
+        float availableWidth = renderRight ? rightSpace : leftSpace;
+        if (availableWidth < INVENTORY_EFFECT_COMPACT_WIDTH) {
+            return;
+        }
+
+        boolean compact = availableWidth < INVENTORY_EFFECT_WIDTH;
+        float width = compact ? INVENTORY_EFFECT_COMPACT_WIDTH : Math.min(INVENTORY_EFFECT_WIDTH, availableWidth);
+        float x = renderRight ? rightX : left - 2.0F - width;
+        float rowStep = effects.size() > 5
+            ? Math.max(INVENTORY_EFFECT_HEIGHT * 0.55F, 132.0F / (effects.size() - 1))
+            : INVENTORY_EFFECT_HEIGHT + INVENTORY_EFFECT_GAP;
+        MobEffectInstance hovered = null;
+
+        for (int index = 0; index < effects.size(); index++) {
+            MobEffectInstance effect = effects.get(index);
+            float y = top + index * rowStep;
+            renderInventoryPotionEffect(graphics, player, effect, x, y, width, compact);
+            if (mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + INVENTORY_EFFECT_HEIGHT) {
+                hovered = effect;
+            }
+        }
+
+        if (hovered != null) {
+            List<Component> tooltip = List.of(
+                effectNameComponent(hovered),
+                MobEffectUtil.formatDuration(hovered, 1.0F, player.level().tickRateManager().tickrate())
+            );
+            tooltip = net.neoforged.neoforge.client.ClientHooks.getEffectTooltip(screen, hovered, tooltip);
+            graphics.setTooltipForNextFrame(screen.getFont(), tooltip, Optional.empty(), mouseX, mouseY);
+        }
     }
 
     public void renderPlayerTabOverlay(
@@ -885,6 +1112,44 @@ public class ModernGui extends Module {
         font.drawString(duration, textX, textY, EFFECT_DURATION_TEXT);
     }
 
+    private void renderInventoryPotionEffect(
+        GuiGraphics graphics,
+        LocalPlayer player,
+        MobEffectInstance effect,
+        float x,
+        float y,
+        float width,
+        boolean compact
+    ) {
+        float height = INVENTORY_EFFECT_HEIGHT;
+        int accent = 0xFF000000 | effect.getEffect().value().getColor();
+        Render2DUtility.drawDropShadow(x, y, width, height, INVENTORY_EFFECT_RADIUS, 0.0F, 0.0F, 10.0F, SHADOW);
+        Render2DUtility.drawRoundedRect(x, y, width, height, INVENTORY_EFFECT_RADIUS, BACKGROUND);
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, height, INVENTORY_EFFECT_RADIUS, 1.0F, BORDER);
+
+        if (compact) {
+            renderPotionIcon(graphics, effect, x + (width - EFFECT_ICON_SIZE) * 0.5F, y + (height - EFFECT_ICON_SIZE) * 0.5F, EFFECT_ICON_SIZE);
+            return;
+        }
+
+        Render2DUtility.drawRoundedRect(x + 5.0F, y + 7.0F, 3.0F, height - 14.0F, 1.5F, accent);
+        renderPotionIcon(graphics, effect, x + EFFECT_ICON_LEFT, y + (height - EFFECT_ICON_SIZE) * 0.5F, EFFECT_ICON_SIZE);
+
+        FontRenderer font = FontManager.getAppleTextRenderer(INVENTORY_EFFECT_TEXT_SIZE);
+        String duration = effectDuration(player, effect);
+        String separator = " | ";
+        String name = effectName(effect);
+        float textX = x + EFFECT_ICON_LEFT + EFFECT_ICON_SIZE + EFFECT_ICON_GAP;
+        float textMaxWidth = width - (textX - x) - EFFECT_TEXT_RIGHT;
+        name = trimToWidth(font, name, Math.max(0.0F, textMaxWidth - font.getStringWidth(separator + duration)));
+        float textY = y + (height - font.getLineHeight()) * 0.5F - 0.5F;
+        font.drawString(name, textX, textY, EFFECT_TEXT);
+        textX += font.getStringWidth(name);
+        font.drawString(separator, textX, textY, EFFECT_DURATION_TEXT);
+        textX += font.getStringWidth(separator);
+        font.drawString(duration, textX, textY, EFFECT_DURATION_TEXT);
+    }
+
     private void renderPotionIcon(GuiGraphics graphics, MobEffectInstance effect, float x, float y, float size) {
         int iconX = Math.round(x);
         int iconY = Math.round(y);
@@ -893,11 +1158,28 @@ public class ModernGui extends Module {
         graphics.blitSprite(RenderPipelines.GUI_TEXTURED, Gui.getMobEffectSprite(holder), iconX, iconY, iconSize, iconSize);
     }
 
+    private void renderContainerSlotBackground(GuiGraphics graphics, float x, float y, boolean hasItem, boolean hovered) {
+        int fill = hovered ? CONTAINER_SLOT_HOVER : hasItem ? CONTAINER_SLOT : CONTAINER_SLOT_EMPTY;
+        int border = hovered ? CONTAINER_SLOT_HOVER_BORDER : CONTAINER_SLOT_BORDER;
+        Render2DUtility.drawRoundedRect(x, y, CONTAINER_SLOT_SIZE, CONTAINER_SLOT_SIZE, CONTAINER_SLOT_RADIUS, fill);
+        Render2DUtility.drawOutlineRoundedRect(x, y, CONTAINER_SLOT_SIZE, CONTAINER_SLOT_SIZE, CONTAINER_SLOT_RADIUS, 1.0F, border);
+    }
+
     private String effectName(MobEffectInstance effect) {
         String name = effect.getEffect().value().getDisplayName().getString();
         int amplifier = effect.getAmplifier();
         if (amplifier >= 1 && amplifier <= 9) {
             name += " " + Component.translatable("enchantment.level." + (amplifier + 1)).getString();
+        }
+
+        return name;
+    }
+
+    private Component effectNameComponent(MobEffectInstance effect) {
+        MutableComponent name = effect.getEffect().value().getDisplayName().copy();
+        int amplifier = effect.getAmplifier();
+        if (amplifier >= 1 && amplifier <= 9) {
+            name.append(CommonComponents.SPACE).append(Component.translatable("enchantment.level." + (amplifier + 1)));
         }
 
         return name;
