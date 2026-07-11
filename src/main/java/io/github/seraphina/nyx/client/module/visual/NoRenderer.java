@@ -15,4 +15,10 @@ public class NoRenderer extends Module {
     public final BoolValue noview = ValueBuild.boolSetting("noview", false, this);
 
     public final BoolValue noparticles = ValueBuild.boolSetting("noparticles", false, this);
+
+    public final BoolValue totemAnimation = ValueBuild.boolSetting("totem animation", false, this);
+
+    public final BoolValue deathEntity = ValueBuild.boolSetting("death entity", false, this);
+
+    public final BoolValue pumpkin = ValueBuild.boolSetting("pumpkin", false, this);
 }

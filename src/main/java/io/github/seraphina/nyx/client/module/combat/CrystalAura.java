@@ -3,9 +3,12 @@ package io.github.seraphina.nyx.client.module.combat;
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.bus.EventHandler;
 import io.github.seraphina.nyx.client.events.bus.EventPriority;
+import io.github.seraphina.nyx.client.events.impl.JumpEvent;
+import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
 import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
+import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
 import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
@@ -58,8 +61,10 @@ public class CrystalAura extends Module {
     private static final int POST_USE_SLOT_DELAY_TICKS = 3;
     private static final int POST_ATTACK_PLACE_DELAY_TICKS = 2;
     private static final double EXISTING_BASE_DAMAGE_RATIO = 0.75D;
+    private static final float ACTION_TARGET_ROTATION_EPSILON = 3.0F;
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DEDUP_PITCH_STEP = 1.0F;
+    private static final float OUTGOING_ROTATION_DUPLICATE_EPSILON = 1.0E-4F;
     private static final Direction[] PLACE_DIRECTIONS = {
             Direction.UP,
             Direction.NORTH,
@@ -133,9 +138,13 @@ public class CrystalAura extends Module {
     private int postUseSlotDelayTicks;
     private int postAttackPlaceDelayTicks;
     private boolean usedInteractionThisTick;
-    private Vector2f forcedOutgoingRotations;
     private Vector2f lastOutgoingRotations;
-    private Vector2f syncedRotations;
+    private Vector2f lastControlledRotations;
+    private Vector2f movementFixRotations;
+    private QueuedAction queuedAction;
+    private QueuedAction syncedAction;
+    private boolean controllingRotations;
+    private int placeRotationVariant;
 
     @Override
     public void onEnable() {
@@ -151,6 +160,7 @@ public class CrystalAura extends Module {
     @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
         usedInteractionThisTick = false;
+        queuedAction = null;
 
         if (!canRun()) {
             restoreOriginalHotbarSlot();
@@ -160,15 +170,13 @@ public class CrystalAura extends Module {
 
         tickTimers();
         tickActionDelays();
-
-        if (postUseSlotDelayTicks > 0) {
-            return;
-        }
+        runSyncedAction();
 
         List<LivingEntity> targets = findTargets();
         if (targets.isEmpty()) {
             lockedTargetId = -1;
             restoreOriginalHotbarSlot();
+            releaseActionRotations();
             return;
         }
 
@@ -177,8 +185,6 @@ public class CrystalAura extends Module {
         if (canBreak()) {
             CrystalTarget crystalTarget = findBestCrystal(activeTargets);
             if (crystalTarget != null && breakCrystal(crystalTarget.crystal())) {
-                spendBreak();
-                postAttackPlaceDelayTicks = POST_ATTACK_PLACE_DELAY_TICKS;
                 return;
             }
         }
@@ -189,7 +195,7 @@ public class CrystalAura extends Module {
             if (placeTarget != null) {
                 if (safePlace.getValue() && !placeTarget.covered()) {
                     if (autoPlaceProtectBlock.getValue() && placeProtectBlock()) {
-                        spendPlace();
+                        return;
                     } else {
                         restoreOriginalHotbarSlotIfIdle();
                     }
@@ -198,7 +204,7 @@ public class CrystalAura extends Module {
 
                 if (shouldUseExistingBase(placeTarget, supportTarget)) {
                     if (placeCrystal(placeTarget.basePos())) {
-                        spendPlace();
+                        return;
                     } else {
                         restoreOriginalHotbarSlotIfIdle();
                     }
@@ -206,16 +212,13 @@ public class CrystalAura extends Module {
                 }
 
                 if (supportTarget != null && placeSupportBlock(supportTarget.pos())) {
-                    spendPlace();
                     return;
                 }
 
                 if (placeCrystal(placeTarget.basePos())) {
-                    spendPlace();
                     return;
                 }
             } else if (supportTarget != null && placeSupportBlock(supportTarget.pos())) {
-                spendPlace();
                 return;
             } else {
                 restoreOriginalHotbarSlotIfIdle();
@@ -224,34 +227,78 @@ public class CrystalAura extends Module {
 
             restoreOriginalHotbarSlotIfIdle();
         }
+
+        if (queuedAction == null) {
+            releaseActionRotations();
+            restoreOriginalHotbarSlotIfIdle();
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onPacketSend(PacketEvent.Send event) {
         if (event.getPacket() instanceof ServerboundMovePlayerPacket packet) {
-            ServerboundMovePlayerPacket outgoingPacket = packet;
-            if (forcedOutgoingRotations != null) {
-                outgoingPacket = applyMovePacketRotations(packet, forcedOutgoingRotations);
-                event.setPacket(outgoingPacket);
-                clearForcedOutgoingRotations();
-            }
-
-            if (outgoingPacket.hasRotation()) {
-                updateLastOutgoingRotations(outgoingPacket);
+            if (packet.hasRotation()) {
+                updateLastOutgoingRotations(packet);
             }
         }
     }
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onSendPosition(SendPositionEvent event) {
-        Vector2f forcedRotations = activeForcedOutgoingRotations();
-        if (forcedRotations == null) {
+        QueuedAction action = queuedAction;
+        if (action != null) {
+            setOutgoingRotations(event, action.rotations());
+            syncedAction = action;
             return;
         }
 
-        event.setYaw(forcedRotations.x);
-        event.setPitch(forcedRotations.y);
-        syncPlayerRotation(forcedRotations);
+        if (movementFixRotations != null) {
+            setOutgoingRotations(event, movementFixRotations);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onMoveInput(MoveInputEvent event) {
+        movementFixRotations = null;
+
+        if (!shouldFixMovement(event)) {
+            return;
+        }
+
+        Vector2f rotations = movementRotations();
+        if (rotations == null) {
+            return;
+        }
+
+        MovementInput fixedInput = correctedMovementInput(
+                event.getForward(),
+                event.getStrafe(),
+                mc.player.getYRot(),
+                rotations.x
+        );
+
+        event.setForward(fixedInput.forward());
+        event.setStrafe(fixedInput.strafe());
+        if (fixedInput.forward() <= 0.0F) {
+            event.setSprint(false);
+            stopSprintingForMovementFix();
+        }
+
+        movementFixRotations = new Vector2f(rotations);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onStrafe(StrafeEvent event) {
+        if (movementFixRotations != null && shouldFixMovement()) {
+            event.setYaw(movementFixRotations.x);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onJump(JumpEvent event) {
+        if (movementFixRotations != null && shouldFixMovement()) {
+            event.setYaw(movementFixRotations.x);
+        }
     }
 
     private boolean canRun() {
@@ -602,11 +649,8 @@ public class CrystalAura extends Module {
     }
 
     private boolean breakCrystal(EndCrystal crystal) {
-        Vector2f appliedRotations = applyActionRotations(RotationUtility.calculate(crystal.position()));
-
-        attackWithRotations(appliedRotations, crystal);
-        mc.player.swing(InteractionHand.MAIN_HAND);
-        usedInteractionThisTick = true;
+        Vector2f appliedRotations = prepareActionRotations(RotationUtility.calculate(crystal.position()));
+        queuedAction = QueuedAction.breakCrystal(crystal, appliedRotations);
         return true;
     }
 
@@ -764,18 +808,76 @@ public class CrystalAura extends Module {
             return false;
         }
 
-        boolean changedSlot = previousSlot != hotbarSlot;
-        if (changedSlot && !selectWorkHotbarSlot(hotbarSlot, previousSlot)) {
+        Vec3 hitVec = blockHitVec(blockPos, direction);
+        Vector2f appliedRotations = preparePlaceRotations(blockPos, direction, RotationUtility.calculate(hitVec));
+        queuedAction = QueuedAction.useBlock(hotbarSlot, blockPos, direction, hitVec, appliedRotations);
+        return true;
+    }
+
+    private void runSyncedAction() {
+        QueuedAction action = syncedAction;
+        if (action == null) {
+            return;
+        }
+
+        syncedAction = null;
+        runQueuedAction(action);
+    }
+
+    private void runQueuedAction(QueuedAction action) {
+        if (!canRun()) {
+            releaseActionRotations();
+            return;
+        }
+
+        boolean success = switch (action.kind()) {
+            case BREAK_CRYSTAL -> runQueuedBreak(action);
+            case USE_BLOCK -> runQueuedBlockUse(action);
+        };
+
+        if (success) {
+            if (action.kind() == QueuedActionKind.BREAK_CRYSTAL) {
+                spendBreak();
+                postAttackPlaceDelayTicks = POST_ATTACK_PLACE_DELAY_TICKS;
+            } else {
+                spendPlace();
+            }
+        }
+
+        releaseActionRotations();
+    }
+
+    private boolean runQueuedBreak(QueuedAction action) {
+        EndCrystal crystal = action.crystal();
+        if (crystal == null || !isBreakableCrystal(crystal, breakRange.getValue())) {
             return false;
         }
 
-        Vec3 hitVec = blockHitVec(blockPos, direction);
-        Vector2f appliedRotations = applyActionRotations(RotationUtility.calculate(hitVec));
+        attackWithRotations(action.rotations(), crystal);
+        mc.player.swing(InteractionHand.MAIN_HAND);
+        usedInteractionThisTick = true;
+        return true;
+    }
 
-        BlockHitResult hitResult = new BlockHitResult(hitVec, direction, blockPos, false);
+    private boolean runQueuedBlockUse(QueuedAction action) {
+        if (!Inventory.isHotbarSlot(action.hotbarSlot())) {
+            return false;
+        }
+
+        int previousSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (!Inventory.isHotbarSlot(previousSlot)) {
+            return false;
+        }
+
+        boolean changedSlot = previousSlot != action.hotbarSlot();
+        if (changedSlot && !selectWorkHotbarSlot(action.hotbarSlot(), previousSlot)) {
+            return false;
+        }
+
+        BlockHitResult hitResult = new BlockHitResult(action.hitVec(), action.direction(), action.blockPos(), false);
         InteractionResult result;
         try {
-            result = useItemOnWithRotations(appliedRotations, hitResult);
+            result = useItemOnWithRotations(action.rotations(), hitResult);
         } finally {
             beginPostUseDelay();
         }
@@ -783,6 +885,7 @@ public class CrystalAura extends Module {
         if (result.consumesAction()) {
             mc.player.swing(InteractionHand.MAIN_HAND);
             mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
+            placeRotationVariant++;
             return true;
         }
 
@@ -797,20 +900,54 @@ public class CrystalAura extends Module {
         );
     }
 
-    private Vector2f applyActionRotations(Vector2f rotations) {
-        Vector2f fixedRotations = legitimizeRotations(rotations);
-        RotationManager.INSTANCE.setRotations(fixedRotations, 180.0D, Priority.Highest);
+    private Vector2f preparePlaceRotations(BlockPos blockPos, Direction direction, Vector2f rotations) {
+        Vector2f baseRotations = legitimizeRotations(rotations);
+        Vector2f placeRotations = variedPlaceRotations(baseRotations);
+        Vector2f uniqueRotations = makeUniqueOutgoingRotations(placeRotations);
+        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)
+                && closeActionRotations(uniqueRotations, baseRotations)) {
+            return prepareActionRotations(uniqueRotations);
+        }
 
-        Vector2f appliedRotations = makeUniqueOutgoingRotations(RotationManager.INSTANCE.getRotation());
+        return prepareActionRotations(placeRotations);
+    }
+
+    private Vector2f prepareActionRotations(Vector2f rotations) {
+        Vector2f appliedRotations = legitimizeRotations(rotations);
+        RotationManager.INSTANCE.setSmoothed(false);
         RotationManager.INSTANCE.setRotations(appliedRotations, 180.0D, Priority.Highest);
-        syncPlayerRotation(appliedRotations);
-        forcedOutgoingRotations = new Vector2f(appliedRotations);
+        appliedRotations = new Vector2f(RotationManager.INSTANCE.getRotation());
+        lastControlledRotations = new Vector2f(appliedRotations);
+        controllingRotations = true;
         return appliedRotations;
+    }
+
+    private Vector2f variedPlaceRotations(Vector2f rotations) {
+        Vector2f baseRotations = legitimizeRotations(rotations);
+        int variant = Math.floorMod(placeRotationVariant, 4);
+        float yawOffset = switch (variant) {
+            case 1 -> 0.35F;
+            case 2 -> -0.35F;
+            case 3 -> 0.2F;
+            default -> -0.2F;
+        };
+        float pitchOffset = switch (variant) {
+            case 1 -> -0.25F;
+            case 2 -> 0.3F;
+            case 3 -> 0.2F;
+            default -> -0.3F;
+        };
+
+        Vector2f variedRotations = legitimizeRotations(RotationUtility.applySensitivityPatch(
+                new Vector2f(baseRotations.x + yawOffset, baseRotations.y + pitchOffset),
+                currentSyncedRotations()
+        ));
+        return closeActionRotations(variedRotations, baseRotations) ? variedRotations : baseRotations;
     }
 
     private Vector2f makeUniqueOutgoingRotations(Vector2f rotations) {
         Vector2f uniqueRotations = legitimizeRotations(rotations);
-        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
+        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)) {
             return uniqueRotations;
         }
 
@@ -819,7 +956,7 @@ public class CrystalAura extends Module {
                 lastOutgoingRotations
         );
         uniqueRotations = legitimizeRotations(steppedRotations);
-        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
+        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)) {
             return uniqueRotations;
         }
 
@@ -828,7 +965,7 @@ public class CrystalAura extends Module {
                 lastOutgoingRotations
         );
         uniqueRotations = legitimizeRotations(steppedRotations);
-        if (!sameRotations(uniqueRotations, lastOutgoingRotations)) {
+        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)) {
             return uniqueRotations;
         }
 
@@ -846,11 +983,11 @@ public class CrystalAura extends Module {
         return OUTGOING_ROTATION_DEDUP_PITCH_STEP;
     }
 
-    private boolean sameRotations(Vector2f first, Vector2f second) {
+    private boolean sameOutgoingRotations(Vector2f first, Vector2f second) {
         return first != null
                 && second != null
-                && Float.compare(first.x, second.x) == 0
-                && Float.compare(first.y, second.y) == 0;
+                && Math.abs(Mth.wrapDegrees(first.x - second.x)) <= OUTGOING_ROTATION_DUPLICATE_EPSILON
+                && Math.abs(first.y - second.y) <= OUTGOING_ROTATION_DUPLICATE_EPSILON;
     }
 
     private Vector2f legitimizeRotations(Vector2f rotations) {
@@ -865,7 +1002,7 @@ public class CrystalAura extends Module {
     }
 
     private Vector2f currentSyncedRotations() {
-        return syncedRotations != null ? new Vector2f(syncedRotations) : currentPlayerRotations();
+        return lastOutgoingRotations != null ? new Vector2f(lastOutgoingRotations) : currentPlayerRotations();
     }
 
     private Vector2f currentPlayerRotations() {
@@ -876,57 +1013,146 @@ public class CrystalAura extends Module {
         return new Vector2f(mc.player.getYRot(), mc.player.getXRot());
     }
 
-    private void syncPlayerRotation(Vector2f rotations) {
-        if (mc.player == null || rotations == null) {
-            return;
-        }
-
-        syncedRotations = new Vector2f(rotations);
-
-        mc.player.setYRot(rotations.x);
-        mc.player.setXRot(rotations.y);
-    }
-
     private void updateLastOutgoingRotations(ServerboundMovePlayerPacket packet) {
         Vector2f fallbackRotations = currentPlayerRotations();
         lastOutgoingRotations = new Vector2f(
                 packet.getYRot(fallbackRotations.x),
                 packet.getXRot(fallbackRotations.y)
         );
-        syncedRotations = new Vector2f(lastOutgoingRotations);
     }
 
-    private ServerboundMovePlayerPacket applyMovePacketRotations(ServerboundMovePlayerPacket packet, Vector2f rotations) {
+    private void setOutgoingRotations(SendPositionEvent event, Vector2f rotations) {
         if (rotations == null) {
-            return packet;
+            return;
         }
 
-        if (packet.hasPosition()) {
-            return new ServerboundMovePlayerPacket.PosRot(
-                    packet.getX(0.0D),
-                    packet.getY(0.0D),
-                    packet.getZ(0.0D),
-                    rotations.x,
-                    rotations.y,
-                    packet.isOnGround(),
-                    packet.horizontalCollision()
-            );
+        event.setYaw(rotations.x);
+        event.setPitch(rotations.y);
+    }
+
+    private void releaseActionRotations() {
+        if (controllingRotations && shouldReleaseRotationManager()) {
+            Vector2f playerRotations = currentPlayerRotations();
+            RotationManager.INSTANCE.setSmoothed(false);
+            RotationManager.INSTANCE.setRotations(playerRotations, 180.0D, Priority.Highest);
+            RotationManager.INSTANCE.setActive(false);
         }
 
-        return new ServerboundMovePlayerPacket.Rot(
-                rotations.x,
-                rotations.y,
-                packet.isOnGround(),
-                packet.horizontalCollision()
+        controllingRotations = false;
+        lastControlledRotations = null;
+        movementFixRotations = null;
+        queuedAction = null;
+        syncedAction = null;
+    }
+
+    private boolean shouldReleaseRotationManager() {
+        if (!RotationManager.INSTANCE.isActive()) {
+            return false;
+        }
+
+        return lastControlledRotations == null
+                || closeRotations(RotationManager.INSTANCE.getRotation(), lastControlledRotations);
+    }
+
+    private boolean closeRotations(Vector2f first, Vector2f second) {
+        return first != null
+                && second != null
+                && Math.abs(Mth.wrapDegrees(first.x - second.x)) <= 0.01F
+                && Math.abs(first.y - second.y) <= 0.01F;
+    }
+
+    private boolean closeActionRotations(Vector2f actual, Vector2f expected) {
+        return actual != null
+                && expected != null
+                && Math.abs(Mth.wrapDegrees(actual.x - expected.x)) <= ACTION_TARGET_ROTATION_EPSILON
+                && Math.abs(actual.y - expected.y) <= ACTION_TARGET_ROTATION_EPSILON;
+    }
+
+    private boolean shouldFixMovement(MoveInputEvent event) {
+        return shouldFixMovement()
+                && (event.getForward() != 0.0F || event.getStrafe() != 0.0F);
+    }
+
+    private boolean shouldFixMovement() {
+        return canRun()
+                && controllingRotations
+                && movementRotations() != null;
+    }
+
+    private Vector2f movementRotations() {
+        if (!controllingRotations) {
+            return null;
+        }
+
+        if (RotationManager.INSTANCE.isActive()) {
+            return new Vector2f(RotationManager.INSTANCE.getRotation());
+        }
+
+        return lastControlledRotations == null ? null : new Vector2f(lastControlledRotations);
+    }
+
+    private void stopSprintingForMovementFix() {
+        if (mc.player != null && mc.player.isSprinting()) {
+            mc.player.setSprinting(false);
+        }
+    }
+
+    private MovementInput correctedMovementInput(float forward, float strafe, float fromYaw, float toYaw) {
+        HorizontalVector wanted = movementVector(forward, strafe, fromYaw);
+        if (wanted.lengthSqr() <= 1.0E-8D) {
+            return new MovementInput(forward, strafe);
+        }
+
+        MovementInput bestInput = new MovementInput(forward, strafe);
+        double bestDot = -Double.MAX_VALUE;
+
+        for (int candidateForward = -1; candidateForward <= 1; candidateForward++) {
+            for (int candidateStrafe = -1; candidateStrafe <= 1; candidateStrafe++) {
+                if (candidateForward == 0 && candidateStrafe == 0) {
+                    continue;
+                }
+
+                HorizontalVector candidate = movementVector(candidateForward, candidateStrafe, toYaw);
+                double dot = normalizedDot(wanted, candidate);
+                if (dot > bestDot) {
+                    bestDot = dot;
+                    bestInput = new MovementInput(candidateForward, candidateStrafe);
+                }
+            }
+        }
+
+        return bestInput;
+    }
+
+    private HorizontalVector movementVector(float forward, float strafe, float yaw) {
+        double inputMagnitude = strafe * strafe + forward * forward;
+        if (inputMagnitude < 1.0E-4D) {
+            return new HorizontalVector(0.0D, 0.0D);
+        }
+
+        inputMagnitude = Math.sqrt(inputMagnitude);
+        if (inputMagnitude < 1.0D) {
+            inputMagnitude = 1.0D;
+        }
+
+        double normalizedStrafe = strafe / inputMagnitude;
+        double normalizedForward = forward / inputMagnitude;
+        float yawRadians = yaw * Mth.DEG_TO_RAD;
+        float sinYaw = Mth.sin(yawRadians);
+        float cosYaw = Mth.cos(yawRadians);
+        return new HorizontalVector(
+                normalizedStrafe * cosYaw - normalizedForward * sinYaw,
+                normalizedForward * cosYaw + normalizedStrafe * sinYaw
         );
     }
 
-    private void clearForcedOutgoingRotations() {
-        forcedOutgoingRotations = null;
-    }
+    private double normalizedDot(HorizontalVector first, HorizontalVector second) {
+        double length = Math.sqrt(first.lengthSqr() * second.lengthSqr());
+        if (length <= 1.0E-8D) {
+            return -Double.MAX_VALUE;
+        }
 
-    private Vector2f activeForcedOutgoingRotations() {
-        return forcedOutgoingRotations;
+        return (first.x() * second.x() + first.z() * second.z()) / length;
     }
 
     private InteractionResult useItemOnWithRotations(Vector2f rotations, BlockHitResult hitResult) {
@@ -1006,7 +1232,7 @@ public class CrystalAura extends Module {
 
     private void restoreOriginalHotbarSlotIfIdle() {
         if (usedInteractionThisTick
-                || activeForcedOutgoingRotations() != null
+                || queuedAction != null
                 || postUseSlotDelayTicks > 0) {
             return;
         }
@@ -1037,6 +1263,7 @@ public class CrystalAura extends Module {
     }
 
     private void resetState() {
+        releaseActionRotations();
         placeProgress = TICKS_PER_SECOND;
         breakProgress = TICKS_PER_SECOND;
         switchProgress = 0;
@@ -1046,9 +1273,11 @@ public class CrystalAura extends Module {
         postUseSlotDelayTicks = 0;
         postAttackPlaceDelayTicks = 0;
         usedInteractionThisTick = false;
-        forcedOutgoingRotations = null;
+        queuedAction = null;
+        syncedAction = null;
         lastOutgoingRotations = currentPlayerRotations();
-        syncedRotations = new Vector2f(lastOutgoingRotations);
+        movementFixRotations = null;
+        placeRotationVariant = 0;
     }
 
     private record CrystalTarget(EndCrystal crystal, LivingEntity target, double score) {
@@ -1061,6 +1290,54 @@ public class CrystalAura extends Module {
     }
 
     private record ClickFace(BlockPos blockPos, Direction direction) {
+    }
+
+    private record QueuedAction(
+            QueuedActionKind kind,
+            EndCrystal crystal,
+            int hotbarSlot,
+            BlockPos blockPos,
+            Direction direction,
+            Vec3 hitVec,
+            Vector2f rotations
+    ) {
+        private static QueuedAction breakCrystal(EndCrystal crystal, Vector2f rotations) {
+            return new QueuedAction(
+                    QueuedActionKind.BREAK_CRYSTAL,
+                    crystal,
+                    InventoryUtility.NOT_FOUND,
+                    null,
+                    null,
+                    null,
+                    rotations == null ? null : new Vector2f(rotations)
+            );
+        }
+
+        private static QueuedAction useBlock(int hotbarSlot, BlockPos blockPos, Direction direction, Vec3 hitVec, Vector2f rotations) {
+            return new QueuedAction(
+                    QueuedActionKind.USE_BLOCK,
+                    null,
+                    hotbarSlot,
+                    blockPos,
+                    direction,
+                    hitVec,
+                    rotations == null ? null : new Vector2f(rotations)
+            );
+        }
+    }
+
+    private enum QueuedActionKind {
+        BREAK_CRYSTAL,
+        USE_BLOCK
+    }
+
+    private record MovementInput(float forward, float strafe) {
+    }
+
+    private record HorizontalVector(double x, double z) {
+        private double lengthSqr() {
+            return x * x + z * z;
+        }
     }
 
     public enum Select {
