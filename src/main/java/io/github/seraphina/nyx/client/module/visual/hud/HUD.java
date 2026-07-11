@@ -6,6 +6,7 @@ import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.visual.hud.component.InventoryComponent;
 import io.github.seraphina.nyx.client.module.visual.hud.component.NotificationComponent;
 import io.github.seraphina.nyx.client.module.visual.hud.component.WatermarkComponent;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.BiomeView;
@@ -31,6 +32,7 @@ public class HUD extends Module {
     public final BoolValue levelType = ValueBuild.boolSetting("level type", true, this);
     public final BoolValue playerPos = ValueBuild.boolSetting("player pos", true, this);
     public final BoolValue biome = ValueBuild.boolSetting("biome", true, this);
+    public final BoolValue inventory = ValueBuild.boolSetting("inventory", false, this);
 
     public HUD() {
         components.add(new WatermarkComponent());
@@ -38,6 +40,7 @@ public class HUD extends Module {
         components.add(new LevelTypeView());
         components.add(new PlayerPosView());
         components.add(new BiomeView());
+        components.add(new InventoryComponent());
         components.add(new NotificationComponent());
     }
 
