@@ -1,13 +1,20 @@
 package io.github.seraphina.nyx.client.utility;
 
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.rendertype.LayeringTransform;
+import net.minecraft.client.renderer.rendertype.OutputTarget;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3f;
@@ -17,6 +24,30 @@ import java.util.Objects;
 
 public final class Render3DUtility {
     private static final float DEFAULT_LINE_WIDTH = 1.0F;
+    private static final RenderPipeline NO_DEPTH_FILLED_BOX_PIPELINE = RenderPipelines.DEBUG_FILLED_BOX.toBuilder()
+        .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/no_depth_filled_box"))
+        .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+        .withDepthWrite(false)
+        .build();
+    private static final RenderPipeline NO_DEPTH_LINES_PIPELINE = RenderPipelines.LINES.toBuilder()
+        .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/no_depth_lines"))
+        .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+        .withDepthWrite(false)
+        .build();
+    private static final RenderType NO_DEPTH_FILLED_BOX = RenderType.create(
+        "nyx_no_depth_filled_box",
+        RenderSetup.builder(NO_DEPTH_FILLED_BOX_PIPELINE)
+            .sortOnUpload()
+            .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
+            .createRenderSetup()
+    );
+    private static final RenderType NO_DEPTH_LINES = RenderType.create(
+        "nyx_no_depth_lines",
+        RenderSetup.builder(NO_DEPTH_LINES_PIPELINE)
+            .setLayeringTransform(LayeringTransform.VIEW_OFFSET_Z_LAYERING)
+            .setOutputTarget(OutputTarget.ITEM_ENTITY_TARGET)
+            .createRenderSetup()
+    );
 
     private Render3DUtility() {
     }
@@ -88,6 +119,15 @@ public final class Render3DUtility {
         renderFilledBox(poseStack, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ, color);
     }
 
+    public static void renderFilledBoxNoDepth(PoseStack poseStack, AABB box, Color color) {
+        renderFilledBoxNoDepth(poseStack, box, color(color));
+    }
+
+    public static void renderFilledBoxNoDepth(PoseStack poseStack, AABB box, int color) {
+        Objects.requireNonNull(box, "box");
+        renderFilledBox(poseStack, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ, color, NO_DEPTH_FILLED_BOX);
+    }
+
     public static void renderFilledBox(
         PoseStack poseStack,
         double minX,
@@ -101,6 +141,19 @@ public final class Render3DUtility {
         renderFilledBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color(color));
     }
 
+    public static void renderFilledBoxNoDepth(
+        PoseStack poseStack,
+        double minX,
+        double minY,
+        double minZ,
+        double maxX,
+        double maxY,
+        double maxZ,
+        Color color
+    ) {
+        renderFilledBoxNoDepth(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color(color));
+    }
+
     public static void renderFilledBox(
         PoseStack poseStack,
         double minX,
@@ -111,12 +164,39 @@ public final class Render3DUtility {
         double maxZ,
         int color
     ) {
+        renderFilledBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color, RenderTypes.debugFilledBox());
+    }
+
+    public static void renderFilledBoxNoDepth(
+        PoseStack poseStack,
+        double minX,
+        double minY,
+        double minZ,
+        double maxX,
+        double maxY,
+        double maxZ,
+        int color
+    ) {
+        renderFilledBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color, NO_DEPTH_FILLED_BOX);
+    }
+
+    private static void renderFilledBox(
+        PoseStack poseStack,
+        double minX,
+        double minY,
+        double minZ,
+        double maxX,
+        double maxY,
+        double maxZ,
+        int color,
+        RenderType renderType
+    ) {
         Objects.requireNonNull(poseStack, "poseStack");
+        Objects.requireNonNull(renderType, "renderType");
         if (isTransparent(color)) {
             return;
         }
 
-        RenderType renderType = RenderTypes.debugFilledBox();
         BufferBuilder buffer = Tesselator.getInstance().begin(renderType.mode(), renderType.format());
         addBoxQuads(buffer, poseStack.last(), minX, minY, minZ, maxX, maxY, maxZ, color);
         draw(renderType, buffer);
@@ -129,6 +209,15 @@ public final class Render3DUtility {
     public static void renderOutlineBox(PoseStack poseStack, AABB box, int color) {
         Objects.requireNonNull(box, "box");
         renderOutlineBox(poseStack, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ, color);
+    }
+
+    public static void renderOutlineBoxNoDepth(PoseStack poseStack, AABB box, Color color) {
+        renderOutlineBoxNoDepth(poseStack, box, color(color));
+    }
+
+    public static void renderOutlineBoxNoDepth(PoseStack poseStack, AABB box, int color) {
+        Objects.requireNonNull(box, "box");
+        renderOutlineBox(poseStack, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ, color, NO_DEPTH_LINES);
     }
 
     public static void renderOutlineBox(
@@ -144,6 +233,19 @@ public final class Render3DUtility {
         renderOutlineBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color(color));
     }
 
+    public static void renderOutlineBoxNoDepth(
+        PoseStack poseStack,
+        double minX,
+        double minY,
+        double minZ,
+        double maxX,
+        double maxY,
+        double maxZ,
+        Color color
+    ) {
+        renderOutlineBoxNoDepth(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color(color));
+    }
+
     public static void renderOutlineBox(
         PoseStack poseStack,
         double minX,
@@ -154,12 +256,39 @@ public final class Render3DUtility {
         double maxZ,
         int color
     ) {
+        renderOutlineBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color, RenderTypes.lines());
+    }
+
+    public static void renderOutlineBoxNoDepth(
+        PoseStack poseStack,
+        double minX,
+        double minY,
+        double minZ,
+        double maxX,
+        double maxY,
+        double maxZ,
+        int color
+    ) {
+        renderOutlineBox(poseStack, minX, minY, minZ, maxX, maxY, maxZ, color, NO_DEPTH_LINES);
+    }
+
+    private static void renderOutlineBox(
+        PoseStack poseStack,
+        double minX,
+        double minY,
+        double minZ,
+        double maxX,
+        double maxY,
+        double maxZ,
+        int color,
+        RenderType renderType
+    ) {
         Objects.requireNonNull(poseStack, "poseStack");
+        Objects.requireNonNull(renderType, "renderType");
         if (isTransparent(color)) {
             return;
         }
 
-        RenderType renderType = RenderTypes.lines();
         BufferBuilder buffer = Tesselator.getInstance().begin(renderType.mode(), renderType.format());
         addBoxLines(buffer, poseStack.last(), minX, minY, minZ, maxX, maxY, maxZ, color);
         draw(renderType, buffer);
