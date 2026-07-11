@@ -25,6 +25,7 @@ import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundClientTickEndPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
@@ -57,7 +58,7 @@ public class AnchorAura extends Module {
     private static final double ANCHOR_EXPLOSION_RADIUS = 5.0D;
     private static final double TARGET_SEARCH_EXTRA_RANGE = ANCHOR_EXPLOSION_RADIUS + 2.0D;
     private static final int PLACE_SCAN_RADIUS = 3;
-    private static final int POST_USE_SLOT_DELAY_TICKS = 2;
+    private static final int POST_USE_SLOT_DELAY_TICKS = 0;
     private static final float ACTION_TARGET_ROTATION_EPSILON = 3.0F;
     private static final float ACTION_ROTATION_SYNC_EPSILON = 0.01F;
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
@@ -157,8 +158,18 @@ public class AnchorAura extends Module {
             return;
         }
 
-        if (releaseRotationsAfterPosition && !postUseMovePacketSeen) {
+        if (syncedAction != null) {
+            runSyncedAction();
             return;
+        }
+
+        if (releaseRotationsAfterPosition) {
+            if (!postUseMovePacketSeen) {
+                holdActionRotations(postUseRotations);
+                return;
+            }
+
+            releaseActionRotations();
         }
 
         if (!canAct()) {
@@ -191,6 +202,8 @@ public class AnchorAura extends Module {
             if (isPostUseRotationConfirmed()) {
                 postUseMovePacketSeen = true;
             }
+        } else if (event.getPacket() instanceof ServerboundClientTickEndPacket && isPostUseRotationConfirmed()) {
+            postUseMovePacketSeen = true;
         }
     }
 
@@ -198,6 +211,20 @@ public class AnchorAura extends Module {
     public void onSendPosition(SendPositionEvent event) {
         if (shouldPauseForItemUse()) {
             pauseForItemUse();
+            return;
+        }
+
+        if (releaseRotationsAfterPosition) {
+            setOutgoingRotations(event, postUseRotations);
+            return;
+        }
+
+        if (syncedAction != null) {
+            if (isRunnableAction(syncedAction)) {
+                setOutgoingRotations(event, syncedAction.rotations());
+            } else {
+                releaseActionRotations();
+            }
             return;
         }
 
@@ -235,12 +262,6 @@ public class AnchorAura extends Module {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPostSendPosition(PostSendPositionEvent event) {
-        boolean hadSyncedAction = syncedAction != null;
-        runSyncedAction();
-        if (hadSyncedAction) {
-            return;
-        }
-
         if (!releaseRotationsAfterPosition || !postUseMovePacketSeen) {
             return;
         }
@@ -772,7 +793,7 @@ public class AnchorAura extends Module {
     }
 
     private void runQueuedAction(QueuedAction action) {
-        if (!canRun() || shouldPauseForItemUse() || !canStillRunAction(action)) {
+        if (!canRun() || shouldPauseForItemUse() || !isRunnableAction(action)) {
             releaseActionRotations();
             return;
         }
@@ -791,6 +812,7 @@ public class AnchorAura extends Module {
             releaseRotationsAfterPosition = true;
             postUseMovePacketSeen = false;
             postUseRotations = new Vector2f(action.rotations());
+            holdActionRotations(postUseRotations);
             return;
         }
 
@@ -895,6 +917,15 @@ public class AnchorAura extends Module {
     }
 
     private Vector2f prepareActionRotations(Vector2f rotations) {
+        Vector2f appliedRotations = legitimizeRotations(rotations);
+        return holdActionRotations(appliedRotations);
+    }
+
+    private Vector2f holdActionRotations(Vector2f rotations) {
+        if (rotations == null) {
+            return null;
+        }
+
         Vector2f appliedRotations = legitimizeRotations(rotations);
         RotationManager.INSTANCE.setSmoothed(false);
         RotationManager.INSTANCE.setRotations(appliedRotations, 180.0D, Priority.Highest);
@@ -1095,15 +1126,27 @@ public class AnchorAura extends Module {
     }
 
     private Vector2f movementRotations() {
+        if (releaseRotationsAfterPosition && postUseRotations != null) {
+            return new Vector2f(postUseRotations);
+        }
+
+        if (syncedAction != null && syncedAction.rotations() != null) {
+            return new Vector2f(syncedAction.rotations());
+        }
+
+        if (queuedAction != null && queuedAction.rotations() != null) {
+            return new Vector2f(queuedAction.rotations());
+        }
+
         if (!controllingRotations) {
             return null;
         }
 
-        if (RotationManager.INSTANCE.isActive()) {
-            return new Vector2f(RotationManager.INSTANCE.getRotation());
+        if (lastControlledRotations != null) {
+            return new Vector2f(lastControlledRotations);
         }
 
-        return lastControlledRotations == null ? null : new Vector2f(lastControlledRotations);
+        return RotationManager.INSTANCE.isActive() ? new Vector2f(RotationManager.INSTANCE.getRotation()) : null;
     }
 
     private void stopSprintingForMovementFix() {

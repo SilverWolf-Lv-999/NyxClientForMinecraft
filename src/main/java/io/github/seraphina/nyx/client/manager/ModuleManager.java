@@ -74,7 +74,9 @@ public final class ModuleManager {
                 AutoWindCharge.INSTANCE,
                 InstantSwitch.INSTANCE,
                 AutoLeave.INSTANCE,
-                AutoCrystal.INSTANCE
+                AutoCrystal.INSTANCE,
+                PacketMine.INSTANCE,
+                PacketEat.INSTANCE
         );
         //Visual
         registerModule(
