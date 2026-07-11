@@ -69,6 +69,10 @@ public class MaceAura extends Module {
     private static final int FIREWORK_MACE_SWITCH_SETTLE_TICKS = 1;
     private static final double FIREWORK_ARMOR_SWITCH_RANGE = 5.0D;
     private static final int FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS = 3;
+    private static final int FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS = 12;
+    private static final double FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL = 4.0D;
+    private static final double FIREWORK_POST_ATTACK_LAUNCH_MIN_HEIGHT = 3.0D;
+    private static final double FIREWORK_POST_ATTACK_LAUNCH_UPWARD_VELOCITY = 0.02D;
     private static final double GRIM_ATTACK_RANGE = 2.90D;
     private static final int POST_USE_ITEM_SLOT_DELAY_TICKS = 3;
     private static final int FIREWORK_USE_RETRY_DELAY_TICKS = 4;
@@ -96,6 +100,7 @@ public class MaceAura extends Module {
     private int attackHoldTicks;
     private int fireworkResetDelayTicks;
     private double fireworkStartY;
+    private double fireworkPostAttackStartY = Double.NaN;
     private float fireworkAscendYaw;
     private float fireworkAscendPitch;
     private ItemStack fireworkOriginalChestStack = ItemStack.EMPTY;
@@ -334,6 +339,7 @@ public class MaceAura extends Module {
 
     private void tickPrepareFireworkRocket() {
         if (target == null) {
+            clearPostAttackLaunchStart();
             setStage(Stage.ACQUIRE_TARGET);
             return;
         }
@@ -724,12 +730,22 @@ public class MaceAura extends Module {
             return;
         }
 
+        double postAttackLaunchHeight = postAttackLaunchHeight();
+        if (target != null && tryUsePostAttackLaunchForDive(postAttackLaunchHeight)) {
+            return;
+        }
+
         if (stageTicks < FIREWORK_POST_ATTACK_ARMOR_HOLD_TICKS) {
             return;
         }
 
         if (target == null) {
+            clearPostAttackLaunchStart();
             setStage(Stage.ACQUIRE_TARGET);
+            return;
+        }
+
+        if (shouldWaitForPostAttackLaunch(postAttackLaunchHeight)) {
             return;
         }
 
@@ -746,13 +762,16 @@ public class MaceAura extends Module {
                 return;
             }
 
+            clearPostAttackLaunchStart();
             setStage(Stage.FIREWORK_EQUIP_ELYTRA);
             return;
         }
 
         if (useSelectedItem()) {
+            clearPostAttackLaunchStart();
             setStage(Stage.FIREWORK_START_ASCENT);
         } else {
+            clearPostAttackLaunchStart();
             setStage(Stage.FIREWORK_EQUIP_ELYTRA);
         }
     }
@@ -1018,10 +1037,93 @@ public class MaceAura extends Module {
         return itemType.getValue() == ItemType.FIREWORK_ROCKET && fireworkDiveBoostUsed;
     }
 
+    private double postAttackLaunchHeight() {
+        if (!hasPostAttackLaunchStart()) {
+            return 0.0D;
+        }
+
+        return Math.max(0.0D, mc.player.getY() - fireworkPostAttackStartY);
+    }
+
+    private boolean hasPostAttackLaunchStart() {
+        return !Double.isNaN(fireworkPostAttackStartY);
+    }
+
+    private void clearPostAttackLaunchStart() {
+        fireworkPostAttackStartY = Double.NaN;
+    }
+
+    private boolean tryUsePostAttackLaunchForDive(double launchHeight) {
+        if (!isPostAttackLaunchEnoughForDive(launchHeight)) {
+            return false;
+        }
+
+        if (!canHoldHotbarItem(elytraSlot, Items.ELYTRA)) {
+            resetFireworkState();
+            setStage(Stage.FIREWORK_PREPARE);
+            return true;
+        }
+
+        preparePostAttackLaunchDive();
+        if (InventoryUtility.getSelectedHotbarSlot() != elytraSlot
+                && !selectHotbarSlot(elytraSlot)) {
+            if (!isQueuedHotbarSlot(elytraSlot)) {
+                clearPostAttackLaunchStart();
+                setStage(Stage.FIREWORK_EQUIP_ELYTRA);
+            }
+            return true;
+        }
+
+        if (useSelectedItem()) {
+            MsgUtility.debug(
+                    "MaceAura using post-attack launch: height=",
+                    format(launchHeight),
+                    ", block=",
+                    blockheight.getValue()
+            );
+            clearPostAttackLaunchStart();
+            setStage(Stage.FIREWORK_START_DIVE);
+        } else {
+            clearPostAttackLaunchStart();
+            setStage(Stage.FIREWORK_EQUIP_ELYTRA);
+        }
+        return true;
+    }
+
+    private boolean isPostAttackLaunchEnoughForDive(double launchHeight) {
+        double requiredHeight = Math.max(
+                FIREWORK_POST_ATTACK_LAUNCH_MIN_HEIGHT,
+                blockheight.getValue() - FIREWORK_POST_ATTACK_LAUNCH_MAX_SHORTFALL
+        );
+        return launchHeight >= requiredHeight;
+    }
+
+    private boolean shouldWaitForPostAttackLaunch(double launchHeight) {
+        return hasPostAttackLaunchStart()
+                && stageTicks < FIREWORK_POST_ATTACK_LAUNCH_WAIT_TICKS
+                && !mc.player.onGround()
+                && mc.player.getDeltaMovement().y > FIREWORK_POST_ATTACK_LAUNCH_UPWARD_VELOCITY
+                && launchHeight < blockheight.getValue();
+    }
+
+    private void preparePostAttackLaunchDive() {
+        fireworkStartY = hasPostAttackLaunchStart() ? fireworkPostAttackStartY : mc.player.getY();
+        fireworkAscendYaw = targetYaw();
+        fireworkAscendPitch = randomFireworkAscendPitch();
+        fireworkResetDelayTicks = 0;
+        fireworkDiveBoostUsed = false;
+        fireworkAllowElytraMaceAttack = false;
+        launchTicks = 0;
+        maceSwitchDelayTicks = 0;
+        windChargeAttackDelayTicks = 0;
+        attackHoldTicks = 0;
+    }
+
     private void beginPostAttackFireworkReset() {
         if (fireworkAllowElytraMaceAttack) {
             fireworkDiveBoostUsed = false;
             fireworkAllowElytraMaceAttack = false;
+            clearPostAttackLaunchStart();
             attackHoldTicks = ATTACK_HOLD_TICKS;
             setStage(Stage.AFTER_ATTACK);
             return;
@@ -1032,12 +1134,13 @@ public class MaceAura extends Module {
         fireworkResetDelayTicks = 0;
         fireworkDiveBoostUsed = false;
         fireworkAllowElytraMaceAttack = false;
+        fireworkPostAttackStartY = mc.player.getY();
         attackHoldTicks = 0;
         setStage(Stage.FIREWORK_AFTER_ATTACK_HOLD_ARMOR);
     }
 
     private void prepareNextFireworkAscent() {
-        fireworkStartY = mc.player.getY();
+        fireworkStartY = hasPostAttackLaunchStart() ? fireworkPostAttackStartY : mc.player.getY();
         fireworkAscendYaw = targetYaw();
         fireworkAscendPitch = randomFireworkAscendPitch();
         fireworkResetDelayTicks = 0;
@@ -1606,6 +1709,7 @@ public class MaceAura extends Module {
         elytraSlot = InventoryUtility.NOT_FOUND;
         fireworkResetDelayTicks = 0;
         fireworkStartY = 0.0D;
+        clearPostAttackLaunchStart();
         fireworkAscendYaw = 0.0F;
         fireworkAscendPitch = 0.0F;
         fireworkOriginalChestStack = ItemStack.EMPTY;

@@ -28,6 +28,7 @@
     "LocalPlayerMixin",
     "MinecraftMixin",
     "MixinLivingEntityRenderer",
+    "ModelPartAccessor",
     "MouseHandlerMixin",
     "MultiPlayerGameModeAccessor",
     "MultiPlayerGameModeMixin",

@@ -1,10 +1,15 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
+import io.github.seraphina.nyx.client.module.visual.ESP;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
+import net.minecraft.client.model.EntityModel;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
+import net.minecraft.client.renderer.state.CameraRenderState;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
@@ -16,7 +21,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 
 @Mixin(LivingEntityRenderer.class)
-public abstract class MixinLivingEntityRenderer<S extends LivingEntityRenderState> implements IMinecraft {
+public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extends LivingEntityRenderState, M extends EntityModel<? super S>> implements IMinecraft {
+
+    @Shadow
+    protected M model;
 
     @Shadow
     public abstract Identifier getTextureLocation(S s);
@@ -30,8 +38,23 @@ public abstract class MixinLivingEntityRenderer<S extends LivingEntityRenderStat
 //        return Chams.INSTANCE.getRenderType(getTextureLocation(state));
 //    }
 
+    @Inject(
+            method = "submit",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/renderer/SubmitNodeCollector;submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IIILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V",
+                    shift = At.Shift.AFTER
+            )
+    )
+    private void captureModelBones(S state, PoseStack poseStack, SubmitNodeCollector nodeCollector, CameraRenderState cameraRenderState, CallbackInfo info) {
+        ESP.INSTANCE.captureModelBones(state, this.model, poseStack, cameraRenderState);
+    }
+
     @Inject(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At("TAIL"))
     private void modifyRotationAnimation(LivingEntity entity, S state, float partialTicks, CallbackInfo info) {
+        ESP.INSTANCE.rememberModelBoneEntity(entity, state);
+        ESP.INSTANCE.applyGlowOutline(entity, state);
+
         if (entity != mc.player) {
             return;
         }

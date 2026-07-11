@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.AfterRender3DEvent;
 import io.github.seraphina.nyx.client.events.impl.Render3DEvent;
+import io.github.seraphina.nyx.client.module.visual.ESP;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -19,13 +20,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(LevelRenderer.class)
 public class LevelRendererMixin {
+    @Inject(method = "renderLevel", at = @At("HEAD"))
+    private void onPreRenderLevel(GraphicsResourceAllocator resourceAllocator, DeltaTracker deltaTracker, boolean renderOutline, Camera camera, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, Matrix4f cullingProjectionMatrix, GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, CallbackInfo info) {
+        ESP.INSTANCE.clearModelBoneFrame();
+    }
+
     @Inject(method = "renderLevel", at = @At("RETURN"))
     private void onPostRenderLevel(GraphicsResourceAllocator resourceAllocator, DeltaTracker deltaTracker, boolean renderOutline, Camera camera, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, Matrix4f cullingProjectionMatrix, GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, CallbackInfo info) {
         PoseStack poseStack = new PoseStack();
         poseStack.mulPose(modelViewMatrix);
         Vec3 cameraPos = camera.position();
         poseStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
-        EventBus.INSTANCE.post(new Render3DEvent(poseStack, projectionMatrix));
+        EventBus.INSTANCE.post(new Render3DEvent(poseStack, projectionMatrix, deltaTracker.getGameTimeDeltaPartialTick(true)));
         EventBus.INSTANCE.post(new AfterRender3DEvent());
     }
 }

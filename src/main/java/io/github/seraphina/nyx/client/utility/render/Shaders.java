@@ -4,7 +4,6 @@ public final class Shaders {
    public static Shader FONT;
    public static Shader GAUSSIAN_BLUR;
    public static Shader BLOOM;
-   public static Shader ESP_GLOW;
 
    private Shaders() {
    }
@@ -18,9 +17,6 @@ public final class Shaders {
       }
       if (BLOOM == null) {
          BLOOM = new Shader("bloom.vert", "bloom.frag");
-      }
-      if (ESP_GLOW == null) {
-         ESP_GLOW = new Shader("esp_glow.vert", "esp_glow.frag");
       }
    }
 
@@ -36,10 +32,6 @@ public final class Shaders {
       if (BLOOM != null) {
          BLOOM.close();
          BLOOM = null;
-      }
-      if (ESP_GLOW != null) {
-         ESP_GLOW.close();
-         ESP_GLOW = null;
       }
 
    }

@@ -7,9 +7,6 @@ import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import io.github.seraphina.nyx.client.utility.render.GL;
-import io.github.seraphina.nyx.client.utility.render.Shader;
-import io.github.seraphina.nyx.client.utility.render.Shaders;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.LayeringTransform;
 import net.minecraft.client.renderer.rendertype.OutputTarget;
@@ -20,25 +17,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix4f;
 import org.joml.Vector3f;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL14;
-import org.lwjgl.opengl.GL15;
-import org.lwjgl.opengl.GL20;
-import org.lwjgl.opengl.GL30;
-import org.lwjgl.opengl.GL32C;
 
 import java.awt.Color;
-import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Objects;
 
 public final class Render3DUtility {
     private static final float DEFAULT_LINE_WIDTH = 1.0F;
-    private static final int GLOW_VERTEX_FLOATS = 7;
-    private static final int GLOW_VERTEX_STRIDE = GLOW_VERTEX_FLOATS * Float.BYTES;
     private static final RenderPipeline NO_DEPTH_FILLED_BOX_PIPELINE = RenderPipelines.DEBUG_FILLED_BOX.toBuilder()
         .withLocation(Identifier.fromNamespaceAndPath("nyxclient", "pipeline/no_depth_filled_box"))
         .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
@@ -63,8 +49,6 @@ public final class Render3DUtility {
             .setOutputTarget(OutputTarget.ITEM_ENTITY_TARGET)
             .createRenderSetup()
     );
-    private static int glowLineVao;
-    private static int glowLineVbo;
 
     private Render3DUtility() {
     }
@@ -326,89 +310,18 @@ public final class Render3DUtility {
     }
 
     public static void renderLineSegmentsNoDepth(PoseStack poseStack, Collection<LineSegment> lines, int color) {
-        renderLineSegments(poseStack, lines, color, NO_DEPTH_LINES);
+        renderLineSegmentsNoDepth(poseStack, lines, color, DEFAULT_LINE_WIDTH);
     }
 
-    public static void renderGlowLineSegmentsNoDepth(PoseStack poseStack, Matrix4f projectionMatrix, Collection<LineSegment> lines, int color, float width) {
-        Objects.requireNonNull(poseStack, "poseStack");
-        Objects.requireNonNull(projectionMatrix, "projectionMatrix");
-        Objects.requireNonNull(lines, "lines");
-        if (lines.isEmpty() || isTransparent(color)) {
-            return;
-        }
-
-        Shader shader = espGlowShader();
-        if (shader == null) {
-            return;
-        }
-
-        int vertexCount = lines.size() * 2;
-        ByteBuffer vertices = BufferUtils.createByteBuffer(vertexCount * GLOW_VERTEX_STRIDE);
-        float red = ((color >>> 16) & 0xFF) / 255.0F;
-        float green = ((color >>> 8) & 0xFF) / 255.0F;
-        float blue = (color & 0xFF) / 255.0F;
-        float alpha = ((color >>> 24) & 0xFF) / 255.0F;
-
-        for (LineSegment line : lines) {
-            putGlowVertex(vertices, line.fromX, line.fromY, line.fromZ, red, green, blue, alpha);
-            putGlowVertex(vertices, line.toX, line.toY, line.toZ, red, green, blue, alpha);
-        }
-        vertices.flip();
-
-        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-        int previousVertexArray = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
-        int previousArrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
-        boolean previousDepthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
-        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
-        boolean previousCull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
-        boolean previousScissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
-        boolean previousLineSmooth = GL11.glIsEnabled(GL11.GL_LINE_SMOOTH);
-        float previousLineWidth = GL11.glGetFloat(GL11.GL_LINE_WIDTH);
-        int previousBlendSrcRgb = GL11.glGetInteger(GL14.GL_BLEND_SRC_RGB);
-        int previousBlendDstRgb = GL11.glGetInteger(GL14.GL_BLEND_DST_RGB);
-        int previousBlendSrcAlpha = GL11.glGetInteger(GL14.GL_BLEND_SRC_ALPHA);
-        int previousBlendDstAlpha = GL11.glGetInteger(GL14.GL_BLEND_DST_ALPHA);
-
-        try {
-            ensureGlowBuffers();
-            GL.bindVertexArray(glowLineVao);
-            GL.bindVertexBuffer(glowLineVbo);
-            GL.bufferData(GL15.GL_ARRAY_BUFFER, vertices, GL15.GL_DYNAMIC_DRAW);
-            GL.vertexAttribute(0, 3, GL11.GL_FLOAT, false, GLOW_VERTEX_STRIDE, 0L);
-            GL.enableVertexAttribute(0);
-            GL.vertexAttribute(1, 4, GL11.GL_FLOAT, false, GLOW_VERTEX_STRIDE, 3L * Float.BYTES);
-            GL.enableVertexAttribute(1);
-
-            GL.disableDepth();
-            GL.enableBlend();
-            GL.disableCull();
-            GL.disableScissorTest();
-            GL11.glEnable(GL11.GL_LINE_SMOOTH);
-
-            shader.bind();
-            shader.set("ModelViewProjection", new Matrix4f(projectionMatrix).mul(poseStack.last().pose()));
-
-            float safeWidth = Math.max(1.0F, Math.min(16.0F, width));
-            drawGlowLinePass(shader, vertexCount, safeWidth * 3.0F, 0.14F, true);
-            drawGlowLinePass(shader, vertexCount, safeWidth * 1.8F, 0.28F, true);
-            drawGlowLinePass(shader, vertexCount, safeWidth, 1.0F, false);
-        } finally {
-            GL20.glDisableVertexAttribArray(0);
-            GL20.glDisableVertexAttribArray(1);
-            GL.bindVertexBuffer(previousArrayBuffer);
-            GL.bindVertexArray(previousVertexArray);
-            GL.useProgram(previousProgram);
-            GL11.glLineWidth(previousLineWidth);
-            GL14.glBlendFuncSeparate(previousBlendSrcRgb, previousBlendDstRgb, previousBlendSrcAlpha, previousBlendDstAlpha);
-            setCapability(GL11.GL_DEPTH_TEST, previousDepthTest);
-            setCapability(GL11.GL_BLEND, previousBlend);
-            setCapability(GL11.GL_CULL_FACE, previousCull);
-            setCapability(GL11.GL_SCISSOR_TEST, previousScissor);
-            setCapability(GL11.GL_LINE_SMOOTH, previousLineSmooth);
-        }
+    public static void renderLineSegmentsNoDepth(PoseStack poseStack, Collection<LineSegment> lines, int color, float lineWidth) {
+        renderLineSegments(poseStack, lines, color, NO_DEPTH_LINES, lineWidth);
     }
 
     private static void renderLineSegments(PoseStack poseStack, Collection<LineSegment> lines, int color, RenderType renderType) {
+        renderLineSegments(poseStack, lines, color, renderType, DEFAULT_LINE_WIDTH);
+    }
+
+    private static void renderLineSegments(PoseStack poseStack, Collection<LineSegment> lines, int color, RenderType renderType, float lineWidth) {
         Objects.requireNonNull(poseStack, "poseStack");
         Objects.requireNonNull(lines, "lines");
         Objects.requireNonNull(renderType, "renderType");
@@ -416,47 +329,13 @@ public final class Render3DUtility {
             return;
         }
 
+        float safeLineWidth = safeLineWidth(lineWidth);
         PoseStack.Pose pose = poseStack.last();
         BufferBuilder buffer = Tesselator.getInstance().begin(renderType.mode(), renderType.format());
         for (LineSegment line : lines) {
-            addLine(buffer, pose, line.fromX, line.fromY, line.fromZ, line.toX, line.toY, line.toZ, color);
+            addLine(buffer, pose, line.fromX, line.fromY, line.fromZ, line.toX, line.toY, line.toZ, color, safeLineWidth);
         }
         draw(renderType, buffer);
-    }
-
-    private static void ensureGlowBuffers() {
-        if (glowLineVao == 0) {
-            glowLineVao = GL.genVertexArray();
-        }
-        if (glowLineVbo == 0) {
-            glowLineVbo = GL.genBuffer();
-        }
-    }
-
-    private static Shader espGlowShader() {
-        Shaders.init();
-        return Shaders.ESP_GLOW;
-    }
-
-    private static void putGlowVertex(ByteBuffer buffer, double x, double y, double z, float red, float green, float blue, float alpha) {
-        buffer.putFloat((float)x);
-        buffer.putFloat((float)y);
-        buffer.putFloat((float)z);
-        buffer.putFloat(red);
-        buffer.putFloat(green);
-        buffer.putFloat(blue);
-        buffer.putFloat(alpha);
-    }
-
-    private static void drawGlowLinePass(Shader shader, int vertexCount, float lineWidth, float alphaMultiplier, boolean additive) {
-        shader.set("AlphaMultiplier", alphaMultiplier);
-        GL11.glLineWidth(lineWidth);
-        if (additive) {
-            GL14.glBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
-        } else {
-            GL14.glBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
-        }
-        GL32C.glDrawArrays(GL32C.GL_LINES, 0, vertexCount);
     }
 
     private static void renderOutlineBox(
@@ -639,16 +518,35 @@ public final class Render3DUtility {
         double toZ,
         int color
     ) {
+        addLine(consumer, pose, fromX, fromY, fromZ, toX, toY, toZ, color, DEFAULT_LINE_WIDTH);
+    }
+
+    private static void addLine(
+        VertexConsumer consumer,
+        PoseStack.Pose pose,
+        double fromX,
+        double fromY,
+        double fromZ,
+        double toX,
+        double toY,
+        double toZ,
+        int color,
+        float lineWidth
+    ) {
         Vector3f normal = normal(fromX, fromY, fromZ, toX, toY, toZ);
-        lineVertex(consumer, pose, fromX, fromY, fromZ, color, normal);
-        lineVertex(consumer, pose, toX, toY, toZ, color, normal);
+        lineVertex(consumer, pose, fromX, fromY, fromZ, color, normal, lineWidth);
+        lineVertex(consumer, pose, toX, toY, toZ, color, normal, lineWidth);
     }
 
     private static void lineVertex(VertexConsumer consumer, PoseStack.Pose pose, double x, double y, double z, int color, Vector3f normal) {
+        lineVertex(consumer, pose, x, y, z, color, normal, DEFAULT_LINE_WIDTH);
+    }
+
+    private static void lineVertex(VertexConsumer consumer, PoseStack.Pose pose, double x, double y, double z, int color, Vector3f normal, float lineWidth) {
         consumer.addVertex(pose, (float)x, (float)y, (float)z)
             .setColor(color)
             .setNormal(pose, normal)
-            .setLineWidth(DEFAULT_LINE_WIDTH);
+            .setLineWidth(lineWidth);
     }
 
     private static Vector3f normal(double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
@@ -664,14 +562,6 @@ public final class Render3DUtility {
     private static void draw(RenderType renderType, BufferBuilder buffer) {
         MeshData meshData = buffer.buildOrThrow();
         renderType.draw(meshData);
-    }
-
-    private static void setCapability(int capability, boolean enabled) {
-        if (enabled) {
-            GL11.glEnable(capability);
-        } else {
-            GL11.glDisable(capability);
-        }
     }
 
     private static int color(Color color) {
@@ -695,6 +585,13 @@ public final class Render3DUtility {
 
     private static boolean isTransparent(int color) {
         return ((color >>> 24) & 0xFF) == 0;
+    }
+
+    private static float safeLineWidth(float lineWidth) {
+        if (Float.isNaN(lineWidth)) {
+            return DEFAULT_LINE_WIDTH;
+        }
+        return Math.max(DEFAULT_LINE_WIDTH, lineWidth);
     }
 
     private static int clamp255(int value) {
