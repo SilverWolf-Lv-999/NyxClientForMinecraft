@@ -25,7 +25,7 @@ public class LevelRendererMixin {
         poseStack.mulPose(modelViewMatrix);
         Vec3 cameraPos = camera.position();
         poseStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
-        EventBus.INSTANCE.post(new Render3DEvent(poseStack));
+        EventBus.INSTANCE.post(new Render3DEvent(poseStack, projectionMatrix));
         EventBus.INSTANCE.post(new AfterRender3DEvent());
     }
 }

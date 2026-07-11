@@ -32,9 +32,17 @@ public class Target extends Module {
         return entity instanceof LivingEntity livingEntity && isTarget(livingEntity);
     }
 
+    public static boolean isTarget(Entity entity, boolean includeFriends) {
+        return entity instanceof LivingEntity livingEntity && isTarget(livingEntity, includeFriends);
+    }
+
     public static boolean isTarget(LivingEntity entity) {
+        return isTarget(entity, false);
+    }
+
+    public static boolean isTarget(LivingEntity entity, boolean includeFriends) {
         if (entity == null) return false;
-        if (Friend.INSTANCE.isEnabled() && FriendManager.isFriend(entity)) return false;
+        if (!includeFriends && Friend.INSTANCE.isEnabled() && FriendManager.isFriend(entity)) return false;
         if (entity.isDeadOrDying() && !INSTANCE.dead.getValue()) return false;
         return switch (entity) {
             case Player ignored2 when INSTANCE.player.getValue() -> true;

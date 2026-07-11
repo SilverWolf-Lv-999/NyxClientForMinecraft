@@ -83,7 +83,8 @@ public final class ModuleManager {
                 Animations.INSTANCE,
                 FullBright.INSTANCE,
                 ModernGui.INSTANCE,
-                ContainerESP.INSTANCE
+                ContainerESP.INSTANCE,
+                ESP.INSTANCE
         );
 
         initialized = true;
