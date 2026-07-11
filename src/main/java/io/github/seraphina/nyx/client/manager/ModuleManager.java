@@ -42,7 +42,8 @@ public final class ModuleManager {
                 UseClick.INSTANCE,
                 MaceKill.INSTANCE,
                 MaceAura.INSTANCE,
-                CrystalAura.INSTANCE
+                CrystalAura.INSTANCE,
+                AnchorAura.INSTANCE
         );
         //Movement
         registerModule(
