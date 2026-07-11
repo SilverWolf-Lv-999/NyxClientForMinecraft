@@ -14,36 +14,48 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(ParticleEngine.class)
 public abstract class ParticleEngineMixin {
+    @Unique
+    private boolean nyx$createdFromAllowedOptions;
+
     @Inject(method = "createParticle", at = @At("HEAD"), cancellable = true)
     private void nyx$createParticle(ParticleOptions particleOptions, double x, double y, double z, double xSpeed, double ySpeed, double zSpeed, CallbackInfoReturnable<Particle> info) {
-        if (nyx$shouldDisableParticles()) info.setReturnValue(null);
+        NoRenderer noRenderer = NoRenderer.INSTANCE;
+        nyx$createdFromAllowedOptions = false;
+        if (noRenderer.shouldDisableParticle(particleOptions)) {
+            info.setReturnValue(null);
+            return;
+        }
+
+        if (noRenderer.shouldTrackAllowedParticleAdds()) {
+            nyx$createdFromAllowedOptions = true;
+        }
+    }
+
+    @Inject(method = "createParticle", at = @At("RETURN"))
+    private void nyx$createParticleReturn(ParticleOptions particleOptions, double x, double y, double z, double xSpeed, double ySpeed, double zSpeed, CallbackInfoReturnable<Particle> info) {
+        nyx$createdFromAllowedOptions = false;
     }
 
     @Inject(method = "add", at = @At("HEAD"), cancellable = true)
     private void nyx$add(Particle particle, CallbackInfo info) {
-        if (nyx$shouldDisableParticles()) info.cancel();
+        if (NoRenderer.INSTANCE.shouldDisableParticleAdd(nyx$createdFromAllowedOptions)) info.cancel();
     }
 
     @Inject(method = "createTrackingEmitter(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/core/particles/ParticleOptions;)V", at = @At("HEAD"), cancellable = true)
     private void nyx$createTrackingEmitter(Entity entity, ParticleOptions particleOptions, CallbackInfo info) {
-        if (nyx$shouldDisableParticles()) info.cancel();
+        if (NoRenderer.INSTANCE.shouldDisableParticle(particleOptions)) info.cancel();
     }
 
     @Inject(method = "createTrackingEmitter(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/core/particles/ParticleOptions;I)V", at = @At("HEAD"), cancellable = true)
     private void nyx$createTrackingEmitter(Entity entity, ParticleOptions particleOptions, int lifetime, CallbackInfo info) {
-        if (nyx$shouldDisableParticles()) info.cancel();
+        if (NoRenderer.INSTANCE.shouldDisableParticle(particleOptions)) info.cancel();
     }
 
     @Inject(method = "tick", at = @At("HEAD"), cancellable = true)
     private void nyx$tick(CallbackInfo info) {
-        if (nyx$shouldDisableParticles()) {
+        if (NoRenderer.INSTANCE.shouldClearParticleEngine()) {
             ((ParticleEngine) (Object) this).clearParticles();
             info.cancel();
         }
-    }
-
-    @Unique
-    private static boolean nyx$shouldDisableParticles() {
-        return NoRenderer.INSTANCE.isEnabled() && NoRenderer.INSTANCE.noparticles.getValue();
     }
 }

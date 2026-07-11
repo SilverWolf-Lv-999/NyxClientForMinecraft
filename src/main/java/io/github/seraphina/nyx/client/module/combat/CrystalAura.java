@@ -200,7 +200,7 @@ public class CrystalAura extends Module {
             SupportTarget supportTarget = autoPlaceBlock.getValue() ? findBestSupportBlock(activeTargets) : null;
             if (placeTarget != null) {
                 if (safePlace.getValue() && !placeTarget.covered()) {
-                    if (autoPlaceProtectBlock.getValue() && placeProtectBlock()) {
+                    if (autoPlaceProtectBlock.getValue() && placeProtectBlock(crystalPosition(placeTarget.basePos()))) {
                         return;
                     } else {
                         restoreOriginalHotbarSlotIfIdle();
@@ -561,6 +561,10 @@ public class CrystalAura extends Module {
             return false;
         }
 
+        return canUseCrystalBase(basePos);
+    }
+
+    private boolean canUseCrystalBase(BlockPos basePos) {
         if (!RotationUtility.isGrimDirection(basePos, Direction.UP) || !RotationUtility.canSee(basePos, Direction.UP)) {
             return false;
         }
@@ -575,7 +579,12 @@ public class CrystalAura extends Module {
             return false;
         }
 
-        AABB crystalSpawnBox = new AABB(
+        return mc.level.getEntities(null, crystalSpawnBox(basePos)).isEmpty();
+    }
+
+    private AABB crystalSpawnBox(BlockPos basePos) {
+        BlockPos crystalBlockPos = basePos.above();
+        return new AABB(
                 crystalBlockPos.getX(),
                 crystalBlockPos.getY(),
                 crystalBlockPos.getZ(),
@@ -583,7 +592,6 @@ public class CrystalAura extends Module {
                 crystalBlockPos.getY() + 2.0D,
                 crystalBlockPos.getZ() + 1.0D
         );
-        return mc.level.getEntities(null, crystalSpawnBox).isEmpty();
     }
 
     private boolean isCrystalBase(BlockPos pos) {
@@ -666,7 +674,7 @@ public class CrystalAura extends Module {
     }
 
     private boolean placeCrystal(BlockPos basePos) {
-        int crystalSlot = InventoryUtility.findHotbarSlot(Items.END_CRYSTAL);
+        int crystalSlot = findCrystalSlot();
         if (!Inventory.isHotbarSlot(crystalSlot)) {
             return false;
         }
@@ -688,18 +696,14 @@ public class CrystalAura extends Module {
         return useHotbarOnBlock(blockSlot, clickFace.blockPos(), clickFace.direction());
     }
 
-    private boolean placeProtectBlock() {
+    private boolean placeProtectBlock(Vec3 explosionPos) {
         int blockSlot = findSupportBlockSlot();
-        if (!Inventory.isHotbarSlot(blockSlot)) {
+        if (!Inventory.isHotbarSlot(blockSlot) || !Inventory.isHotbarSlot(findCrystalSlot())) {
             return false;
         }
 
-        for (BlockPos pos : protectBlockPositions()) {
-            if (isCoverBlock(pos)) {
-                return false;
-            }
-
-            if (!canPlaceBlockAt(pos)) {
+        for (BlockPos pos : protectBlockPositions(explosionPos)) {
+            if (!wouldCoverExplosion(pos, explosionPos) || !canPlaceBlockAt(pos)) {
                 continue;
             }
 
@@ -712,41 +716,80 @@ public class CrystalAura extends Module {
         return false;
     }
 
-    private List<BlockPos> protectBlockPositions() {
-        Direction facing = Direction.fromYRot(mc.player.getYRot());
-        BlockPos feet = mc.player.blockPosition();
-        BlockPos front = feet.relative(facing);
-        return List.of(front, front.above());
+    private List<BlockPos> protectBlockPositions(Vec3 explosionPos) {
+        List<BlockPos> positions = new ArrayList<>();
+        Vec3 eyePos = mc.player.getEyePosition();
+        Vec3 delta = explosionPos.subtract(eyePos);
+        double distance = delta.length();
+        if (distance <= 1.0E-6D) {
+            return positions;
+        }
+
+        int steps = Mth.clamp((int) Math.ceil(distance * 4.0D), 2, 32);
+        for (int step = 1; step < steps; step++) {
+            Vec3 sample = eyePos.add(delta.scale((double) step / steps));
+            BlockPos samplePos = BlockPos.containing(sample);
+            addProtectBlockPosition(positions, samplePos);
+            addProtectBlockPosition(positions, samplePos.below());
+        }
+
+        positions.sort(Comparator.comparingDouble(pos -> Vec3.atCenterOf(pos).distanceToSqr(eyePos)));
+        return positions;
     }
 
-    private boolean isCoverBlock(BlockPos pos) {
-        BlockState state = mc.level.getBlockState(pos);
-        return !state.canBeReplaced() && state.blocksMotion();
+    private void addProtectBlockPosition(List<BlockPos> positions, BlockPos pos) {
+        if (!positions.contains(pos)) {
+            positions.add(pos);
+        }
+    }
+
+    private boolean wouldCoverExplosion(BlockPos pos, Vec3 explosionPos) {
+        return intersectsSegment(new AABB(pos).inflate(1.0E-4D), mc.player.getEyePosition(), explosionPos);
+    }
+
+    private boolean intersectsSegment(AABB box, Vec3 start, Vec3 end) {
+        SegmentRange range = new SegmentRange(0.0D, 1.0D);
+        range = clipSegmentAxis(start.x, end.x - start.x, box.minX, box.maxX, range);
+        if (range == null) {
+            return false;
+        }
+
+        range = clipSegmentAxis(start.y, end.y - start.y, box.minY, box.maxY, range);
+        if (range == null) {
+            return false;
+        }
+
+        return clipSegmentAxis(start.z, end.z - start.z, box.minZ, box.maxZ, range) != null;
+    }
+
+    private SegmentRange clipSegmentAxis(double start, double delta, double min, double max, SegmentRange range) {
+        if (Math.abs(delta) <= 1.0E-8D) {
+            return start >= min && start <= max ? range : null;
+        }
+
+        double enter = (min - start) / delta;
+        double exit = (max - start) / delta;
+        if (enter > exit) {
+            double swap = enter;
+            enter = exit;
+            exit = swap;
+        }
+
+        double clippedMin = Math.max(range.min(), enter);
+        double clippedMax = Math.min(range.max(), exit);
+        return clippedMin <= clippedMax ? new SegmentRange(clippedMin, clippedMax) : null;
     }
 
     private SupportTarget findBestSupportBlock(List<LivingEntity> targets) {
+        if (!canPlanSupportBlock()) {
+            return null;
+        }
+
         SupportTarget best = null;
 
         for (LivingEntity target : targets) {
             for (BlockPos basePos : scanBasePositions(target)) {
-                if (!canPlaceBlockAt(basePos)) {
-                    continue;
-                }
-
-                BlockPos crystalBlockPos = basePos.above();
-                if (!mc.level.isEmptyBlock(crystalBlockPos)) {
-                    continue;
-                }
-
-                AABB crystalSpawnBox = new AABB(
-                        crystalBlockPos.getX(),
-                        crystalBlockPos.getY(),
-                        crystalBlockPos.getZ(),
-                        crystalBlockPos.getX() + 1.0D,
-                        crystalBlockPos.getY() + 2.0D,
-                        crystalBlockPos.getZ() + 1.0D
-                );
-                if (!mc.level.getEntities(null, crystalSpawnBox).isEmpty()) {
+                if (!canPlaceSupportBlockAt(basePos)) {
                     continue;
                 }
 
@@ -777,6 +820,17 @@ public class CrystalAura extends Module {
         return best;
     }
 
+    private boolean canPlanSupportBlock() {
+        return Inventory.isHotbarSlot(findCrystalSlot())
+                && Inventory.isHotbarSlot(findSupportBlockSlot());
+    }
+
+    private boolean canPlaceSupportBlockAt(BlockPos basePos) {
+        return canPlaceBlockAt(basePos)
+                && canUseCrystalBase(basePos)
+                && findClickFace(basePos) != null;
+    }
+
     private boolean canPlaceBlockAt(BlockPos pos) {
         if (mc.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) > placeRange.getValue() * placeRange.getValue()) {
             return false;
@@ -788,7 +842,8 @@ public class CrystalAura extends Module {
         }
 
         AABB blockBox = new AABB(pos);
-        return mc.level.noCollision(mc.player, blockBox);
+        return mc.level.noCollision(mc.player, blockBox)
+                && mc.level.getEntities(null, blockBox).isEmpty();
     }
 
     private ClickFace findClickFace(BlockPos targetPos) {
@@ -1268,6 +1323,10 @@ public class CrystalAura extends Module {
         return InventoryUtility.findHotbarSlot(stack -> stack.is(Blocks.BEDROCK.asItem()));
     }
 
+    private int findCrystalSlot() {
+        return InventoryUtility.findHotbarSlot(Items.END_CRYSTAL);
+    }
+
     private boolean isSupportBlockStack(ItemStack stack) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) {
             return false;
@@ -1309,6 +1368,9 @@ public class CrystalAura extends Module {
     }
 
     private record ClickFace(BlockPos blockPos, Direction direction) {
+    }
+
+    private record SegmentRange(double min, double max) {
     }
 
     private record QueuedAction(
