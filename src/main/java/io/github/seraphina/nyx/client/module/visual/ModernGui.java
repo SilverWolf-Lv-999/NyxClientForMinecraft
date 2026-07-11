@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.module.visual;
 
 import com.google.common.collect.Ordering;
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import com.mojang.authlib.GameProfile;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
@@ -15,6 +16,9 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractButton;
+import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -33,6 +37,7 @@ import net.minecraft.network.chat.numbers.StyledFormat;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.ARGB;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.util.StringUtil;
 import net.minecraft.world.TickRateManager;
@@ -237,6 +242,34 @@ public class ModernGui extends Module {
     private static final float RECIPE_BOOK_HEIGHT = 166.0F;
     private static final float RECIPE_BOOK_RADIUS = 8.0F;
     private static final float RECIPE_BOOK_HEADER_HEIGHT = 28.0F;
+    private static final float BUTTON_RADIUS = 6.0F;
+    private static final int BUTTON_FILL_TOP = 0xE6151822;
+    private static final int BUTTON_FILL_BOTTOM = 0xE60E1018;
+    private static final int BUTTON_HOVER_TOP = 0xF01F2636;
+    private static final int BUTTON_HOVER_BOTTOM = 0xF0161B28;
+    private static final int BUTTON_DISABLED_TOP = 0x99101218;
+    private static final int BUTTON_DISABLED_BOTTOM = 0x990B0C10;
+    private static final int BUTTON_BORDER = 0x28FFFFFF;
+    private static final int BUTTON_BORDER_HOVER = 0xAA57C7FF;
+    private static final int BUTTON_BORDER_DISABLED = 0x16FFFFFF;
+    private static final int BUTTON_ACCENT = 0xFF57C7FF;
+    private static final int BUTTON_ACCENT_FOCUSED = 0xFF3D81F7;
+    private static final int BUTTON_TOP_HIGHLIGHT = 0x22FFFFFF;
+    private static final int SLIDER_FILL_START = 0xFF57C7FF;
+    private static final int SLIDER_FILL_END = 0xFF3D81F7;
+    private static final float TOOLTIP_PADDING_X = 5.0F;
+    private static final float TOOLTIP_PADDING_TOP = 5.0F;
+    private static final float TOOLTIP_PADDING_BOTTOM = 5.0F;
+    private static final float TOOLTIP_RADIUS = 5.0F;
+    private static final float TOOLTIP_FONT_SIZE = 9.0F;
+    private static final int TOOLTIP_FILL_TOP = 0xF0141824;
+    private static final int TOOLTIP_FILL_BOTTOM = 0xF0090B12;
+    private static final int TOOLTIP_BORDER = 0x30FFFFFF;
+    private static final int TOOLTIP_TOP_HIGHLIGHT = 0x20FFFFFF;
+    private static final int TOOLTIP_TEXT = 0xFFFFFFFF;
+    private static final int TOOLTIP_TEXT_SHADOW = 0x88000000;
+    private static final String NYX_CLIENT_PACKAGE_PREFIX = "io.github.seraphina.nyx.client.";
+    private static final String NYX_UI_PACKAGE_PREFIX = "io.github.seraphina.nyx.client.ui.";
     private static final String MINECRAFT_NAMESPACE = "minecraft";
     private static final String CONTAINER_TEXTURE_PREFIX = "textures/gui/container/";
     private static final String RECIPE_BOOK_TEXTURE = "textures/gui/recipe_book.png";
@@ -250,6 +283,8 @@ public class ModernGui extends Module {
     public final BoolValue potionEffects = ValueBuild.boolSetting("potion effects", true, this);
     public final BoolValue tabList = ValueBuild.boolSetting("tab list", true, this);
     public final BoolValue containers = ValueBuild.boolSetting("containers", true, this);
+    public final BoolValue buttons = ValueBuild.boolSetting("buttons", true, this);
+    public final BoolValue tooltips = ValueBuild.boolSetting("tooltips", true, this);
 
     public boolean shouldReplaceStatusHearts() {
         return shouldReplaceStatusBars();
@@ -305,6 +340,35 @@ public class ModernGui extends Module {
         return isEnabled() && containers.getValue();
     }
 
+    public boolean shouldReplaceButtons() {
+        return isEnabled() && buttons.getValue();
+    }
+
+    public boolean shouldReplaceTooltips() {
+        return isEnabled() && tooltips.getValue();
+    }
+
+    public boolean shouldReplaceButton(AbstractButton button) {
+        return shouldReplaceWidget(button);
+    }
+
+    public boolean shouldReplaceSlider(AbstractSliderButton slider) {
+        return shouldReplaceWidget(slider);
+    }
+
+    private boolean shouldReplaceWidget(AbstractWidget widget) {
+        if (!shouldReplaceButtons() || widget == null) {
+            return false;
+        }
+
+        if (widget.getClass().getName().startsWith(NYX_CLIENT_PACKAGE_PREFIX)) {
+            return false;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft.screen == null || !minecraft.screen.getClass().getName().startsWith(NYX_UI_PACKAGE_PREFIX);
+    }
+
     public void beginContainerTextureReplacement() {
         this.containerTextureReplacementDepth++;
     }
@@ -332,6 +396,202 @@ public class ModernGui extends Module {
             && path.endsWith(".png"))
             || (this.recipeBookTextureReplacementDepth > 0
             && RECIPE_BOOK_TEXTURE.equals(path));
+    }
+
+    public boolean renderButton(GuiGraphics graphics, AbstractButton button, float alpha) {
+        if (!shouldReplaceButton(button)) {
+            return false;
+        }
+
+        float opacity = clamp(alpha, 0.0F, 1.0F);
+        boolean active = button.active;
+        boolean highlighted = active && button.isHoveredOrFocused();
+        float highlight = highlighted ? 1.0F : 0.0F;
+        float disabledOpacity = active ? opacity : opacity * 0.58F;
+        float x = button.getX();
+        float y = button.getY();
+        float width = button.getWidth();
+        float height = button.getHeight();
+        float radius = Math.min(BUTTON_RADIUS, Math.max(2.0F, height * 0.5F));
+
+        int top = active
+            ? Render2DUtility.mix(BUTTON_FILL_TOP, BUTTON_HOVER_TOP, highlight)
+            : BUTTON_DISABLED_TOP;
+        int bottom = active
+            ? Render2DUtility.mix(BUTTON_FILL_BOTTOM, BUTTON_HOVER_BOTTOM, highlight)
+            : BUTTON_DISABLED_BOTTOM;
+        int border = active
+            ? Render2DUtility.mix(BUTTON_BORDER, BUTTON_BORDER_HOVER, highlight)
+            : BUTTON_BORDER_DISABLED;
+
+        Render2DUtility.drawDropShadow(
+            x,
+            y,
+            width,
+            height,
+            radius,
+            0.0F,
+            highlighted ? 4.0F : 2.0F,
+            highlighted ? 14.0F : 9.0F,
+            Render2DUtility.applyOpacity(SHADOW, disabledOpacity * (highlighted ? 0.74F : 0.42F))
+        );
+        Render2DUtility.drawRoundedVerticalGradientRect(
+            x,
+            y,
+            width,
+            height,
+            radius,
+            Render2DUtility.applyOpacity(top, disabledOpacity),
+            Render2DUtility.applyOpacity(bottom, disabledOpacity)
+        );
+        Render2DUtility.drawRoundedRect(
+            x + 1.0F,
+            y + 1.0F,
+            Math.max(0.0F, width - 2.0F),
+            1.0F,
+            0.5F,
+            Render2DUtility.applyOpacity(BUTTON_TOP_HIGHLIGHT, disabledOpacity)
+        );
+
+        if (highlighted && width > 14.0F && height > 10.0F) {
+            int accent = button.isFocused() ? BUTTON_ACCENT_FOCUSED : BUTTON_ACCENT;
+            Render2DUtility.drawRoundedRect(
+                x + 4.0F,
+                y + 4.0F,
+                2.0F,
+                Math.max(2.0F, height - 8.0F),
+                1.0F,
+                Render2DUtility.applyOpacity(accent, disabledOpacity)
+            );
+        }
+
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, height, radius, 1.0F, Render2DUtility.applyOpacity(border, disabledOpacity));
+
+        int textColor = ARGB.color(disabledOpacity, button.getFGColor());
+        FontRenderer font = FontManager.getAppleTextRenderer(Math.max(7.0F, Math.min(9.0F, height * 0.45F)));
+        String text = trimToWidth(font, button.getMessage().getString(), Math.max(0.0F, width - 14.0F));
+        font.drawCenteredString(text, x + width * 0.5F, y + (height - font.getLineHeight()) * 0.5F - 0.5F, textColor);
+        if (button.isHovered()) {
+            graphics.requestCursor(button.isActive() ? CursorTypes.POINTING_HAND : CursorTypes.NOT_ALLOWED);
+        }
+
+        return true;
+    }
+
+    public boolean renderSlider(GuiGraphics graphics, AbstractSliderButton slider, double value, boolean dragging, float alpha) {
+        if (!shouldReplaceSlider(slider)) {
+            return false;
+        }
+
+        float opacity = clamp(alpha, 0.0F, 1.0F);
+        boolean active = slider.active;
+        boolean highlighted = active && slider.isHoveredOrFocused();
+        float highlight = highlighted ? 1.0F : 0.0F;
+        float disabledOpacity = active ? opacity : opacity * 0.58F;
+        float x = slider.getX();
+        float y = slider.getY();
+        float width = slider.getWidth();
+        float height = slider.getHeight();
+        float radius = Math.min(BUTTON_RADIUS, Math.max(2.0F, height * 0.5F));
+
+        int top = active
+            ? Render2DUtility.mix(BUTTON_FILL_TOP, BUTTON_HOVER_TOP, highlight)
+            : BUTTON_DISABLED_TOP;
+        int bottom = active
+            ? Render2DUtility.mix(BUTTON_FILL_BOTTOM, BUTTON_HOVER_BOTTOM, highlight)
+            : BUTTON_DISABLED_BOTTOM;
+        int border = active
+            ? Render2DUtility.mix(BUTTON_BORDER, BUTTON_BORDER_HOVER, highlight)
+            : BUTTON_BORDER_DISABLED;
+
+        Render2DUtility.drawDropShadow(
+            x,
+            y,
+            width,
+            height,
+            radius,
+            0.0F,
+            highlighted ? 4.0F : 2.0F,
+            highlighted ? 14.0F : 9.0F,
+            Render2DUtility.applyOpacity(SHADOW, disabledOpacity * (highlighted ? 0.74F : 0.42F))
+        );
+        Render2DUtility.drawRoundedVerticalGradientRect(
+            x,
+            y,
+            width,
+            height,
+            radius,
+            Render2DUtility.applyOpacity(top, disabledOpacity),
+            Render2DUtility.applyOpacity(bottom, disabledOpacity)
+        );
+        float progress = clamp((float)value, 0.0F, 1.0F);
+        float fillWidth = width * progress;
+        if (fillWidth > 0.25F) {
+            Render2DUtility.drawRoundedHorizontalGradientRect(
+                x,
+                y,
+                fillWidth,
+                height,
+                Math.min(radius, fillWidth * 0.5F),
+                Render2DUtility.applyOpacity(SLIDER_FILL_START, disabledOpacity * 0.72F),
+                Render2DUtility.applyOpacity(SLIDER_FILL_END, disabledOpacity * 0.72F)
+            );
+        }
+        Render2DUtility.drawRoundedRect(
+            x + 1.0F,
+            y + 1.0F,
+            Math.max(0.0F, width - 2.0F),
+            1.0F,
+            0.5F,
+            Render2DUtility.applyOpacity(BUTTON_TOP_HIGHLIGHT, disabledOpacity)
+        );
+
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, height, radius, 1.0F, Render2DUtility.applyOpacity(border, disabledOpacity));
+
+        int textColor = ARGB.color(disabledOpacity, slider.getFGColor());
+        FontRenderer font = FontManager.getAppleTextRenderer(Math.max(7.0F, Math.min(9.0F, height * 0.45F)));
+        String text = trimToWidth(font, slider.getMessage().getString(), Math.max(0.0F, width - 20.0F));
+        float textY = y + Math.max(1.0F, (height - font.getLineHeight()) * 0.35F);
+        font.drawCenteredString(text, x + width * 0.5F, textY, textColor);
+        if (slider.isHovered()) {
+            graphics.requestCursor(slider.isActive() ? (dragging ? CursorTypes.RESIZE_EW : CursorTypes.POINTING_HAND) : CursorTypes.NOT_ALLOWED);
+        }
+
+        return true;
+    }
+
+    public boolean renderTooltipBackground(GuiGraphics graphics, int x, int y, int width, int height, @Nullable Identifier tooltipStyle) {
+        if (!shouldReplaceTooltips()) {
+            return false;
+        }
+
+        float panelX = x - TOOLTIP_PADDING_X;
+        float panelY = y - TOOLTIP_PADDING_TOP;
+        float panelWidth = Math.max(10.0F, width + TOOLTIP_PADDING_X * 2.0F);
+        float panelHeight = Math.max(10.0F, height + TOOLTIP_PADDING_TOP + TOOLTIP_PADDING_BOTTOM);
+        float radius = Math.min(TOOLTIP_RADIUS, panelHeight * 0.5F);
+
+        Render2DUtility.drawDropShadow(panelX, panelY, panelWidth, panelHeight, radius, 0.0F, 4.0F, 14.0F, SHADOW);
+        Render2DUtility.drawRoundedVerticalGradientRect(panelX, panelY, panelWidth, panelHeight, radius, TOOLTIP_FILL_TOP, TOOLTIP_FILL_BOTTOM);
+        Render2DUtility.drawRoundedRect(panelX + 1.0F, panelY + 1.0F, Math.max(0.0F, panelWidth - 2.0F), 1.0F, 0.5F, TOOLTIP_TOP_HIGHLIGHT);
+        Render2DUtility.drawOutlineRoundedRect(panelX, panelY, panelWidth, panelHeight, radius, 1.0F, TOOLTIP_BORDER);
+        return true;
+    }
+
+    public int modernTooltipTextWidth(FormattedCharSequence text) {
+        FontRenderer font = tooltipFont();
+        return (int)Math.ceil(textWidth(font, textSegments(text, TOOLTIP_TEXT)));
+    }
+
+    public int modernTooltipTextHeight() {
+        return Math.max(10, (int)Math.ceil(tooltipFont().getLineHeight()));
+    }
+
+    public void renderTooltipText(FormattedCharSequence text, float x, float y) {
+        FontRenderer font = tooltipFont();
+        TextSegment[] segments = textSegments(text, TOOLTIP_TEXT);
+        drawTextSegments(font, segments, x + 0.75F, y + 0.75F, TOOLTIP_TEXT_SHADOW);
+        drawTextSegments(font, segments, x, y);
     }
 
     public void renderStatusBars(GuiGraphics graphics, Player player, int x, int y, int rowSpacing, int displayHealth, int absorption, boolean flashing) {
@@ -1421,12 +1681,20 @@ public class ModernGui extends Module {
         return Math.max(min, Math.min(max, value));
     }
 
+    private FontRenderer tooltipFont() {
+        return FontManager.getClickGuiRenderer(TOOLTIP_FONT_SIZE);
+    }
+
     private TextSegment[] textSegments(Component component, int defaultColor) {
+        return replaceServerAddresses(textSegments(component.getVisualOrderText(), defaultColor));
+    }
+
+    private TextSegment[] textSegments(FormattedCharSequence text, int defaultColor) {
         List<TextSegment> segments = new ArrayList<>();
         StringBuilder builder = new StringBuilder();
         int[] activeColor = {defaultColor};
 
-        component.getVisualOrderText().accept((index, style, codePoint) -> {
+        text.accept((index, style, codePoint) -> {
             int color = textColor(style, defaultColor);
             if (color != activeColor[0] && !builder.isEmpty()) {
                 segments.add(new TextSegment(builder.toString(), activeColor[0]));
@@ -1442,7 +1710,7 @@ public class ModernGui extends Module {
             segments.add(new TextSegment(builder.toString(), activeColor[0]));
         }
 
-        return replaceServerAddresses(segments);
+        return segments.toArray(TextSegment[]::new);
     }
 
     private int textColor(Style style, int defaultColor) {
@@ -1450,7 +1718,7 @@ public class ModernGui extends Module {
         return color == null ? defaultColor : 0xFF000000 | color.getValue();
     }
 
-    private TextSegment[] replaceServerAddresses(List<TextSegment> segments) {
+    private TextSegment[] replaceServerAddresses(TextSegment[] segments) {
         List<TextSegment> replaced = new ArrayList<>();
         boolean changed = false;
         for (TextSegment segment : segments) {
@@ -1475,7 +1743,7 @@ public class ModernGui extends Module {
             }
         }
 
-        return (changed ? replaced : segments).toArray(TextSegment[]::new);
+        return changed ? replaced.toArray(TextSegment[]::new) : segments;
     }
 
     private float textWidth(FontRenderer font, TextSegment[] segments) {
@@ -1490,6 +1758,14 @@ public class ModernGui extends Module {
         float currentX = x;
         for (TextSegment segment : segments) {
             drawTextSegment(font, segment, currentX, y);
+            currentX += font.getStringWidth(segment.text);
+        }
+    }
+
+    private void drawTextSegments(FontRenderer font, TextSegment[] segments, float x, float y, int colorOverride) {
+        float currentX = x;
+        for (TextSegment segment : segments) {
+            font.drawString(segment.text, currentX, y, colorOverride);
             currentX += font.getStringWidth(segment.text);
         }
     }

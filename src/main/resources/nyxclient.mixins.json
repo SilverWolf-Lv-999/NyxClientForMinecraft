@@ -6,11 +6,14 @@
   "mixins": [
   ],
   "client": [
+    "AbstractButtonMixin",
+    "AbstractSliderButtonMixin",
     "AbstractContainerScreenAccessor",
     "AbstractContainerScreenMixin",
     "BlockCollisionsMixin",
     "CameraMixin",
     "ChatScreenMixin",
+    "ClientTextTooltipMixin",
     "ClientPacketListenerMixin",
     "CommandSuggestionsMixin",
     "ConnectionMixin",
@@ -41,7 +44,8 @@
     "ParticleEngineMixin",
     "PlayerMixin",
     "PlayerTabOverlayMixin",
-    "RecipeBookComponentMixin"
+    "RecipeBookComponentMixin",
+    "TooltipRenderUtilMixin"
   ],
   "injectors": {
     "defaultRequire": 1
