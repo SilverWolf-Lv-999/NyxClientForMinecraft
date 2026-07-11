@@ -64,6 +64,7 @@ public class AnchorAura extends Module {
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DEDUP_PITCH_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DUPLICATE_EPSILON = 1.0E-4F;
+    private static final int MOVEMENT_FIX_SPRINT_LOCK_TICKS = 2;
     private static final Direction[] PLACE_DIRECTIONS = {
             Direction.UP,
             Direction.NORTH,
@@ -117,6 +118,7 @@ public class AnchorAura extends Module {
     private boolean releaseRotationsAfterPosition;
     private boolean postUseMovePacketSeen;
     private Vector2f postUseRotations;
+    private int movementFixSprintLockTicks;
     private int placeRotationVariant;
     private BlockPos activeAnchorPos;
     private Stage stage = Stage.PLACE_ANCHOR;
@@ -275,27 +277,30 @@ public class AnchorAura extends Module {
         movementFixAction = null;
 
         if (!shouldFixMovement(event)) {
+            applyMovementFixSprintLock(event);
             return;
         }
 
         Vector2f rotations = movementRotations();
         if (rotations == null) {
+            applyMovementFixSprintLock(event);
             return;
         }
 
+        float playerYaw = mc.player.getYRot();
         MovementInput fixedInput = correctedMovementInput(
                 event.getForward(),
                 event.getStrafe(),
-                mc.player.getYRot(),
+                playerYaw,
                 rotations.x
         );
 
         event.setForward(fixedInput.forward());
         event.setStrafe(fixedInput.strafe());
-        if (fixedInput.forward() <= 0.0F) {
-            event.setSprint(false);
-            stopSprintingForMovementFix();
+        if (shouldLockSprintForMovementFix(fixedInput, playerYaw, rotations.x)) {
+            movementFixSprintLockTicks = MOVEMENT_FIX_SPRINT_LOCK_TICKS;
         }
+        applyMovementFixSprintLock(event);
 
         movementFixRotations = new Vector2f(rotations);
         movementFixAction = queuedAction == null ? null : actionWithRotations(queuedAction, rotations);
@@ -337,6 +342,10 @@ public class AnchorAura extends Module {
     private void tickActionDelays() {
         if (postUseSlotDelayTicks > 0) {
             postUseSlotDelayTicks--;
+        }
+
+        if (movementFixSprintLockTicks > 0) {
+            movementFixSprintLockTicks--;
         }
     }
 
@@ -1155,6 +1164,21 @@ public class AnchorAura extends Module {
         }
     }
 
+    private boolean shouldLockSprintForMovementFix(MovementInput fixedInput, float playerYaw, float movementYaw) {
+        return fixedInput.forward() <= 0.0F
+                || fixedInput.strafe() != 0.0F
+                || Math.abs(Mth.wrapDegrees(movementYaw - playerYaw)) > 35.0F;
+    }
+
+    private void applyMovementFixSprintLock(MoveInputEvent event) {
+        if (movementFixSprintLockTicks <= 0) {
+            return;
+        }
+
+        event.setSprint(false);
+        stopSprintingForMovementFix();
+    }
+
     private MovementInput correctedMovementInput(float forward, float strafe, float fromYaw, float toYaw) {
         HorizontalVector wanted = movementVector(forward, strafe, fromYaw);
         if (wanted.lengthSqr() <= 1.0E-8D) {
@@ -1330,6 +1354,7 @@ public class AnchorAura extends Module {
         releaseRotationsAfterPosition = false;
         postUseMovePacketSeen = false;
         postUseRotations = null;
+        movementFixSprintLockTicks = 0;
         placeRotationVariant = 0;
         activeAnchorPos = null;
         stage = Stage.PLACE_ANCHOR;

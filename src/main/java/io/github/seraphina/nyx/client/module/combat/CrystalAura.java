@@ -64,6 +64,8 @@ public class CrystalAura extends Module {
     private static final float OUTGOING_ROTATION_DEDUP_YAW_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DEDUP_PITCH_STEP = 1.0F;
     private static final float OUTGOING_ROTATION_DUPLICATE_EPSILON = 1.0E-4F;
+    private static final float PLACE_YAW_DELTA_DUPLICATE_EPSILON = 1.0E-4F;
+    private static final float GRIM_DUPLICATE_ROT_PLACE_MIN_YAW_DELTA = 2.0F;
     private static final Direction[] PLACE_DIRECTIONS = {
             Direction.UP,
             Direction.NORTH,
@@ -144,6 +146,7 @@ public class CrystalAura extends Module {
     private QueuedAction syncedAction;
     private boolean controllingRotations;
     private int placeRotationVariant;
+    private float lastPlacedYawDelta = Float.NaN;
     private BlockPos pendingSupportBasePos;
 
     @Override
@@ -900,8 +903,16 @@ public class CrystalAura extends Module {
         }
 
         Vec3 hitVec = blockHitVec(blockPos, direction);
-        Vector2f appliedRotations = preparePlaceRotations(blockPos, direction, RotationUtility.calculate(hitVec));
-        queuedAction = QueuedAction.useBlock(hotbarSlot, blockPos, direction, hitVec, appliedRotations);
+        Vector2f previousRotations = currentSyncedRotations();
+        Vector2f appliedRotations = preparePlaceRotations(RotationUtility.calculate(hitVec), previousRotations);
+        queuedAction = QueuedAction.useBlock(
+                hotbarSlot,
+                blockPos,
+                direction,
+                hitVec,
+                appliedRotations,
+                placeYawDelta(previousRotations, appliedRotations)
+        );
         return true;
     }
 
@@ -982,6 +993,7 @@ public class CrystalAura extends Module {
         }
 
         if (result.consumesAction()) {
+            updateLastPlacedYawDelta(action);
             mc.player.swing(InteractionHand.MAIN_HAND);
             mc.gameRenderer.itemInHandRenderer.itemUsed(InteractionHand.MAIN_HAND);
             placeRotationVariant++;
@@ -999,16 +1011,68 @@ public class CrystalAura extends Module {
         );
     }
 
-    private Vector2f preparePlaceRotations(BlockPos blockPos, Direction direction, Vector2f rotations) {
+    private Vector2f preparePlaceRotations(Vector2f rotations, Vector2f previousRotations) {
         Vector2f baseRotations = legitimizeRotations(rotations);
         Vector2f placeRotations = variedPlaceRotations(baseRotations);
         Vector2f uniqueRotations = makeUniqueOutgoingRotations(placeRotations);
-        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)
-                && closeActionRotations(uniqueRotations, baseRotations)) {
+        if (isUsablePlaceRotation(uniqueRotations, baseRotations, previousRotations)) {
             return prepareActionRotations(uniqueRotations);
         }
 
-        return prepareActionRotations(placeRotations);
+        Vector2f uniqueDeltaRotations = makeUniquePlaceYawDeltaRotations(placeRotations, baseRotations, previousRotations);
+        return prepareActionRotations(uniqueDeltaRotations);
+    }
+
+    private Vector2f makeUniquePlaceYawDeltaRotations(Vector2f rotations, Vector2f baseRotations, Vector2f previousRotations) {
+        float[] yawOffsets = {
+                0.35F,
+                -0.35F,
+                0.7F,
+                -0.7F,
+                1.05F,
+                -1.05F,
+                OUTGOING_ROTATION_DEDUP_YAW_STEP,
+                -OUTGOING_ROTATION_DEDUP_YAW_STEP
+        };
+
+        for (float yawOffset : yawOffsets) {
+            Vector2f candidate = legitimizeRotations(RotationUtility.applySensitivityPatch(
+                    new Vector2f(rotations.x + yawOffset, rotations.y),
+                    previousRotations
+            ));
+            if (isUsablePlaceRotation(candidate, baseRotations, previousRotations)) {
+                return candidate;
+            }
+        }
+
+        return rotations;
+    }
+
+    private boolean isUsablePlaceRotation(Vector2f rotations, Vector2f baseRotations, Vector2f previousRotations) {
+        return !sameOutgoingRotations(rotations, lastOutgoingRotations)
+                && closeActionRotations(rotations, baseRotations)
+                && !samePlacedYawDelta(placeYawDelta(previousRotations, rotations), lastPlacedYawDelta);
+    }
+
+    private float placeYawDelta(Vector2f previousRotations, Vector2f rotations) {
+        if (previousRotations == null || rotations == null) {
+            return Float.NaN;
+        }
+
+        return Math.abs(Mth.wrapDegrees(rotations.x - previousRotations.x));
+    }
+
+    private boolean samePlacedYawDelta(float yawDelta, float previousYawDelta) {
+        return !Float.isNaN(yawDelta)
+                && !Float.isNaN(previousYawDelta)
+                && yawDelta > GRIM_DUPLICATE_ROT_PLACE_MIN_YAW_DELTA
+                && Math.abs(yawDelta - previousYawDelta) <= PLACE_YAW_DELTA_DUPLICATE_EPSILON;
+    }
+
+    private void updateLastPlacedYawDelta(QueuedAction action) {
+        if (action.kind() == QueuedActionKind.USE_BLOCK && !Float.isNaN(action.placeYawDelta())) {
+            lastPlacedYawDelta = action.placeYawDelta();
+        }
     }
 
     private Vector2f prepareActionRotations(Vector2f rotations) {
@@ -1381,6 +1445,7 @@ public class CrystalAura extends Module {
         lastOutgoingRotations = currentPlayerRotations();
         movementFixRotations = null;
         placeRotationVariant = 0;
+        lastPlacedYawDelta = Float.NaN;
         pendingSupportBasePos = null;
     }
 
@@ -1406,7 +1471,8 @@ public class CrystalAura extends Module {
             BlockPos blockPos,
             Direction direction,
             Vec3 hitVec,
-            Vector2f rotations
+            Vector2f rotations,
+            float placeYawDelta
     ) {
         private static QueuedAction breakCrystal(EndCrystal crystal, Vector2f rotations) {
             return new QueuedAction(
@@ -1416,11 +1482,12 @@ public class CrystalAura extends Module {
                     null,
                     null,
                     null,
-                    rotations == null ? null : new Vector2f(rotations)
+                    rotations == null ? null : new Vector2f(rotations),
+                    Float.NaN
             );
         }
 
-        private static QueuedAction useBlock(int hotbarSlot, BlockPos blockPos, Direction direction, Vec3 hitVec, Vector2f rotations) {
+        private static QueuedAction useBlock(int hotbarSlot, BlockPos blockPos, Direction direction, Vec3 hitVec, Vector2f rotations, float placeYawDelta) {
             return new QueuedAction(
                     QueuedActionKind.USE_BLOCK,
                     null,
@@ -1428,7 +1495,8 @@ public class CrystalAura extends Module {
                     blockPos,
                     direction,
                     hitVec,
-                    rotations == null ? null : new Vector2f(rotations)
+                    rotations == null ? null : new Vector2f(rotations),
+                    placeYawDelta
             );
         }
     }

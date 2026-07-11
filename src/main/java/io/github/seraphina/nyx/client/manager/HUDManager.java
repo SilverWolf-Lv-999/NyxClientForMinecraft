@@ -32,7 +32,7 @@ import java.util.Map;
 
 public final class HUDManager implements IMinecraft {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final int CONFIG_VERSION = 1;
+    private static final int CONFIG_VERSION = 2;
     private static final float MIN_SCALE = 0.5F;
     private static final float MAX_SCALE = 3.0F;
     private static final float SCALE_STEP = 0.08F;
@@ -585,6 +585,8 @@ public final class HUDManager implements IMinecraft {
         VerticalAnchor verticalAnchor = readVerticalAnchor(object);
         Float anchorX = readFloat(object, "anchorX");
         Float anchorY = readFloat(object, "anchorY");
+        Float anchorOffsetX = readFloat(object, "anchorOffsetX");
+        Float anchorOffsetY = readFloat(object, "anchorOffsetY");
 
         if (x == null || y == null) {
             return null;
@@ -597,7 +599,9 @@ public final class HUDManager implements IMinecraft {
             horizontalAnchor,
             verticalAnchor,
             anchorX,
-            anchorY
+            anchorY,
+            anchorOffsetX,
+            anchorOffsetY
         );
     }
 
@@ -666,6 +670,8 @@ public final class HUDManager implements IMinecraft {
             object.addProperty("scale", layout.scale);
             object.addProperty("horizontalAnchor", layout.horizontalAnchor.name().toLowerCase(Locale.ROOT));
             object.addProperty("verticalAnchor", layout.verticalAnchor.name().toLowerCase(Locale.ROOT));
+            object.addProperty("anchorOffsetX", layout.anchorOffsetX);
+            object.addProperty("anchorOffsetY", layout.anchorOffsetY);
             object.addProperty("anchorX", layout.anchorX);
             object.addProperty("anchorY", layout.anchorY);
             components.add(component.getId(), object);
@@ -717,18 +723,30 @@ public final class HUDManager implements IMinecraft {
             layout.verticalAnchor = inferVerticalAnchor(layout.y, base, layout.scale);
         }
 
-        if (!layout.hasAnchorX) {
-            layout.anchorX = horizontalAnchorScreen(layout.x, base, layout.scale, layout.horizontalAnchor);
-            layout.hasAnchorX = true;
+        if (!layout.hasAnchorOffsetX) {
+            if (!layout.hasAnchorX) {
+                layout.anchorX = horizontalAnchorScreen(layout.x, base, layout.scale, layout.horizontalAnchor);
+                layout.hasAnchorX = true;
+            }
+            layout.anchorOffsetX = layout.anchorX - horizontalAnchorReference(layout.horizontalAnchor);
+            layout.hasAnchorOffsetX = true;
         }
 
-        if (!layout.hasAnchorY) {
-            layout.anchorY = verticalAnchorScreen(layout.y, base, layout.scale, layout.verticalAnchor);
-            layout.hasAnchorY = true;
+        if (!layout.hasAnchorOffsetY) {
+            if (!layout.hasAnchorY) {
+                layout.anchorY = verticalAnchorScreen(layout.y, base, layout.scale, layout.verticalAnchor);
+                layout.hasAnchorY = true;
+            }
+            layout.anchorOffsetY = layout.anchorY - verticalAnchorReference(layout.verticalAnchor);
+            layout.hasAnchorOffsetY = true;
         }
     }
 
     private static void resolveLayoutPosition(Layout layout, AABB base) {
+        layout.anchorX = horizontalAnchorReference(layout.horizontalAnchor) + layout.anchorOffsetX;
+        layout.anchorY = verticalAnchorReference(layout.verticalAnchor) + layout.anchorOffsetY;
+        layout.hasAnchorX = true;
+        layout.hasAnchorY = true;
         layout.x = layout.anchorX - horizontalAnchorLocal(base, layout.horizontalAnchor) * layout.scale;
         layout.y = layout.anchorY - verticalAnchorLocal(base, layout.verticalAnchor) * layout.scale;
     }
@@ -742,8 +760,12 @@ public final class HUDManager implements IMinecraft {
     private static void updateAnchorCoordinates(Layout layout, AABB base) {
         layout.anchorX = horizontalAnchorScreen(layout.x, base, layout.scale, layout.horizontalAnchor);
         layout.anchorY = verticalAnchorScreen(layout.y, base, layout.scale, layout.verticalAnchor);
+        layout.anchorOffsetX = layout.anchorX - horizontalAnchorReference(layout.horizontalAnchor);
+        layout.anchorOffsetY = layout.anchorY - verticalAnchorReference(layout.verticalAnchor);
         layout.hasAnchorX = true;
         layout.hasAnchorY = true;
+        layout.hasAnchorOffsetX = true;
+        layout.hasAnchorOffsetY = true;
     }
 
     private static HorizontalAnchor inferHorizontalAnchor(float x, AABB base, float scale) {
@@ -782,6 +804,30 @@ public final class HUDManager implements IMinecraft {
 
     private static float verticalAnchorScreen(float y, AABB base, float scale, VerticalAnchor anchor) {
         return y + verticalAnchorLocal(base, anchor) * scale;
+    }
+
+    private static float horizontalAnchorReference(HorizontalAnchor anchor) {
+        if (mc.getWindow() == null) {
+            return 0.0F;
+        }
+
+        return switch (anchor) {
+            case LEFT -> 0.0F;
+            case CENTER -> mc.getWindow().getGuiScaledWidth() * 0.5F;
+            case RIGHT -> mc.getWindow().getGuiScaledWidth();
+        };
+    }
+
+    private static float verticalAnchorReference(VerticalAnchor anchor) {
+        if (mc.getWindow() == null) {
+            return 0.0F;
+        }
+
+        return switch (anchor) {
+            case TOP -> 0.0F;
+            case CENTER -> mc.getWindow().getGuiScaledHeight() * 0.5F;
+            case BOTTOM -> mc.getWindow().getGuiScaledHeight();
+        };
     }
 
     private static float horizontalAnchorLocal(AABB base, HorizontalAnchor anchor) {
@@ -850,15 +896,19 @@ public final class HUDManager implements IMinecraft {
         private VerticalAnchor verticalAnchor;
         private float anchorX;
         private float anchorY;
+        private float anchorOffsetX;
+        private float anchorOffsetY;
         private boolean hasAnchorX;
         private boolean hasAnchorY;
+        private boolean hasAnchorOffsetX;
+        private boolean hasAnchorOffsetY;
 
         private Layout(float x, float y, float scale) {
-            this(x, y, scale, null, null, null, null);
+            this(x, y, scale, null, null, null, null, null, null);
         }
 
         private Layout(float x, float y, float scale, HorizontalAnchor horizontalAnchor, VerticalAnchor verticalAnchor,
-                       Float anchorX, Float anchorY) {
+                       Float anchorX, Float anchorY, Float anchorOffsetX, Float anchorOffsetY) {
             this.x = x;
             this.y = y;
             this.scale = MathUtility.clamp(scale, MIN_SCALE, MAX_SCALE);
@@ -871,6 +921,14 @@ public final class HUDManager implements IMinecraft {
             if (anchorY != null) {
                 this.anchorY = anchorY;
                 this.hasAnchorY = true;
+            }
+            if (anchorOffsetX != null) {
+                this.anchorOffsetX = anchorOffsetX;
+                this.hasAnchorOffsetX = true;
+            }
+            if (anchorOffsetY != null) {
+                this.anchorOffsetY = anchorOffsetY;
+                this.hasAnchorOffsetY = true;
             }
         }
     }
