@@ -64,11 +64,13 @@ public class ClickGuiUI extends Screen {
     private static final int AVATAR_TEXTURE_SIZE = 128;
     private static final int AVATAR_SUPERSAMPLE = 4;
     private static final long CATEGORY_SWITCH_ANIMATION_NANOS = 260_000_000L;
+    private static final long SCREEN_TRANSITION_ANIMATION_NANOS = 180_000_000L;
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
     private static final float MODULE_EXPAND_ANIMATION_SPEED = 13.0F;
     private static final float MODULE_TOGGLE_ANIMATION_SPEED = 16.0F;
     private static final float MODULE_HOVER_ANIMATION_SPEED = 18.0F;
+    private static final float SCREEN_TRANSITION_MIN_SCALE = 0.86F;
 
     private static final int SCREEN_DIM = 0xB005060A;
     private static final int PANEL_BACKGROUND = 0xFF0C0D11;
@@ -116,6 +118,10 @@ public class ClickGuiUI extends Screen {
     private long categorySwitchStartedAtNanos;
     private int categorySwitchDirection = 1;
     private float categorySwitchProgress = 1.0F;
+    private long screenTransitionStartedAtNanos;
+    private float screenTransitionProgress = 1.0F;
+    private boolean closing;
+    private boolean closingCompleted;
     private long lastAnimationFrameNanos;
     private float animationFrameSeconds = DEFAULT_FRAME_SECONDS;
     @Nullable
@@ -130,12 +136,34 @@ public class ClickGuiUI extends Screen {
     }
 
     @Override
+    protected void init() {
+        if (screenTransitionStartedAtNanos == 0L && !closing) {
+            beginOpenAnimation();
+        }
+    }
+
+    public void beginOpenAnimation() {
+        closing = false;
+        closingCompleted = false;
+        screenTransitionProgress = 0.0F;
+        screenTransitionStartedAtNanos = System.nanoTime();
+        lastAnimationFrameNanos = 0L;
+        draggingPanel = false;
+        capturedComponent = null;
+        blurComponentsExcept(null);
+    }
+
+    @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         Render2DUtility.withGuiGraphics(guiGraphics, () -> {
             updatePanelMetrics();
             ensureVisibleCategory();
             updateAnimationFrame();
+            updateScreenTransitionAnimation();
+            if (finishClosingIfNeeded()) {
+                return;
+            }
             updateCategorySwitchAnimation();
             updateModuleAnimations();
             updateScrollLimit();
@@ -144,14 +172,18 @@ public class ClickGuiUI extends Screen {
             int fixedMouseX = Math.round(mouseX * scale);
             int fixedMouseY = Math.round(mouseY * scale);
             Render2DUtility.withScale(1.0F / scale, 1.0F / scale, 0.0F, 0.0F, () -> {
-                Render2DUtility.drawRect(0.0F, 0.0F, fixedScreenWidth(), fixedScreenHeight(), SCREEN_DIM);
-                renderPanel(fixedMouseX, fixedMouseY);
+                Render2DUtility.drawRect(0.0F, 0.0F, fixedScreenWidth(), fixedScreenHeight(), screenDimColor());
+                Render2DUtility.withScale(screenTransitionScale(), screenTransitionScale(), panelCenterX(), panelCenterY(), () -> renderPanel(fixedMouseX, fixedMouseY));
             });
         });
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (!isInteractive()) {
+            return true;
+        }
+
         updatePanelMetrics();
         ensureVisibleCategory();
         updateCategorySwitchAnimation();
@@ -218,6 +250,10 @@ public class ClickGuiUI extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (!isInteractive()) {
+            return true;
+        }
+
         double fixedMouseX = fixedMouseX(event.x());
         double fixedMouseY = fixedMouseY(event.y());
 
@@ -241,6 +277,10 @@ public class ClickGuiUI extends Screen {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (!isInteractive()) {
+            return true;
+        }
+
         if (capturedComponent != null) {
             boolean handled = capturedComponent.mouseDragged(fixedMouseX(event.x()), fixedMouseY(event.y()), event.button(), dragX, dragY);
             updateScrollLimit();
@@ -262,6 +302,10 @@ public class ClickGuiUI extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (!isInteractive()) {
+            return true;
+        }
+
         updatePanelMetrics();
         updateCategorySwitchAnimation();
         updateScrollLimit();
@@ -284,6 +328,13 @@ public class ClickGuiUI extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (!isInteractive()) {
+            if (event.isEscape()) {
+                beginCloseAnimation();
+            }
+            return true;
+        }
+
         for (AbstractComponent component : valueComponents.values()) {
             if (component.keyPressed(event)) {
                 updateScrollLimit();
@@ -291,11 +342,20 @@ public class ClickGuiUI extends Screen {
             }
         }
 
+        if (event.isEscape()) {
+            beginCloseAnimation();
+            return true;
+        }
+
         return super.keyPressed(event);
     }
 
     @Override
     public boolean charTyped(CharacterEvent event) {
+        if (!isInteractive()) {
+            return true;
+        }
+
         for (AbstractComponent component : valueComponents.values()) {
             if (component.charTyped(event)) {
                 updateScrollLimit();
@@ -320,7 +380,22 @@ public class ClickGuiUI extends Screen {
         capturedComponent = null;
         blurComponentsExcept(null);
         closeAvatarTexture();
+        closing = false;
+        closingCompleted = false;
+        screenTransitionStartedAtNanos = 0L;
+        screenTransitionProgress = 1.0F;
+        lastAnimationFrameNanos = 0L;
         super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        beginCloseAnimation();
+    }
+
+    @Override
+    public boolean shouldCloseOnEsc() {
+        return false;
     }
 
     @Override
@@ -1016,6 +1091,67 @@ public class ClickGuiUI extends Screen {
         lastAnimationFrameNanos = now;
     }
 
+    private void updateScreenTransitionAnimation() {
+        if (screenTransitionStartedAtNanos == 0L) {
+            screenTransitionProgress = 1.0F;
+            return;
+        }
+
+        float rawProgress = (float)((System.nanoTime() - screenTransitionStartedAtNanos) / (double)SCREEN_TRANSITION_ANIMATION_NANOS);
+        if (rawProgress >= 1.0F) {
+            screenTransitionProgress = 1.0F;
+            if (closing) {
+                closingCompleted = true;
+            }
+            return;
+        }
+
+        screenTransitionProgress = easeOutCubic(clamp(rawProgress, 0.0F, 1.0F));
+    }
+
+    private boolean finishClosingIfNeeded() {
+        if (!closingCompleted) {
+            return false;
+        }
+
+        closingCompleted = false;
+        if (this.minecraft != null && this.minecraft.screen == this) {
+            this.minecraft.setScreen(null);
+        }
+        return true;
+    }
+
+    private void beginCloseAnimation() {
+        if (closing) {
+            return;
+        }
+
+        closing = true;
+        closingCompleted = false;
+        screenTransitionProgress = 0.0F;
+        screenTransitionStartedAtNanos = System.nanoTime();
+        lastAnimationFrameNanos = 0L;
+        draggingPanel = false;
+        capturedComponent = null;
+        blurComponentsExcept(null);
+    }
+
+    private boolean isInteractive() {
+        return !closing && screenTransitionProgress >= 1.0F;
+    }
+
+    private float screenTransitionVisibility() {
+        return closing ? 1.0F - screenTransitionProgress : screenTransitionProgress;
+    }
+
+    private float screenTransitionScale() {
+        return lerp(SCREEN_TRANSITION_MIN_SCALE, 1.0F, screenTransitionVisibility());
+    }
+
+    private int screenDimColor() {
+        return Render2DUtility.applyOpacity(SCREEN_DIM, screenTransitionVisibility());
+    }
+
     private void updateCategorySwitchAnimation() {
         if (previousCategory == null) {
             categorySwitchProgress = 1.0F;
@@ -1182,6 +1318,14 @@ public class ClickGuiUI extends Screen {
 
     private float mainWidth() {
         return panelWidth - sidebarWidth;
+    }
+
+    private float panelCenterX() {
+        return panelX + panelWidth * 0.5F;
+    }
+
+    private float panelCenterY() {
+        return panelY + panelHeight * 0.5F;
     }
 
     private float contentTop(float scrollOffset) {

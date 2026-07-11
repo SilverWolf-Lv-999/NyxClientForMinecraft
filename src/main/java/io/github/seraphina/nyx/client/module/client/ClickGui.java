@@ -23,6 +23,7 @@ public class ClickGui extends Module {
         if (clickGui == null) {
             clickGui = new ClickGuiUI();
         }
+        clickGui.beginOpenAnimation();
         mc.setScreen(clickGui);
         this.setEnabled(false);
     }
