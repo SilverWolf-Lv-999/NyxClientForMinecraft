@@ -6,10 +6,7 @@ import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
-import io.github.seraphina.nyx.client.module.visual.hud.component.InventoryComponent;
-import io.github.seraphina.nyx.client.module.visual.hud.component.MapComponent;
-import io.github.seraphina.nyx.client.module.visual.hud.component.NotificationComponent;
-import io.github.seraphina.nyx.client.module.visual.hud.component.WatermarkComponent;
+import io.github.seraphina.nyx.client.module.visual.hud.component.*;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.BiomeView;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.LevelTypeView;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.PlayerPosView;
@@ -44,6 +41,7 @@ public class HUD extends Module {
         components.add(new InventoryComponent());
         components.add(new MapComponent());
         components.add(new NotificationComponent());
+        components.add(new KeyStrokesComponent());
     }
 
     @EventTarget

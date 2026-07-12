@@ -103,6 +103,7 @@ public class NameTag extends Module {
         float screenWidth = graphics.guiWidth();
         float screenHeight = graphics.guiHeight();
 
+        assert mc.level != null;
         for (AbstractClientPlayer player : mc.level.players()) {
             if (!isValidPlayer(player)) {
                 continue;
@@ -241,8 +242,8 @@ public class NameTag extends Module {
 
     private String displayName(AbstractClientPlayer player) {
         Component displayName = player.getDisplayName();
-        String text = displayName == null ? player.getScoreboardName() : displayName.getString();
-        return text == null || text.isBlank() ? "Player" : text;
+        String text = displayName.getString();
+        return text.isBlank() ? "Player" : text;
     }
 
     private String healthText(AbstractClientPlayer player) {

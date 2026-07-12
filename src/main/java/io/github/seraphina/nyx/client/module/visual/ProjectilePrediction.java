@@ -56,8 +56,8 @@ public class ProjectilePrediction extends Module {
     public final BoolValue crossbows = ValueBuild.boolSetting("crossbows", true, this);
     public final IntValue points = ValueBuild.intSetting("points", 120, 20, MAX_TICKS, 5, this);
     public final DoubleValue lineWidth = ValueBuild.doubleSetting("line width", 1.5D, 1.0D, 4.0D, 0.1D, this);
-    public final IntValue trajectoryAlpha = ValueBuild.intSetting("trajectory alpha", 220, 0, 255, 5, () -> trajectory.getValue(), this);
-    public final IntValue landingAlpha = ValueBuild.intSetting("landing alpha", 230, 0, 255, 5, () -> landing.getValue(), this);
+    public final IntValue trajectoryAlpha = ValueBuild.intSetting("trajectory alpha", 220, 0, 255, 5, trajectory::getValue, this);
+    public final IntValue landingAlpha = ValueBuild.intSetting("landing alpha", 230, 0, 255, 5, landing::getValue, this);
     public final ColorValue color = ValueBuild.colorSetting("color", new Color(84, 170, 255), false, this);
 
     @EventTarget

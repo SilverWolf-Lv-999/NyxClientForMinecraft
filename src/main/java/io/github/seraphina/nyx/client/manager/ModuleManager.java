@@ -101,7 +101,8 @@ public final class ModuleManager {
                 NameTag.INSTANCE,
                 Filter.INSTANCE,
                 ProjectilePrediction.INSTANCE,
-                Map.INSTANCE
+                Map.INSTANCE,
+                KeyStrokes.INSTANCE
         );
 
         initialized = true;
