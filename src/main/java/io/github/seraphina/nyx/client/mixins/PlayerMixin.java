@@ -6,6 +6,7 @@ import io.github.seraphina.nyx.client.events.impl.AttackYawEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.module.combat.Reach;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
+import io.github.seraphina.nyx.client.module.movement.SafeWalk;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -30,6 +31,11 @@ public class PlayerMixin {
         }
 
         return original;
+    }
+
+    @ModifyExpressionValue(method = "maybeBackOffFromEdge", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;isStayingOnGroundSurface()Z"))
+    private boolean nyx$enableSafeWalk(boolean original) {
+        return original || ((Object) this instanceof LocalPlayer player && SafeWalk.INSTANCE.shouldStayOnGroundSurface(player));
     }
 
     @Inject(method = "entityInteractionRange()D", at = @At("RETURN"), cancellable = true)

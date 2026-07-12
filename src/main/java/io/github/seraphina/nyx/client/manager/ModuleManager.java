@@ -8,6 +8,7 @@ import io.github.seraphina.nyx.client.module.movement.*;
 import io.github.seraphina.nyx.client.module.other.*;
 import io.github.seraphina.nyx.client.module.player.*;
 import io.github.seraphina.nyx.client.module.visual.*;
+import io.github.seraphina.nyx.client.module.visual.Map;
 import io.github.seraphina.nyx.client.module.visual.hud.HUD;
 
 import java.util.*;
@@ -56,7 +57,8 @@ public final class ModuleManager {
                 Sprint.INSTANCE,
                 Stuck.INSTANCE,
                 ElytraFly.INSTANCE,
-                FastFall.INSTANCE
+                FastFall.INSTANCE,
+                SafeWalk.INSTANCE
         );
         //Other
         registerModule(
@@ -97,7 +99,9 @@ public final class ModuleManager {
                 ModuleList.INSTANCE,
                 Ambient.INSTANCE,
                 NameTag.INSTANCE,
-                Filter.INSTANCE
+                Filter.INSTANCE,
+                ProjectilePrediction.INSTANCE,
+                Map.INSTANCE
         );
 
         initialized = true;
