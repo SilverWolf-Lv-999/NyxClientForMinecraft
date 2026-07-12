@@ -33,7 +33,8 @@ public final class ModuleManager {
                 Debug.INSTANCE,
                 Friend.INSTANCE,
                 ClientSpoof.INSTANCE,
-                Zoom.INSTANCE
+                Zoom.INSTANCE,
+                NetworkOptimization.INSTANCE
         );
         //Combat
         registerModule(
