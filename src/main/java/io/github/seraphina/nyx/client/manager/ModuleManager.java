@@ -94,7 +94,8 @@ public final class ModuleManager {
                 ViewClip.INSTANCE,
                 HurtMaker.INSTANCE,
                 ModuleList.INSTANCE,
-                Ambient.INSTANCE
+                Ambient.INSTANCE,
+                NameTag.INSTANCE
         );
 
         initialized = true;

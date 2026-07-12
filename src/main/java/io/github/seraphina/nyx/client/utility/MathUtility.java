@@ -1,5 +1,9 @@
 package io.github.seraphina.nyx.client.utility;
 
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
+
 public final class MathUtility {
     private static final float SNAP_EPSILON = 0.001F;
 
@@ -76,7 +80,44 @@ public final class MathUtility {
         return pointX >= x && pointX < x + width && pointY >= y && pointY < y + height;
     }
 
+    public static ScreenPosition worldToScreen(
+            Vec3 position,
+            Matrix4f modelViewMatrix,
+            Matrix4f projectionMatrix,
+            float screenWidth,
+            float screenHeight
+    ) {
+        if (position == null || modelViewMatrix == null || projectionMatrix == null || screenWidth <= 0.0F || screenHeight <= 0.0F) {
+            return null;
+        }
+
+        Vector4f clip = new Vector4f((float)position.x, (float)position.y, (float)position.z, 1.0F);
+        clip.mul(modelViewMatrix);
+        clip.mul(projectionMatrix);
+
+        float w = clip.w();
+        if (w <= 0.0F) {
+            return null;
+        }
+
+        float ndcX = clip.x() / w;
+        float ndcY = clip.y() / w;
+        float ndcZ = clip.z() / w;
+        if (ndcZ < -1.0F || ndcZ > 1.0F) {
+            return null;
+        }
+
+        return new ScreenPosition(
+                (ndcX + 1.0F) * 0.5F * screenWidth,
+                (1.0F - ndcY) * 0.5F * screenHeight,
+                ndcZ
+        );
+    }
+
     private static float snapToTarget(float value, float target) {
         return Math.abs(target - value) < SNAP_EPSILON ? target : value;
+    }
+
+    public record ScreenPosition(float x, float y, float depth) {
     }
 }
