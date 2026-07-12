@@ -20,6 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,6 +47,12 @@ public class Auto2048 extends Module {
     private boolean activeKeyWasDown;
     private int pressTicksLeft;
     private int delayTicksLeft;
+    private AxisMapping lastColumnMapping;
+    private AxisMapping lastRowMapping;
+    private Move lastPressedMove;
+    private int[][] lastPressedBoard;
+    private int[][] blockedBoard;
+    private final EnumSet<Move> blockedMoves = EnumSet.noneOf(Move.class);
 
     @Override
     public void onEnable() {
@@ -90,9 +97,11 @@ public class Auto2048 extends Module {
             return;
         }
 
+        updateIneffectiveMove(snapshot.board());
+
         Move move = chooseMove(snapshot.board());
         if (move != null) {
-            press(move);
+            press(move, snapshot.board());
         }
     }
 
@@ -101,9 +110,15 @@ public class Auto2048 extends Module {
         activeKeyWasDown = false;
         pressTicksLeft = 0;
         delayTicksLeft = 0;
+        lastColumnMapping = null;
+        lastRowMapping = null;
+        lastPressedMove = null;
+        lastPressedBoard = null;
+        blockedBoard = null;
+        blockedMoves.clear();
     }
 
-    private void press(Move move) {
+    private void press(Move move, int[][] board) {
         KeyMapping key = keyFor(move);
         if (key == null) {
             return;
@@ -117,6 +132,8 @@ public class Auto2048 extends Module {
         activeKeyWasDown = key.isDown();
         activeKey.setDown(true);
         pressTicksLeft = pressTicks.getValue();
+        lastPressedMove = move;
+        lastPressedBoard = copyBoard(board);
     }
 
     private void releaseActiveKey() {
@@ -184,11 +201,17 @@ public class Auto2048 extends Module {
             return null;
         }
 
-        AxisMapping columns = inferAxis(tiles.stream().mapToDouble(Tile::column).toArray(), 0.0D);
-        AxisMapping rows = inferAxis(tiles.stream().mapToDouble(Tile::row).toArray(), average(tiles.stream().mapToDouble(Tile::row).toArray()));
+        double[] columnPositions = tiles.stream().mapToDouble(Tile::column).toArray();
+        double[] rowPositions = tiles.stream().mapToDouble(Tile::row).toArray();
+        AxisMapping columns = inferAxis(columnPositions, 0.0D, lastColumnMapping);
+        AxisMapping rows = inferAxis(rowPositions, average(rowPositions), lastRowMapping);
         if (columns == null || rows == null) {
+            lastColumnMapping = null;
+            lastRowMapping = null;
             return null;
         }
+        lastColumnMapping = columns;
+        lastRowMapping = rows;
 
         int[][] board = new int[SIZE][SIZE];
         int tileCount = 0;
@@ -253,9 +276,14 @@ public class Auto2048 extends Module {
         return value >= 2 && (value & value - 1) == 0;
     }
 
-    private AxisMapping inferAxis(double[] positions, double expectedCenter) {
+    private AxisMapping inferAxis(double[] positions, double expectedCenter, AxisMapping previous) {
         if (positions.length == 0) {
             return null;
+        }
+
+        int requiredFits = Math.min(positions.length, Math.max(1, minTiles.getValue()));
+        if (previous != null && previous.validCount(positions) >= requiredFits) {
+            return previous;
         }
 
         double step = inferStep(positions);
@@ -267,7 +295,6 @@ public class Auto2048 extends Module {
             }
         }
 
-        int requiredFits = Math.min(positions.length, Math.max(1, minTiles.getValue()));
         return candidates.stream()
                 .min(Comparator.comparingInt((AxisMapping mapping) -> -mapping.validCount(positions))
                         .thenComparingDouble(mapping -> mapping.fitError(positions))
@@ -310,6 +337,10 @@ public class Auto2048 extends Module {
         int depth = searchDepth.getValue();
 
         for (Move move : Move.values()) {
+            if (isMoveBlocked(board, move)) {
+                continue;
+            }
+
             MoveResult result = move(board, move);
             if (!result.changed()) {
                 continue;
@@ -323,6 +354,30 @@ public class Auto2048 extends Module {
         }
 
         return bestMove;
+    }
+
+    private void updateIneffectiveMove(int[][] board) {
+        if (lastPressedMove == null || lastPressedBoard == null) {
+            return;
+        }
+
+        if (sameBoard(board, lastPressedBoard)) {
+            if (blockedBoard == null || !sameBoard(board, blockedBoard)) {
+                blockedBoard = copyBoard(board);
+                blockedMoves.clear();
+            }
+            blockedMoves.add(lastPressedMove);
+        } else if (blockedBoard != null && !sameBoard(board, blockedBoard)) {
+            blockedBoard = null;
+            blockedMoves.clear();
+        }
+
+        lastPressedMove = null;
+        lastPressedBoard = null;
+    }
+
+    private boolean isMoveBlocked(int[][] board, Move move) {
+        return blockedBoard != null && sameBoard(board, blockedBoard) && blockedMoves.contains(move);
     }
 
     private double expectimax(int[][] board, int depth, boolean playerTurn) {
@@ -602,6 +657,15 @@ public class Auto2048 extends Module {
             System.arraycopy(board[row], 0, copy[row], 0, SIZE);
         }
         return copy;
+    }
+
+    private static boolean sameBoard(int[][] first, int[][] second) {
+        for (int row = 0; row < SIZE; row++) {
+            if (!Arrays.equals(first[row], second[row])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static double log2(int value) {

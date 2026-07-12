@@ -35,7 +35,8 @@ public final class ModuleManager {
                 Friend.INSTANCE,
                 ClientSpoof.INSTANCE,
                 Zoom.INSTANCE,
-                NetworkOptimization.INSTANCE
+                NetworkOptimization.INSTANCE,
+                NameProtection.INSTANCE
         );
         //Combat
         registerModule(
