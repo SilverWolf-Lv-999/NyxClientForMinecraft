@@ -48,7 +48,8 @@ public final class ModuleManager {
                 MaceAura.INSTANCE,
                 CrystalAura.INSTANCE,
                 AnchorAura.INSTANCE,
-                SpearCooldown.INSTANCE
+                SpearCooldown.INSTANCE,
+                TpAura.INSTANCE
         );
         //Movement
         registerModule(
@@ -84,7 +85,8 @@ public final class ModuleManager {
                 AutoLeave.INSTANCE,
                 AutoCrystal.INSTANCE,
                 PacketMine.INSTANCE,
-                PacketEat.INSTANCE
+                PacketEat.INSTANCE,
+                Blink.INSTANCE
         );
         //Visual
         registerModule(
