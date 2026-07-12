@@ -1,7 +1,9 @@
 package io.github.seraphina.nyx.client.module.combat;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.impl.LevelUpdateEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
+import io.github.seraphina.nyx.client.events.impl.RespawnEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
@@ -23,7 +25,10 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2f;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 @ModuleInfo(name = "nyxclient.module.tpaura.name", description = "nyxclient.module.tpaura.description", category = Category.COMBAT)
 public class TpAura extends Module {
@@ -35,9 +40,15 @@ public class TpAura extends Module {
     public final DoubleValue range = ValueBuild.doubleSetting("range", 16.0D, 1.0D, 128.0D, 0.5D, this);
     public final IntValue cps = ValueBuild.intSetting("cps", 20, 1, TICKS_PER_SECOND, 1, this);
     public final IntValue maxTargets = ValueBuild.intSetting("max targets", 3, 1, 20, 1, () -> targetMode.is(Targets.MUTI), this);
+    public final BoolValue oncePerTarget = ValueBuild.boolSetting("once per target", false, value -> {
+        if (!value) {
+            clearAttackedTargets();
+        }
+    }, this);
     public final BoolValue swing = ValueBuild.boolSetting("swing", true, this);
     public final BoolValue disableOnSetback = ValueBuild.boolSetting("disable on setback", true, this);
 
+    private final Set<UUID> attackedTargets = new HashSet<>();
     private int attackProgress;
 
     @Override
@@ -52,6 +63,17 @@ public class TpAura extends Module {
     @Override
     public void onDisable() {
         attackProgress = 0;
+        clearAttackedTargets();
+    }
+
+    @EventTarget
+    public void onLevelUpdate(LevelUpdateEvent event) {
+        clearAttackedTargets();
+    }
+
+    @EventTarget
+    public void onRespawn(RespawnEvent event) {
+        clearAttackedTargets();
     }
 
     @EventTarget
@@ -99,6 +121,7 @@ public class TpAura extends Module {
             Vector2f rotations = rotationsFrom(spoofPos, target);
             sendPosition(spoofPos, rotations.x, rotations.y, returnOnGround, returnHorizontalCollision);
             attackWithRotations(target, rotations);
+            markAttacked(target);
         }
 
         sendPosition(returnPos, returnYaw, returnPitch, returnOnGround, returnHorizontalCollision);
@@ -188,7 +211,22 @@ public class TpAura extends Module {
                 && !entity.isSpectator()
                 && entity.isPickable()
                 && !entity.isInvulnerable()
+                && !hasAttacked(entity)
                 && RotationUtility.getEyeDistanceToEntity(entity) <= range.getValue();
+    }
+
+    private boolean hasAttacked(LivingEntity entity) {
+        return oncePerTarget.getValue() && attackedTargets.contains(entity.getUUID());
+    }
+
+    private void markAttacked(LivingEntity entity) {
+        if (oncePerTarget.getValue()) {
+            attackedTargets.add(entity.getUUID());
+        }
+    }
+
+    private void clearAttackedTargets() {
+        attackedTargets.clear();
     }
 
     public enum Targets {
