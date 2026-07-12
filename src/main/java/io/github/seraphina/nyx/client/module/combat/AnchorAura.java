@@ -109,6 +109,7 @@ public class AnchorAura extends Module {
     private int postUseSlotDelayTicks;
     private boolean usedInteractionThisTick;
     private Vector2f lastOutgoingRotations;
+    private Vector2f lastBlockUseRotations;
     private Vector2f lastControlledRotations;
     private Vector2f movementFixRotations;
     private QueuedAction movementFixAction;
@@ -886,6 +887,7 @@ public class AnchorAura extends Module {
         try {
             result = useItemOnWithRotations(action.rotations(), hitResult);
         } finally {
+            rememberBlockUseRotations(action.rotations());
             beginPostUseDelay();
         }
 
@@ -916,13 +918,7 @@ public class AnchorAura extends Module {
     private Vector2f preparePlaceRotations(Vector2f rotations) {
         Vector2f baseRotations = legitimizeRotations(rotations);
         Vector2f placeRotations = variedPlaceRotations(baseRotations);
-        Vector2f uniqueRotations = makeUniqueOutgoingRotations(placeRotations);
-        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)
-                && closeActionRotations(uniqueRotations, baseRotations)) {
-            return prepareActionRotations(uniqueRotations);
-        }
-
-        return prepareActionRotations(placeRotations);
+        return prepareActionRotations(makeUniqueActionRotations(placeRotations, baseRotations));
     }
 
     private Vector2f prepareActionRotations(Vector2f rotations) {
@@ -967,34 +963,63 @@ public class AnchorAura extends Module {
         return closeActionRotations(variedRotations, baseRotations) ? variedRotations : baseRotations;
     }
 
-    private Vector2f makeUniqueOutgoingRotations(Vector2f rotations) {
+    private Vector2f makeUniqueActionRotations(Vector2f rotations, Vector2f baseRotations) {
         Vector2f uniqueRotations = legitimizeRotations(rotations);
-        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)) {
+        if (isUsableActionRotation(uniqueRotations, baseRotations)) {
             return uniqueRotations;
         }
 
-        Vector2f steppedRotations = RotationUtility.applySensitivityPatch(
-                new Vector2f(uniqueRotations.x, uniqueRotations.y + pitchDedupStep(uniqueRotations)),
-                lastOutgoingRotations
-        );
-        uniqueRotations = legitimizeRotations(steppedRotations);
-        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)) {
-            return uniqueRotations;
+        float pitchStep = pitchDedupStep(uniqueRotations);
+        for (float multiplier = 1.0F; multiplier <= ACTION_TARGET_ROTATION_EPSILON; multiplier += 0.5F) {
+            Vector2f yawCandidate = patchedActionOffset(baseRotations, OUTGOING_ROTATION_DEDUP_YAW_STEP * multiplier, 0.0F);
+            if (isUsableActionRotation(yawCandidate, baseRotations)) {
+                return yawCandidate;
+            }
+
+            Vector2f combinedCandidate = patchedActionOffset(
+                    baseRotations,
+                    OUTGOING_ROTATION_DEDUP_YAW_STEP * multiplier,
+                    pitchStep * multiplier
+            );
+            if (isUsableActionRotation(combinedCandidate, baseRotations)) {
+                return combinedCandidate;
+            }
+
+            Vector2f inverseYawCandidate = patchedActionOffset(baseRotations, -OUTGOING_ROTATION_DEDUP_YAW_STEP * multiplier, 0.0F);
+            if (isUsableActionRotation(inverseYawCandidate, baseRotations)) {
+                return inverseYawCandidate;
+            }
+
+            Vector2f pitchCandidate = patchedActionOffset(baseRotations, 0.0F, pitchStep * multiplier);
+            if (isUsableActionRotation(pitchCandidate, baseRotations)) {
+                return pitchCandidate;
+            }
         }
 
-        steppedRotations = RotationUtility.applySensitivityPatch(
-                new Vector2f(uniqueRotations.x + OUTGOING_ROTATION_DEDUP_YAW_STEP, uniqueRotations.y),
-                lastOutgoingRotations
-        );
-        uniqueRotations = legitimizeRotations(steppedRotations);
-        if (!sameOutgoingRotations(uniqueRotations, lastOutgoingRotations)) {
-            return uniqueRotations;
-        }
+        return uniqueRotations;
+    }
 
-        return legitimizeRotations(new Vector2f(
-                lastOutgoingRotations.x + OUTGOING_ROTATION_DEDUP_YAW_STEP,
-                Mth.clamp(lastOutgoingRotations.y + pitchDedupStep(lastOutgoingRotations), -90.0F, 90.0F)
+    private Vector2f patchedActionOffset(Vector2f rotations, float yawOffset, float pitchOffset) {
+        return legitimizeRotations(RotationUtility.applySensitivityPatch(
+                new Vector2f(
+                        rotations.x + yawOffset,
+                        Mth.clamp(rotations.y + pitchOffset, -90.0F, 90.0F)
+                ),
+                currentSyncedRotations()
         ));
+    }
+
+    private boolean isUsableActionRotation(Vector2f rotations, Vector2f baseRotations) {
+        return rotations != null
+                && closeActionRotations(rotations, baseRotations)
+                && !isDuplicateActionRotation(rotations);
+    }
+
+    private boolean isDuplicateActionRotation(Vector2f rotations) {
+        return sameOutgoingRotations(rotations, lastOutgoingRotations)
+                || sameOutgoingRotations(rotations, lastBlockUseRotations)
+                || sameOutgoingYaw(rotations, lastOutgoingRotations)
+                || sameOutgoingYaw(rotations, lastBlockUseRotations);
     }
 
     private float pitchDedupStep(Vector2f rotations) {
@@ -1010,6 +1035,16 @@ public class AnchorAura extends Module {
                 && second != null
                 && Math.abs(Mth.wrapDegrees(first.x - second.x)) <= OUTGOING_ROTATION_DUPLICATE_EPSILON
                 && Math.abs(first.y - second.y) <= OUTGOING_ROTATION_DUPLICATE_EPSILON;
+    }
+
+    private boolean sameOutgoingYaw(Vector2f first, Vector2f second) {
+        return first != null
+                && second != null
+                && Math.abs(Mth.wrapDegrees(first.x - second.x)) <= OUTGOING_ROTATION_DUPLICATE_EPSILON;
+    }
+
+    private void rememberBlockUseRotations(Vector2f rotations) {
+        lastBlockUseRotations = rotations == null ? null : new Vector2f(rotations);
     }
 
     private Vector2f legitimizeRotations(Vector2f rotations) {
@@ -1349,6 +1384,7 @@ public class AnchorAura extends Module {
         queuedAction = null;
         syncedAction = null;
         lastOutgoingRotations = currentPlayerRotations();
+        lastBlockUseRotations = null;
         movementFixRotations = null;
         movementFixAction = null;
         releaseRotationsAfterPosition = false;
