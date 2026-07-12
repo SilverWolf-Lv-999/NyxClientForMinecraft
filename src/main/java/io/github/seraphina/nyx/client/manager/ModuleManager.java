@@ -93,7 +93,8 @@ public final class ModuleManager {
                 ESP.INSTANCE,
                 ViewClip.INSTANCE,
                 HurtMaker.INSTANCE,
-                ModuleList.INSTANCE
+                ModuleList.INSTANCE,
+                Ambient.INSTANCE
         );
 
         initialized = true;
