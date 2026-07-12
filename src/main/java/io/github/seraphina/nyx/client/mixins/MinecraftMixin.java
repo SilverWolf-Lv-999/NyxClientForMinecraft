@@ -13,6 +13,7 @@ import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
+import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import io.github.seraphina.nyx.client.module.combat.UseClick;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.Minecraft;
@@ -25,8 +26,10 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyConstant;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -83,6 +86,16 @@ public class MinecraftMixin {
         if (EventBus.INSTANCE.post(new StartUseItemEvent()).isCancelled()) {
             info.cancel();
         }
+    }
+
+    @ModifyConstant(method = "startUseItem", constant = @Constant(intValue = 4))
+    private int nyx$modifySpearRightClickDelay(int original) {
+        return SpearCooldown.INSTANCE.rightClickDelay(original);
+    }
+
+    @ModifyConstant(method = "startAttack", constant = @Constant(intValue = 10))
+    private int nyx$modifySpearLeftClickMissDelay(int original) {
+        return SpearCooldown.INSTANCE.leftClickMissDelay(original);
     }
 
     @Inject(method = "openChatScreen", at = @At("HEAD"), cancellable = true)

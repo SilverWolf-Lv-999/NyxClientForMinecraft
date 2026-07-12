@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.mixins;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
@@ -8,6 +9,7 @@ import io.github.seraphina.nyx.client.events.impl.FallFlyingEvent;
 import io.github.seraphina.nyx.client.events.impl.JumpEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.events.impl.TravelEvent;
+import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -56,5 +58,15 @@ public class LivingEntityMixin {
                 info.cancel();
             }
         }
+    }
+
+    @ModifyReturnValue(method = "getCurrentSwingDuration", at = @At("RETURN"))
+    private int nyx$modifySpearSwingDuration(int original) {
+        LivingEntity entity = (LivingEntity) (Object) this;
+        if (entity != Minecraft.getInstance().player) {
+            return original;
+        }
+
+        return SpearCooldown.INSTANCE.swingDuration(original, entity.getMainHandItem());
     }
 }

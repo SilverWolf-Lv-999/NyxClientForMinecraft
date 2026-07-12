@@ -5,8 +5,10 @@ import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.AttackYawEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.module.combat.Reach;
+import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -34,6 +36,14 @@ public class PlayerMixin {
     private void modifyEntityInteractionRange(CallbackInfoReturnable<Double> info) {
         if ((Object) this instanceof LocalPlayer) {
             info.setReturnValue(Reach.INSTANCE.getEntityRange(info.getReturnValue()));
+        }
+    }
+
+    @Inject(method = "cannotAttackWithItem", at = @At("HEAD"), cancellable = true)
+    private void nyx$modifySpearAttackCooldown(ItemStack stack, int adjustTicks, CallbackInfoReturnable<Boolean> info) {
+        if ((Object) this instanceof LocalPlayer && SpearCooldown.INSTANCE.shouldOverrideSpearAttackCooldown(stack)) {
+            int attackStrengthTicker = ((LivingEntityAccessor) this).nyx$getAttackStrengthTicker();
+            info.setReturnValue(SpearCooldown.INSTANCE.cannotAttackYet(attackStrengthTicker, adjustTicks));
         }
     }
 }
