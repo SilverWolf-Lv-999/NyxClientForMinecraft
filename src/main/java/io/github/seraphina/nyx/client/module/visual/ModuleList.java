@@ -36,7 +36,7 @@ import java.util.Map;
 public class ModuleList extends Module {
     public static final ModuleList INSTANCE = new ModuleList();
 
-    private static final float SCALE = 0.5F;
+    private static final float SCALE = 0.6F;
     private static final float TOP_PADDING = 5.0F * SCALE;
     private static final float RIGHT_PADDING = 5.0F * SCALE;
     private static final float HORIZONTAL_PADDING = 7.0F * SCALE;
