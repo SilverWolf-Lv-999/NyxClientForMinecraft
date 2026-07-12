@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class MusicPlaybackService implements StreamPlayerListener {
     public static final MusicPlaybackService INSTANCE = new MusicPlaybackService();
@@ -39,6 +40,7 @@ public final class MusicPlaybackService implements StreamPlayerListener {
     private volatile float volume = 1.0F;
     private volatile int currentIndex;
     private volatile String status = "Idle";
+    private volatile PlaybackMode playbackMode = PlaybackMode.LIST;
 
     private MusicPlaybackService() {
         player.addStreamPlayerListener(this);
@@ -57,6 +59,13 @@ public final class MusicPlaybackService implements StreamPlayerListener {
     public void playSong(Song song) {
         if (song == null) {
             return;
+        }
+
+        synchronized (playlist) {
+            int index = playlist.indexOf(song);
+            if (index >= 0) {
+                currentIndex = index;
+            }
         }
 
         executor.execute(() -> {
@@ -139,7 +148,7 @@ public final class MusicPlaybackService implements StreamPlayerListener {
             if (playlist.isEmpty() || changingSong) {
                 return;
             }
-            currentIndex = (currentIndex + 1) % playlist.size();
+            currentIndex = nextIndex();
             next = playlist.get(currentIndex);
         }
         playSong(next);
@@ -151,10 +160,21 @@ public final class MusicPlaybackService implements StreamPlayerListener {
             if (playlist.isEmpty() || changingSong) {
                 return;
             }
-            currentIndex = currentIndex > 0 ? currentIndex - 1 : playlist.size() - 1;
+            currentIndex = previousIndex();
             previous = playlist.get(currentIndex);
         }
         playSong(previous);
+    }
+
+    public void cyclePlaybackMode() {
+        PlaybackMode[] modes = PlaybackMode.values();
+        playbackMode = modes[(playbackMode.ordinal() + 1) % modes.length];
+    }
+
+    public void setPlaybackMode(PlaybackMode playbackMode) {
+        if (playbackMode != null) {
+            this.playbackMode = playbackMode;
+        }
     }
 
     public void setVolume(float volume) {
@@ -186,6 +206,10 @@ public final class MusicPlaybackService implements StreamPlayerListener {
 
     public float volume() {
         return volume;
+    }
+
+    public PlaybackMode playbackMode() {
+        return playbackMode;
     }
 
     public String status() {
@@ -245,6 +269,50 @@ public final class MusicPlaybackService implements StreamPlayerListener {
             return (long)(stream.getFrameLength() / frameRate * 1000.0F);
         } catch (Exception ignored) {
             return 0L;
+        }
+    }
+
+    private int nextIndex() {
+        return switch (playbackMode) {
+            case LOOP -> currentIndex;
+            case RANDOM -> randomIndex();
+            case LIST -> (currentIndex + 1) % playlist.size();
+        };
+    }
+
+    private int previousIndex() {
+        return switch (playbackMode) {
+            case LOOP -> currentIndex;
+            case RANDOM -> randomIndex();
+            case LIST -> currentIndex > 0 ? currentIndex - 1 : playlist.size() - 1;
+        };
+    }
+
+    private int randomIndex() {
+        if (playlist.size() <= 1) {
+            return 0;
+        }
+
+        int next = ThreadLocalRandom.current().nextInt(playlist.size());
+        if (next == currentIndex) {
+            next = (next + 1) % playlist.size();
+        }
+        return next;
+    }
+
+    public enum PlaybackMode {
+        LOOP("循环"),
+        LIST("列表"),
+        RANDOM("随机");
+
+        private final String label;
+
+        PlaybackMode(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
         }
     }
 }
