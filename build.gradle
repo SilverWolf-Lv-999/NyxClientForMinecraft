@@ -11,7 +11,18 @@ group = mod_group_id
 repositories {
     mavenLocal()
     mavenCentral()
+    exclusiveContent {
+        forRepository {
+            mavenCentral()
+        }
+        filter {
+            includeGroup "commons-io"
+            includeGroup "org.apache.commons"
+            includeGroup "org.tukaani"
+        }
+    }
     maven { url = 'https://maven.parchmentmc.org' }
+    maven { url = 'https://jitpack.io' }
 }
 
 base {
@@ -100,6 +111,30 @@ dependencies {
     }
     implementation "org.bytedeco:ffmpeg:8.0.1-1.5.13"
     runtimeOnly "org.bytedeco:ffmpeg-platform:8.0.1-1.5.13"
+    jarJar(implementation("com.github.goxr3plus:java-stream-player:10.0.2")) {
+        version {
+            strictly "[10.0.2,11.0.0)"
+            prefer "10.0.2"
+        }
+    }
+    jarJar(implementation("javazoom:jlayer:1.0.1")) {
+        version {
+            strictly "[1.0.1,2.0.0)"
+            prefer "1.0.1"
+        }
+    }
+    jarJar(implementation("org.apache.commons:commons-compress:1.27.1")) {
+        version {
+            strictly "[1.27.1,2.0.0)"
+            prefer "1.27.1"
+        }
+    }
+    jarJar(implementation("org.tukaani:xz:1.10")) {
+        version {
+            strictly "[1.10,2.0.0)"
+            prefer "1.10"
+        }
+    }
 
     // Example mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
@@ -122,6 +157,93 @@ dependencies {
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
 }
+
+def neteaseMusicApiVersion = '4.32.0'
+def bundledNodeVersion = '22.13.1'
+def bundledMusicServiceDir = layout.buildDirectory.dir('generated/resources/neteaseMusicService')
+def bundledMusicServiceAssets = bundledMusicServiceDir.map { it.dir('assets/nyxclient/music-service') }
+def installedNeteaseMusicApiDir = layout.buildDirectory.dir('neteaseMusicService/api')
+def npmExecutable = providers.provider {
+    org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npm.cmd' : 'npm'
+}
+
+tasks.register('installNeteaseMusicApi', Exec) {
+    inputs.property('neteaseMusicApiVersion', neteaseMusicApiVersion)
+    outputs.dir(installedNeteaseMusicApiDir)
+
+    doFirst {
+        def outputDirectory = installedNeteaseMusicApiDir.get().asFile
+        if (outputDirectory.exists()) {
+            outputDirectory.deleteDir()
+        }
+        outputDirectory.mkdirs()
+    }
+
+    commandLine npmExecutable.get(),
+        'install',
+        '--prefix', installedNeteaseMusicApiDir.get().asFile.absolutePath,
+        "NeteaseCloudMusicApi@${neteaseMusicApiVersion}",
+        '--omit=dev',
+        '--ignore-scripts'
+}
+
+tasks.register('packageNeteaseMusicApi', Zip) {
+    dependsOn tasks.named('installNeteaseMusicApi')
+    archiveFileName = 'netease-cloud-music-api.zip'
+    destinationDirectory = bundledMusicServiceAssets
+    from(installedNeteaseMusicApiDir) {
+        into 'api'
+    }
+}
+
+def bundledNodeArchives = [
+    'windows-x64': [
+        url : "https://nodejs.org/dist/v${bundledNodeVersion}/node-v${bundledNodeVersion}-win-x64.zip",
+        file: 'node-windows-x64.zip'
+    ],
+    'linux-x64': [
+        url : "https://nodejs.org/dist/v${bundledNodeVersion}/node-v${bundledNodeVersion}-linux-x64.tar.xz",
+        file: 'node-linux-x64.tar.xz'
+    ],
+    'macos-x64': [
+        url : "https://nodejs.org/dist/v${bundledNodeVersion}/node-v${bundledNodeVersion}-darwin-x64.tar.xz",
+        file: 'node-macos-x64.tar.xz'
+    ],
+    'macos-aarch64': [
+        url : "https://nodejs.org/dist/v${bundledNodeVersion}/node-v${bundledNodeVersion}-darwin-arm64.tar.xz",
+        file: 'node-macos-aarch64.tar.xz'
+    ]
+]
+
+tasks.register('downloadBundledNode') {
+    inputs.property('bundledNodeVersion', bundledNodeVersion)
+    outputs.files(bundledNodeArchives.collect { _, archive ->
+        bundledMusicServiceAssets.map { it.file(archive.file) }
+    })
+
+    doLast {
+        def outputDirectory = bundledMusicServiceAssets.get().asFile
+        outputDirectory.mkdirs()
+        bundledNodeArchives.each { _, archive ->
+            def output = new File(outputDirectory, archive.file)
+            if (!output.isFile()) {
+                logger.lifecycle("Downloading ${archive.url}")
+                new URI(archive.url).toURL().withInputStream { input ->
+                    output.withOutputStream { stream ->
+                        stream << input
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.named('processResources') {
+    dependsOn tasks.named('packageNeteaseMusicApi')
+    dependsOn tasks.named('downloadBundledNode')
+}
+
+sourceSets.main.resources.srcDir bundledMusicServiceDir
 
 // This block of code expands all declared replace properties in the specified resource targets.
 // A missing property will result in an error. Properties are expanded using ${} Groovy notation.

@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
 import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.music.NeteaseMusicLocalService;
 import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import io.github.seraphina.nyx.client.module.combat.UseClick;
@@ -136,6 +137,7 @@ public class MinecraftMixin {
 
     @Inject(method = "close", at = @At("HEAD"))
     public void close(CallbackInfo info) {
+        NeteaseMusicLocalService.stop();
         FontManager.close();
         Render2DUtility.close();
     }

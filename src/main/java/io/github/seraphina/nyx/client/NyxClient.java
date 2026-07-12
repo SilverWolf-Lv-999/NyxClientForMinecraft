@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.events.api.EventManager;
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
 import io.github.seraphina.nyx.client.manager.*;
+import io.github.seraphina.nyx.client.music.NeteaseMusicLocalService;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
 import io.github.seraphina.nyx.client.utility.StringUtility;
 import io.github.seraphina.nyx.client.utility.render.Shaders;
@@ -35,7 +36,9 @@ public class NyxClient {
         CommandManager.init();
         RotationManager.INSTANCE.getClass();
         FontManager.init();
+        NeteaseMusicLocalService.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            NeteaseMusicLocalService.stop();
             Shaders.close();
             LOGGER.info("Shutting down NyxClient");
         }));

@@ -72,6 +72,7 @@ public final class ModuleManager {
                 AutoLogin.INSTANCE,
                 NoDownload.INSTANCE,
                 FakePlayer.INSTANCE,
+                MusicPlayer.INSTANCE,
                 Auto2048.INSTANCE
         );
         //Player
