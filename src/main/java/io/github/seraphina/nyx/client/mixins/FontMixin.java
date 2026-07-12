@@ -62,11 +62,11 @@ public abstract class FontMixin {
         return FormattedText.of(modified, style);
     }
 
-    @Dynamic("NeoForge patches Font#prepareText(FormattedCharSequence, float, float, int, boolean, int).")
+    @Dynamic("NeoForge patches Font#prepareText(FormattedCharSequence, float, float, int, boolean, boolean, int).")
     @SuppressWarnings({"UnresolvedMixinReference", "MixinAnnotationTarget"})
     @ModifyVariable(
         method = {
-            "prepareText(Lnet/minecraft/util/FormattedCharSequence;FFIZI)Lnet/minecraft/client/gui/Font$PreparedText;",
+            "prepareText(Lnet/minecraft/util/FormattedCharSequence;FFIZZI)Lnet/minecraft/client/gui/Font$PreparedText;",
             "width(Lnet/minecraft/util/FormattedCharSequence;)I",
             "drawInBatch8xOutline(Lnet/minecraft/util/FormattedCharSequence;FFIILorg/joml/Matrix4f;Lnet/minecraft/client/renderer/MultiBufferSource;I)V"
         },
@@ -87,17 +87,17 @@ public abstract class FontMixin {
         return sink -> StringDecomposer.iterateFormatted(modified, captured.style(), sink);
     }
 
-    @Dynamic("NeoForge patches Font#prepareText(FormattedCharSequence, float, float, int, boolean, int).")
+    @Dynamic("NeoForge patches Font#prepareText(FormattedCharSequence, float, float, int, boolean, boolean, int).")
     @SuppressWarnings({"UnresolvedMixinReference", "MixinAnnotationTarget"})
     @Inject(
-        method = "prepareText(Lnet/minecraft/util/FormattedCharSequence;FFIZI)Lnet/minecraft/client/gui/Font$PreparedText;",
+        method = "prepareText(Lnet/minecraft/util/FormattedCharSequence;FFIZZI)Lnet/minecraft/client/gui/Font$PreparedText;",
         at = @At("HEAD"),
         cancellable = true
     )
     private void nyx$prepareDebugText(FormattedCharSequence text, float x, float y, int color, boolean drawShadow,
-                                      int backgroundColor, CallbackInfoReturnable<Font.PreparedText> cir) {
+                                      boolean includeEmpty, int backgroundColor, CallbackInfoReturnable<Font.PreparedText> cir) {
         if (nyx$isDebugSequence(text)) {
-            cir.setReturnValue(FontRenderer.prepareDebugChatText(text, x, y, color, drawShadow, false, backgroundColor));
+            cir.setReturnValue(FontRenderer.prepareDebugChatText(text, x, y, color, drawShadow, includeEmpty, backgroundColor));
         }
     }
 
