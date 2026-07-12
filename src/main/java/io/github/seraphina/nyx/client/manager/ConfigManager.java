@@ -18,14 +18,25 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 public final class ConfigManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final int CONFIG_VERSION = 1;
     private static final String MODULES_KEY = "modules";
-    private static final Path CONFIG_FILE = PathManager.CONFIG_PATH.resolve("modules.json");
+    private static final String DEFAULT_CONFIG_NAME = "default";
+    private static final String CONFIG_EXTENSION = ".json";
+    private static final Pattern CONFIG_NAME_PATTERN = Pattern.compile("[a-z0-9_-]{1,64}");
+    private static final Path DEFAULT_CONFIG_FILE = PathManager.CONFIG_PATH.resolve("modules.json");
+    private static final Path CONFIG_DIRECTORY = PathManager.CONFIG_PATH.resolve("profiles");
+    private static final Path SELECTED_CONFIG_FILE = PathManager.CONFIG_PATH.resolve("selected.txt");
 
+    private static String selectedConfigName = DEFAULT_CONFIG_NAME;
     private static boolean shutdownHookRegistered;
 
     private ConfigManager() {
@@ -39,15 +50,41 @@ public final class ConfigManager {
             return;
         }
 
+        try {
+            Files.createDirectories(CONFIG_DIRECTORY);
+        } catch (IOException exception) {
+            exception.printStackTrace();
+            return;
+        }
+
+        selectedConfigName = readSelectedConfigName();
         load();
-        if (!Files.exists(CONFIG_FILE)) {
+        if (!Files.exists(getConfigFile())) {
             save();
         }
         registerShutdownHook();
     }
 
     public static void load() {
-        load(CONFIG_FILE);
+        load(getConfigFile());
+    }
+
+    public static boolean load(String configName) {
+        String normalizedName = normalizeConfigName(configName);
+        if (!isValidConfigName(normalizedName)) {
+            return false;
+        }
+
+        Path configFile = getConfigFile(normalizedName);
+        if (!Files.exists(configFile)) {
+            return false;
+        }
+
+        save();
+        selectedConfigName = normalizedName;
+        writeSelectedConfigName();
+        load(configFile);
+        return true;
     }
 
     public static void load(Path configFile) {
@@ -69,7 +106,7 @@ public final class ConfigManager {
     }
 
     public static void save() {
-        save(CONFIG_FILE);
+        save(getConfigFile());
     }
 
     public static void save(Path configFile) {
@@ -85,12 +122,60 @@ public final class ConfigManager {
     }
 
     public static Path getConfigFile() {
-        return CONFIG_FILE;
+        return getConfigFile(selectedConfigName);
+    }
+
+    public static String getSelectedConfigName() {
+        return selectedConfigName;
+    }
+
+    public static boolean create(String configName) {
+        String normalizedName = normalizeConfigName(configName);
+        if (!isValidConfigName(normalizedName) || exists(normalizedName)) {
+            return false;
+        }
+
+        save();
+        selectedConfigName = normalizedName;
+        writeSelectedConfigName();
+        save();
+        return true;
+    }
+
+    public static boolean exists(String configName) {
+        String normalizedName = normalizeConfigName(configName);
+        return isValidConfigName(normalizedName) && Files.exists(getConfigFile(normalizedName));
+    }
+
+    public static List<String> getConfigNames() {
+        TreeSet<String> names = new TreeSet<>();
+        names.add(DEFAULT_CONFIG_NAME);
+
+        if (Files.isDirectory(CONFIG_DIRECTORY)) {
+            try (var paths = Files.list(CONFIG_DIRECTORY)) {
+                paths.filter(Files::isRegularFile)
+                        .map(path -> path.getFileName().toString())
+                        .filter(name -> name.endsWith(CONFIG_EXTENSION))
+                        .map(name -> name.substring(0, name.length() - CONFIG_EXTENSION.length()))
+                        .map(ConfigManager::normalizeConfigName)
+                        .filter(ConfigManager::isValidConfigName)
+                        .forEach(names::add);
+            } catch (IOException exception) {
+                exception.printStackTrace();
+            }
+        }
+
+        return new ArrayList<>(names);
+    }
+
+    public static boolean isValidConfigName(String configName) {
+        String normalizedName = normalizeConfigName(configName);
+        return CONFIG_NAME_PATTERN.matcher(normalizedName).matches();
     }
 
     public static boolean delete() {
         try {
-            return Files.deleteIfExists(CONFIG_FILE);
+            return Files.deleteIfExists(getConfigFile());
         } catch (IOException exception) {
             exception.printStackTrace();
             return false;
@@ -108,6 +193,48 @@ public final class ConfigManager {
         root.addProperty("version", CONFIG_VERSION);
         root.add(MODULES_KEY, modules);
         return root;
+    }
+
+    private static String normalizeConfigName(String configName) {
+        return configName == null ? "" : configName.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static Path getConfigFile(String configName) {
+        String normalizedName = normalizeConfigName(configName);
+        if (DEFAULT_CONFIG_NAME.equals(normalizedName)) {
+            return DEFAULT_CONFIG_FILE;
+        }
+
+        return CONFIG_DIRECTORY.resolve(normalizedName + CONFIG_EXTENSION);
+    }
+
+    private static String readSelectedConfigName() {
+        if (!Files.exists(SELECTED_CONFIG_FILE)) {
+            return DEFAULT_CONFIG_NAME;
+        }
+
+        try {
+            String selectedName = normalizeConfigName(Files.readString(SELECTED_CONFIG_FILE, StandardCharsets.UTF_8));
+            if (!isValidConfigName(selectedName)) {
+                return DEFAULT_CONFIG_NAME;
+            }
+
+            return DEFAULT_CONFIG_NAME.equals(selectedName) || Files.exists(getConfigFile(selectedName))
+                    ? selectedName
+                    : DEFAULT_CONFIG_NAME;
+        } catch (IOException exception) {
+            exception.printStackTrace();
+            return DEFAULT_CONFIG_NAME;
+        }
+    }
+
+    private static void writeSelectedConfigName() {
+        try {
+            Files.createDirectories(SELECTED_CONFIG_FILE.getParent());
+            Files.writeString(SELECTED_CONFIG_FILE, selectedConfigName, StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
     }
 
     private static JsonObject readModules(JsonObject root) {
