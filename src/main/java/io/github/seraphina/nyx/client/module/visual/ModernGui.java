@@ -114,6 +114,7 @@ public class ModernGui extends Module {
     private static final float HOTBAR_SLOT_SIZE = 20.0F;
     private static final float HOTBAR_SLOT_GAP = 0.0F;
     private static final float HOTBAR_SELECTED_SIZE = 24.0F;
+    private static final long HOTBAR_SLOT_ANIMATION_NANOS = 140_000_000L;
     private static final float HOTBAR_OFFHAND_WIDTH = 26.0F;
     private static final float HOTBAR_OFFHAND_GAP = 4.0F;
     private static final int HOTBAR_SLOT = 0x22000000;
@@ -281,6 +282,10 @@ public class ModernGui extends Module {
     private float tabListAnimationProgress;
     private float tabListAnimationStartProgress;
     private long tabListAnimationStartedAtNanos;
+    private int hotbarSelectedSlotTarget = -1;
+    private float hotbarSelectedSlotProgress;
+    private float hotbarSelectedSlotStartProgress;
+    private long hotbarSelectedSlotAnimationStartedAtNanos;
 
     public final BoolValue statusBars = ValueBuild.boolSetting("status bars", true, this);
     public final BoolValue hotbar = ValueBuild.boolSetting("hotbar", true, this);
@@ -761,10 +766,11 @@ public class ModernGui extends Module {
 
     public void renderSelectedHotbarSlot(int centerX, int screenHeight, int selectedSlot) {
         if (selectedSlot < 0 || selectedSlot >= 9) {
+            resetHotbarSlotAnimation();
             return;
         }
 
-        float slotX = slotCellX(centerX, selectedSlot) - 2.0F;
+        float slotX = slotCellX(centerX, animatedSelectedHotbarSlot(selectedSlot)) - 2.0F;
         float slotY = hotbarY(screenHeight);
         Render2DUtility.drawDropShadow(slotX, slotY, HOTBAR_SELECTED_SIZE, HOTBAR_SELECTED_SIZE, HOTBAR_RADIUS, 0.0F, 1.0F, 9.0F, 0x553D81F7);
         Render2DUtility.drawRoundedRect(slotX, slotY, HOTBAR_SELECTED_SIZE, HOTBAR_SELECTED_SIZE, HOTBAR_RADIUS, HOTBAR_SELECTED);
@@ -1738,6 +1744,53 @@ public class ModernGui extends Module {
 
     private float slotCellX(int centerX, int slot) {
         return centerX - HOTBAR_WIDTH * 0.5F + 1.0F + slot * (HOTBAR_SLOT_SIZE + HOTBAR_SLOT_GAP);
+    }
+
+    private float slotCellX(int centerX, float slot) {
+        return centerX - HOTBAR_WIDTH * 0.5F + 1.0F + slot * (HOTBAR_SLOT_SIZE + HOTBAR_SLOT_GAP);
+    }
+
+    private float animatedSelectedHotbarSlot(int selectedSlot) {
+        if (hotbarSelectedSlotTarget < 0) {
+            hotbarSelectedSlotTarget = selectedSlot;
+            hotbarSelectedSlotProgress = selectedSlot;
+            hotbarSelectedSlotStartProgress = selectedSlot;
+            hotbarSelectedSlotAnimationStartedAtNanos = 0L;
+            return hotbarSelectedSlotProgress;
+        }
+
+        if (hotbarSelectedSlotTarget != selectedSlot) {
+            hotbarSelectedSlotStartProgress = hotbarSelectedSlotProgress();
+            hotbarSelectedSlotTarget = selectedSlot;
+            hotbarSelectedSlotAnimationStartedAtNanos = System.nanoTime();
+        }
+
+        return hotbarSelectedSlotProgress();
+    }
+
+    private float hotbarSelectedSlotProgress() {
+        if (hotbarSelectedSlotAnimationStartedAtNanos == 0L) {
+            return hotbarSelectedSlotProgress;
+        }
+
+        float rawProgress = (float)((System.nanoTime() - hotbarSelectedSlotAnimationStartedAtNanos) / (double)HOTBAR_SLOT_ANIMATION_NANOS);
+        float target = hotbarSelectedSlotTarget;
+        if (rawProgress >= 1.0F) {
+            hotbarSelectedSlotProgress = target;
+            hotbarSelectedSlotStartProgress = target;
+            hotbarSelectedSlotAnimationStartedAtNanos = 0L;
+            return hotbarSelectedSlotProgress;
+        }
+
+        hotbarSelectedSlotProgress = MathUtility.lerp(hotbarSelectedSlotStartProgress, target, MathUtility.easeOutCubic(rawProgress));
+        return hotbarSelectedSlotProgress;
+    }
+
+    private void resetHotbarSlotAnimation() {
+        hotbarSelectedSlotTarget = -1;
+        hotbarSelectedSlotProgress = 0.0F;
+        hotbarSelectedSlotStartProgress = 0.0F;
+        hotbarSelectedSlotAnimationStartedAtNanos = 0L;
     }
 
     private float contextualBarX(GuiGraphics graphics) {
