@@ -49,7 +49,8 @@ public final class ModuleManager {
                 CrystalAura.INSTANCE,
                 AnchorAura.INSTANCE,
                 SpearCooldown.INSTANCE,
-                TpAura.INSTANCE
+                TpAura.INSTANCE,
+                Backtrack.INSTANCE
         );
         //Movement
         registerModule(
