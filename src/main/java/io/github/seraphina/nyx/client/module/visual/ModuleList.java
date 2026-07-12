@@ -49,6 +49,7 @@ public class ModuleList extends Module {
     private static final float EDGE_EPSILON = 0.5F * SCALE;
     private static final float MAX_FRAME_SECONDS = 0.05F;
     private static final float ANIMATION_SPEED = 7.5F;
+    private static final float POSITION_SPEED = 18.0F;
     private static final int BACKGROUND = 0xCC0C0D11;
     private static final int BORDER = 0x22FFFFFF;
     private static final int SHADOW = 0x74000000;
@@ -96,7 +97,7 @@ public class ModuleList extends Module {
         }
 
         entries.sort(ENTRY_ORDER);
-        layoutEntries(event.getGuiGraphics(), entries);
+        layoutEntries(event.getGuiGraphics(), entries, frameSeconds);
         updateCornerStates(entries);
 
         Render2DUtility.withGuiGraphics(event.getGuiGraphics(), () -> {
@@ -120,7 +121,7 @@ public class ModuleList extends Module {
         Iterator<Map.Entry<Module, AnimationState>> iterator = animations.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Module, AnimationState> entry = iterator.next();
-            if (!entry.getKey().isEnabled() && entry.getValue().progress <= 0.0F) {
+            if ((!entry.getKey().isEnabled() || !shouldDisplay(entry.getKey())) && entry.getValue().progress <= 0.0F) {
                 iterator.remove();
             }
         }
@@ -129,7 +130,8 @@ public class ModuleList extends Module {
     private List<RenderEntry> collectEntries(FontRenderer font) {
         List<RenderEntry> entries = new ArrayList<>();
         for (Map.Entry<Module, AnimationState> animationEntry : animations.entrySet()) {
-            float progress = animationEntry.getValue().progress;
+            AnimationState state = animationEntry.getValue();
+            float progress = state.progress;
             if (progress <= 0.001F) {
                 continue;
             }
@@ -143,6 +145,8 @@ public class ModuleList extends Module {
             String suffixText = suffix.getValue() ? suffixText(module) : "";
             String fullText = moduleName + suffixText;
             RenderEntry entry = new RenderEntry();
+            entry.state = state;
+            entry.targetVisible = shouldDisplay(module) && module.isEnabled();
             entry.fullText = fullText;
             entry.moduleName = moduleName;
             entry.suffixText = suffixText;
@@ -155,13 +159,38 @@ public class ModuleList extends Module {
         return entries;
     }
 
-    private void layoutEntries(GuiGraphics graphics, List<RenderEntry> entries) {
+    private void layoutEntries(GuiGraphics graphics, List<RenderEntry> entries, float frameSeconds) {
         float screenWidth = graphics.guiWidth();
+        int visibleIndex = 0;
+        int visibleCount = 0;
+        for (RenderEntry entry : entries) {
+            if (entry.targetVisible) {
+                visibleCount++;
+            }
+        }
+
         for (int index = 0; index < entries.size(); index++) {
             RenderEntry entry = entries.get(index);
-            entry.y = TOP_PADDING + index * (ROW_HEIGHT + ROW_GAP);
+            if (entry.targetVisible) {
+                float targetY = TOP_PADDING + visibleIndex * (ROW_HEIGHT + ROW_GAP);
+                if (!entry.state.positionInitialized) {
+                    entry.state.y = targetY;
+                    entry.state.positionInitialized = true;
+                } else {
+                    entry.state.y = MathUtility.animateExp(entry.state.y, targetY, POSITION_SPEED, frameSeconds);
+                }
+                entry.y = entry.state.y;
+                visibleIndex++;
+            } else {
+                if (!entry.state.positionInitialized) {
+                    entry.state.y = TOP_PADDING + index * (ROW_HEIGHT + ROW_GAP);
+                    entry.state.positionInitialized = true;
+                }
+                entry.y = entry.state.y;
+            }
+
             entry.x = screenWidth - RIGHT_PADDING - entry.rowWidth + (1.0F - entry.easedProgress) * (entry.rowWidth + SLIDE_DISTANCE);
-            float colorProgress = entries.size() <= 1 ? 0.0F : index / (float)(entries.size() - 1);
+            float colorProgress = visibleCount <= 1 || !entry.targetVisible ? 0.0F : (visibleIndex - 1) / (float)(visibleCount - 1);
             entry.accentColor = accentColor(colorProgress);
         }
     }
@@ -222,10 +251,22 @@ public class ModuleList extends Module {
     }
 
     private void updateCornerStates(List<RenderEntry> entries) {
-        for (int index = 0; index < entries.size(); index++) {
-            RenderEntry previous = index > 0 ? entries.get(index - 1) : null;
-            RenderEntry current = entries.get(index);
-            RenderEntry next = index + 1 < entries.size() ? entries.get(index + 1) : null;
+        List<RenderEntry> visibleEntries = new ArrayList<>();
+        for (RenderEntry entry : entries) {
+            if (entry.targetVisible) {
+                visibleEntries.add(entry);
+            } else {
+                entry.topLeftRounded = true;
+                entry.topRightRounded = true;
+                entry.bottomRightRounded = true;
+                entry.bottomLeftRounded = true;
+            }
+        }
+
+        for (int index = 0; index < visibleEntries.size(); index++) {
+            RenderEntry previous = index > 0 ? visibleEntries.get(index - 1) : null;
+            RenderEntry current = visibleEntries.get(index);
+            RenderEntry next = index + 1 < visibleEntries.size() ? visibleEntries.get(index + 1) : null;
 
             current.topLeftRounded = !coversX(previous, current.x);
             current.topRightRounded = !coversX(previous, current.x + current.rowWidth);
@@ -348,9 +389,13 @@ public class ModuleList extends Module {
 
     private static final class AnimationState {
         private float progress;
+        private float y;
+        private boolean positionInitialized;
     }
 
     private static final class RenderEntry {
+        private AnimationState state;
+        private boolean targetVisible;
         private String fullText;
         private String moduleName;
         private String suffixText;
