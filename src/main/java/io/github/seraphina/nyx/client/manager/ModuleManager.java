@@ -68,7 +68,8 @@ public final class ModuleManager {
                 PlayerAlert.INSTANCE,
                 AutoLogin.INSTANCE,
                 NoDownload.INSTANCE,
-                FakePlayer.INSTANCE
+                FakePlayer.INSTANCE,
+                Auto2048.INSTANCE
         );
         //Player
         registerModule(

@@ -17,15 +17,12 @@ public final class KeyStrokesComponent implements UIComponent<KeyStrokes> {
     private static final float GAP = 3.0F;
     private static final float WIDTH = KEY_SIZE * 3.0F + GAP * 2.0F;
     private static final float HEIGHT = KEY_SIZE * 2.0F + MOUSE_KEY_HEIGHT + SPACE_KEY_HEIGHT + GAP * 3.0F;
-    private static final float RADIUS = 5.0F;
-    private static final int BACKGROUND = 0xCC0C0D11;
     private static final int KEY_BACKGROUND = 0x66141622;
     private static final int KEY_BACKGROUND_DOWN = 0xAA213B6F;
     private static final int BORDER = 0x22FFFFFF;
     private static final int BORDER_DOWN = 0xAA3D81F7;
     private static final int TEXT = 0xFFEDEFF7;
     private static final int TEXT_DOWN = 0xFFFFFFFF;
-    private static final int SHADOW = 0x80000000;
 
     @Override
     public String getId() {
@@ -49,10 +46,6 @@ public final class KeyStrokesComponent implements UIComponent<KeyStrokes> {
     public void render(GuiGraphics graphics, float partialTicks, float scale) {
         FontRenderer keyFont = FontManager.getAppleDisplayRenderer(13.0F);
         FontRenderer smallFont = FontManager.getAppleTextRenderer(10.5F);
-
-        Render2DUtility.drawDropShadow(0.0F, 0.0F, WIDTH, HEIGHT, RADIUS, 0.0F, 2.0F, 10.0F, SHADOW);
-        Render2DUtility.drawRoundedRect(0.0F, 0.0F, WIDTH, HEIGHT, RADIUS, BACKGROUND);
-        Render2DUtility.drawOutlineRoundedRect(0.0F, 0.0F, WIDTH, HEIGHT, RADIUS, 1.0F, BORDER);
 
         renderKey(keyFont, "W", KEY_SIZE + GAP, 0.0F, KEY_SIZE, KEY_SIZE, mc.options.keyUp);
         renderKey(keyFont, "A", 0.0F, KEY_SIZE + GAP, KEY_SIZE, KEY_SIZE, mc.options.keyLeft);
