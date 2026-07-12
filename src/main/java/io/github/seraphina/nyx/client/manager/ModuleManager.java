@@ -95,7 +95,8 @@ public final class ModuleManager {
                 HurtMaker.INSTANCE,
                 ModuleList.INSTANCE,
                 Ambient.INSTANCE,
-                NameTag.INSTANCE
+                NameTag.INSTANCE,
+                Filter.INSTANCE
         );
 
         initialized = true;
