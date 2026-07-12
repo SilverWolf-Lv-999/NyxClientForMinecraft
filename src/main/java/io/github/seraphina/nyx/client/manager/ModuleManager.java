@@ -86,7 +86,8 @@ public final class ModuleManager {
                 AutoCrystal.INSTANCE,
                 PacketMine.INSTANCE,
                 PacketEat.INSTANCE,
-                Blink.INSTANCE
+                Blink.INSTANCE,
+                LagBack.INSTANCE
         );
         //Visual
         registerModule(
