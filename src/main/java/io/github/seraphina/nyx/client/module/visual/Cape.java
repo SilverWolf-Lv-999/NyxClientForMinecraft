@@ -3,51 +3,119 @@ package io.github.seraphina.nyx.client.module.visual;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.value.ValueBuild;
+import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.core.ClientAsset;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.Avatar;
 import net.minecraft.world.entity.player.PlayerSkin;
+
+import java.util.UUID;
 
 @ModuleInfo(name = "nyxclient.module.cape.name", description = "nyxclient.module.cape.description", category = Category.VISUAL)
 public class Cape extends Module {
     public static final Cape INSTANCE = new Cape();
 
-    private static final ClientAsset.ResourceTexture CAPE_TEXTURE = new ClientAsset.ResourceTexture(
-            Identifier.fromNamespaceAndPath("nyxclient", "cape/cape"),
-            Identifier.fromNamespaceAndPath("nyxclient", "cape/cape.png")
-    );
-    private static final ThreadLocal<Boolean> RESOLVING_LOCAL_SKIN = ThreadLocal.withInitial(() -> false);
+    public final EnumValue<Mode> mode = ValueBuild.enumSetting("mode", Mode.SELF, this);
+    public final EnumValue<CapeType> capeType = ValueBuild.enumSetting("cape type", CapeType.NYX, this);
 
-    public PlayerSkin overrideSkin(PlayerSkin original) {
-        if (!isEnabled() || original == null || RESOLVING_LOCAL_SKIN.get()) {
+    public PlayerSkin overrideSkin(PlayerInfo playerInfo, PlayerSkin original) {
+        if (!shouldReplaceCape(playerInfo) || original == null) {
             return original;
         }
 
-        PlayerSkin localSkin = localSkin(original);
-        return PlayerSkin.insecure(localSkin.body(), CAPE_TEXTURE, localSkin.elytra(), localSkin.model());
+        return withCape(original);
     }
 
-    public boolean shouldForceCape() {
-        return isEnabled();
+    public PlayerSkin overrideSkin(AbstractClientPlayer player, PlayerSkin original) {
+        if (!shouldReplaceCape(player) || original == null) {
+            return original;
+        }
+
+        return withCape(original);
     }
 
-    private PlayerSkin localSkin(PlayerSkin fallback) {
-        if (mc.getConnection() == null) {
-            return fallback;
+    public boolean shouldForceCape(Avatar avatar) {
+        return shouldReplaceCape(avatar);
+    }
+
+    private PlayerSkin withCape(PlayerSkin original) {
+        return PlayerSkin.insecure(original.body(), capeType.getValue().texture(), original.elytra(), original.model());
+    }
+
+    private boolean shouldReplaceCape(PlayerInfo playerInfo) {
+        if (!isEnabled() || playerInfo == null) {
+            return false;
         }
 
-        PlayerInfo localInfo = mc.getConnection().getPlayerInfo(mc.getUser().getProfileId());
-        if (localInfo == null) {
-            return fallback;
+        return mode.is(Mode.ALL_PLAYERS) || isLocalPlayer(playerInfo.getProfile().id());
+    }
+
+    private boolean shouldReplaceCape(Avatar avatar) {
+        if (!isEnabled() || avatar == null) {
+            return false;
         }
 
-        boolean resolving = RESOLVING_LOCAL_SKIN.get();
-        RESOLVING_LOCAL_SKIN.set(true);
-        try {
-            PlayerSkin skin = localInfo.getSkin();
-            return skin == null ? fallback : skin;
-        } finally {
-            RESOLVING_LOCAL_SKIN.set(resolving);
+        return mode.is(Mode.ALL_PLAYERS) || isLocalPlayer(avatar.getUUID());
+    }
+
+    private boolean isLocalPlayer(UUID uuid) {
+        return mc.getUser() != null && uuid != null && uuid.equals(mc.getUser().getProfileId());
+    }
+
+    public enum Mode {
+        SELF("Self"),
+        ALL_PLAYERS("All Players");
+
+        private final String displayName;
+
+        Mode(String displayName) {
+            this.displayName = displayName;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+
+    public enum CapeType {
+        NYX("Nyx", "cape.png"),
+        LIQUID_BOUNCE("LiquidBounce", "liquidbounce.png"),
+        MIO("Mio", "mio.png"),
+        CRUCIFIX("CrucifiX", "opal.png"),
+        RISE("Rise", "rise.png"),
+        VAPE_LITE("VapeLite", "vapelite.png"),
+        VAPE_V4("VapeV4", "vapev4.png"),
+        NUM_15("15", "15.png"),
+        AIXIN("aixin", "aixin.png"),
+        LIU_3("Liu3", "liu3.png"),
+        LIU_HUA("LiuHua", "liuhua.png"),
+        LIU_HUA_2("LiuHua2", "liuhua2.png"),
+        SAN_JIU("SanJiu", "sanjiu.png");
+
+        private final String displayName;
+        private final ClientAsset.ResourceTexture texture;
+
+        CapeType(String displayName, String fileName) {
+            this.displayName = displayName;
+            String path = "cape/" + fileName;
+            String textureId = path.endsWith(".png") ? path.substring(0, path.length() - 4) : path;
+            this.texture = new ClientAsset.ResourceTexture(
+                    Identifier.fromNamespaceAndPath("nyxclient", textureId),
+                    Identifier.fromNamespaceAndPath("nyxclient", path)
+            );
+        }
+
+        private ClientAsset.ResourceTexture texture() {
+            return texture;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
         }
     }
 }

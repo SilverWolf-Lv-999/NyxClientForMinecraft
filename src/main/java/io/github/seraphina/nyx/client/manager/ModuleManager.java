@@ -102,6 +102,7 @@ public final class ModuleManager {
                 Animations.INSTANCE,
                 FullBright.INSTANCE,
                 ModernGui.INSTANCE,
+                Chams.INSTANCE,
                 ContainerESP.INSTANCE,
                 ESP.INSTANCE,
                 ViewClip.INSTANCE,

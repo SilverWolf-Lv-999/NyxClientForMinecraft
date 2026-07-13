@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class AvatarRendererMixin {
     @Inject(method = "extractRenderState", at = @At("RETURN"))
     private void nyx$forceCapeVisible(Avatar avatar, AvatarRenderState state, float partialTick, CallbackInfo info) {
-        if (avatar instanceof ClientAvatarEntity && Cape.INSTANCE.shouldForceCape()) {
+        if (avatar instanceof ClientAvatarEntity && Cape.INSTANCE.shouldForceCape(avatar)) {
             state.showCape = true;
         }
     }

@@ -12,6 +12,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public class AbstractClientPlayerMixin {
     @Inject(method = "getSkin", at = @At("RETURN"), cancellable = true)
     private void nyx$overrideSkin(CallbackInfoReturnable<PlayerSkin> info) {
-        info.setReturnValue(Cape.INSTANCE.overrideSkin(info.getReturnValue()));
+        info.setReturnValue(Cape.INSTANCE.overrideSkin((AbstractClientPlayer) (Object) this, info.getReturnValue()));
     }
 }

@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.mixins;
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
+import io.github.seraphina.nyx.client.module.visual.Chams;
 import io.github.seraphina.nyx.client.module.visual.ESP;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
@@ -18,7 +19,9 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArgs;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 
 @Mixin(LivingEntityRenderer.class)
@@ -37,14 +40,17 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
         }
     }
 
-//    @ModifyReturnValue(method = "getRenderType", at = @At("RETURN"))
-//    private RenderType modifyRenderType(RenderType original, S state, boolean isBodyVisible, boolean forceTransparent, boolean appearGlowing) {
-//        Chams chamsModule = Chams.INSTANCE;
-//        if (!chamsModule.isEnabled() || state.entityType != EntityType.PLAYER) {
-//            return original;
-//        }
-//        return Chams.INSTANCE.getRenderType(getTextureLocation(state));
-//    }
+    @ModifyArgs(
+            method = "submit",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/renderer/SubmitNodeCollector;submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IIILnet/minecraft/client/renderer/texture/TextureAtlasSprite;ILnet/minecraft/client/renderer/feature/ModelFeatureRenderer$CrumblingOverlay;)V"
+            )
+    )
+    private void applyChams(Args args, S state, PoseStack poseStack, SubmitNodeCollector nodeCollector, CameraRenderState cameraRenderState) {
+        args.set(3, Chams.INSTANCE.getRenderType(state, getTextureLocation(state), args.get(3)));
+        args.set(6, Chams.INSTANCE.getModelTint(state, args.get(6)));
+    }
 
     @Inject(
             method = "submit",
@@ -60,6 +66,7 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
 
     @Inject(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At("TAIL"))
     private void modifyRotationAnimation(LivingEntity entity, S state, float partialTicks, CallbackInfo info) {
+        Chams.INSTANCE.rememberEntity(entity, state);
         ESP.INSTANCE.rememberModelBoneEntity(entity, state);
         ESP.INSTANCE.applyGlowOutline(entity, state);
 
