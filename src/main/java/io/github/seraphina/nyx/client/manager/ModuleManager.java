@@ -111,7 +111,9 @@ public final class ModuleManager {
                 ProjectilePrediction.INSTANCE,
                 Map.INSTANCE,
                 KeyStrokes.INSTANCE,
-                Spectrum.INSTANCE
+                Spectrum.INSTANCE,
+                MaceEffect.INSTANCE,
+                MotionCamera.INSTANCE
         );
 
         initialized = true;
