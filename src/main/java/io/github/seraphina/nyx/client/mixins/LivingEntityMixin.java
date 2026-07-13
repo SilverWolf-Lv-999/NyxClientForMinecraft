@@ -10,7 +10,12 @@ import io.github.seraphina.nyx.client.events.impl.JumpEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.events.impl.TravelEvent;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
+import io.github.seraphina.nyx.client.module.player.AntiEffects;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.Holder;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
@@ -58,6 +63,41 @@ public class LivingEntityMixin {
                 info.cancel();
             }
         }
+    }
+
+    @WrapOperation(method = "travel", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;hasEffect(Lnet/minecraft/core/Holder;)Z"), require = 0)
+    private boolean nyx$antiEffects(LivingEntity entity, Holder<MobEffect> effect, Operation<Boolean> original) {
+        if (shouldIgnoreEffect(entity, effect)) {
+            return false;
+        }
+
+        return original.call(entity, effect);
+    }
+
+    @WrapOperation(method = "travel", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;getEffect(Lnet/minecraft/core/Holder;)Lnet/minecraft/world/effect/MobEffectInstance;"), require = 0)
+    private MobEffectInstance nyx$antiEffectInstance(LivingEntity entity, Holder<MobEffect> effect, Operation<MobEffectInstance> original) {
+        if (shouldIgnoreEffect(entity, effect)) {
+            return null;
+        }
+
+        return original.call(entity, effect);
+    }
+
+    @WrapOperation(method = "getEffectiveGravity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;hasEffect(Lnet/minecraft/core/Holder;)Z"), require = 0)
+    private boolean nyx$antiEffectGravity(LivingEntity entity, Holder<MobEffect> effect, Operation<Boolean> original) {
+        if (shouldIgnoreEffect(entity, effect)) {
+            return false;
+        }
+
+        return original.call(entity, effect);
+    }
+
+    private boolean shouldIgnoreEffect(LivingEntity entity, Holder<MobEffect> effect) {
+        AntiEffects antiEffects = AntiEffects.INSTANCE;
+        return entity == Minecraft.getInstance().player
+                && antiEffects.isEnabled()
+                && ((effect == MobEffects.SLOW_FALLING && antiEffects.slowFalling.getValue())
+                || (effect == MobEffects.LEVITATION && antiEffects.levitation.getValue()));
     }
 
     @ModifyReturnValue(method = "getCurrentSwingDuration", at = @At("RETURN"))

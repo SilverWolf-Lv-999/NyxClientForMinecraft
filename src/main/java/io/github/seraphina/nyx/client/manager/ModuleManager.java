@@ -93,6 +93,7 @@ public final class ModuleManager {
                 PacketEat.INSTANCE,
                 Blink.INSTANCE,
                 LagBack.INSTANCE,
+                AntiEffects.INSTANCE,
                 NoFall.INSTANCE
         );
         //Visual
