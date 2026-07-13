@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Set;
 
 public final class NeteaseMusicApi {
+    private static volatile LoginSession loginSession;
+
     private NeteaseMusicApi() {
     }
 
@@ -51,11 +53,79 @@ public final class NeteaseMusicApi {
     }
 
     public static List<Song> getPlaylistDetail(long id) throws IOException, InterruptedException {
-        JsonObject root = getJsonObject("/playlist/track/all?id=" + id + "&limit=80");
+        JsonObject root = getJsonObject(withSession("/playlist/track/all?id=" + id + "&limit=80"));
         List<Song> result = new ArrayList<>();
         JsonArray songs = array(root, "songs");
         for (JsonElement element : songs) {
             result.add(parseCloudSong(object(element)));
+        }
+        return result;
+    }
+
+    public static LoginSession loginCellphone(String phone, String password) throws IOException, InterruptedException {
+        if (phone == null || phone.isBlank()) {
+            throw new IOException("Phone number is empty");
+        }
+        if (password == null || password.isBlank()) {
+            throw new IOException("Password is empty");
+        }
+
+        JsonObject root = getJsonObject("/login/cellphone?phone=" + WebUtility.encode(phone.trim())
+            + "&password=" + WebUtility.encode(password)
+            + "&timestamp=" + System.currentTimeMillis());
+        int code = (int)number(root, "code");
+        if (code != 200) {
+            String message = string(root, "message");
+            if (message.isBlank()) {
+                message = string(root, "msg");
+            }
+            throw new IOException(message.isBlank() ? "Netease login failed: " + code : message);
+        }
+
+        JsonObject profile = object(root.get("profile"));
+        LoginSession session = new LoginSession(
+            number(profile, "userId"),
+            string(profile, "nickname"),
+            string(root, "cookie")
+        );
+        if (session.uid() <= 0L || session.cookie().isBlank()) {
+            throw new IOException("Netease login response did not include a usable session");
+        }
+        loginSession = session;
+        return session;
+    }
+
+    public static void logout() {
+        loginSession = null;
+    }
+
+    public static boolean isLoggedIn() {
+        return loginSession != null;
+    }
+
+    public static LoginSession currentSession() {
+        return loginSession;
+    }
+
+    public static List<Playlist> getUserPlaylists() throws IOException, InterruptedException {
+        LoginSession session = loginSession;
+        if (session == null) {
+            return List.of();
+        }
+
+        JsonObject root = getJsonObject("/user/playlist?uid=" + session.uid()
+            + "&limit=100&cookie=" + WebUtility.encode(session.cookie())
+            + "&timestamp=" + System.currentTimeMillis());
+        List<Playlist> result = new ArrayList<>();
+        JsonArray data = array(root, "playlist");
+        for (JsonElement element : data) {
+            JsonObject playlist = object(element);
+            result.add(new Playlist(
+                number(playlist, "id"),
+                string(playlist, "name"),
+                appendImageSize(string(playlist, "coverImgUrl")),
+                number(playlist, "playCount")
+            ));
         }
         return result;
     }
@@ -76,7 +146,7 @@ public final class NeteaseMusicApi {
     }
 
     public static SongFile getSongFile(long id) throws IOException, InterruptedException {
-        JsonObject root = getJsonObject("/song/url/v1?id=" + id + "&level=exhigh&UnblockNeteaseMusic=true");
+        JsonObject root = getJsonObject(withSession("/song/url/v1?id=" + id + "&level=exhigh&UnblockNeteaseMusic=true"));
         JsonArray data = array(root, "data");
         if (data.isEmpty()) {
             return new SongFile("", 0L);
@@ -87,7 +157,7 @@ public final class NeteaseMusicApi {
     }
 
     public static List<LyricLine> getLyric(long id) throws IOException, InterruptedException {
-        JsonObject root = getJsonObject("/lyric?id=" + id);
+        JsonObject root = getJsonObject(withSession("/lyric?id=" + id));
         JsonObject lrc = object(root.get("lrc"));
         return LyricLineProcessor.parse(string(lrc, "lyric"));
     }
@@ -117,6 +187,16 @@ public final class NeteaseMusicApi {
             throw failure;
         }
         throw new IOException("No Netease API base URL configured");
+    }
+
+    private static String withSession(String path) {
+        LoginSession session = loginSession;
+        if (session == null || session.cookie().isBlank()) {
+            return path;
+        }
+        return path + (path.contains("?") ? "&" : "?")
+            + "cookie=" + WebUtility.encode(session.cookie())
+            + "&timestamp=" + System.currentTimeMillis();
     }
 
     private static List<String> baseUrls() {
@@ -182,5 +262,8 @@ public final class NeteaseMusicApi {
         } catch (RuntimeException ignored) {
             return 0L;
         }
+    }
+
+    public record LoginSession(long uid, String nickname, String cookie) {
     }
 }
