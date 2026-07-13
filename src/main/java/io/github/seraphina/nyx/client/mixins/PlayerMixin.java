@@ -1,11 +1,13 @@
 package io.github.seraphina.nyx.client.mixins;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.AttackYawEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.module.combat.Reach;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
+import io.github.seraphina.nyx.client.module.movement.NoSlow;
 import io.github.seraphina.nyx.client.module.movement.SafeWalk;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Player;
@@ -36,6 +38,24 @@ public class PlayerMixin {
     @ModifyExpressionValue(method = "maybeBackOffFromEdge", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;isStayingOnGroundSurface()Z"))
     private boolean nyx$enableSafeWalk(boolean original) {
         return original || ((Object) this instanceof LocalPlayer player && SafeWalk.INSTANCE.shouldStayOnGroundSurface(player));
+    }
+
+    @ModifyReturnValue(method = "getBlockSpeedFactor", at = @At("RETURN"))
+    private float nyx$modifyBlockSpeedFactor(float original) {
+        if ((Object) this instanceof LocalPlayer && NoSlow.INSTANCE.soulSand()) {
+            return 1.0F;
+        }
+
+        return original;
+    }
+
+    @ModifyReturnValue(method = "onClimbable", at = @At("RETURN"))
+    private boolean nyx$modifyClimbable(boolean original) {
+        if ((Object) this instanceof LocalPlayer && NoSlow.INSTANCE.climb()) {
+            return false;
+        }
+
+        return original;
     }
 
     @Inject(method = "entityInteractionRange()D", at = @At("RETURN"), cancellable = true)

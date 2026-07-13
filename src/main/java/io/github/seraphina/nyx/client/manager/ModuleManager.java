@@ -61,7 +61,9 @@ public final class ModuleManager {
                 Stuck.INSTANCE,
                 ElytraFly.INSTANCE,
                 FastFall.INSTANCE,
-                SafeWalk.INSTANCE
+                SafeWalk.INSTANCE,
+                AntiVoid.INSTANCE,
+                NoSlow.INSTANCE
         );
         //Other
         registerModule(
