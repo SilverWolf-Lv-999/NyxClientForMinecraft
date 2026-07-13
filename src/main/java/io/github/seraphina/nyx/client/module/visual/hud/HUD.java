@@ -31,6 +31,7 @@ public class HUD extends Module {
     public final BoolValue playerPos = ValueBuild.boolSetting("player pos", true, this);
     public final BoolValue biome = ValueBuild.boolSetting("biome", true, this);
     public final BoolValue inventory = ValueBuild.boolSetting("inventory", false, this);
+    public final BoolValue lyric = ValueBuild.boolSetting("lyric", false, this);
 
     public HUD() {
         components.add(new WatermarkComponent());
@@ -42,9 +43,10 @@ public class HUD extends Module {
         components.add(new MapComponent());
         components.add(new NotificationComponent());
         components.add(new KeyStrokesComponent());
+        components.add(new LyricComponent());
     }
 
-    @EventTarget
+    @EventTarget(4)
     public void onRender2D(Render2DEvent.HUD event) {
         if (mc.screen instanceof ChatScreen) {
             return;

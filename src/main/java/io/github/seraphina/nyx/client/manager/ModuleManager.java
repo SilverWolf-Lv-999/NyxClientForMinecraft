@@ -109,7 +109,8 @@ public final class ModuleManager {
                 Filter.INSTANCE,
                 ProjectilePrediction.INSTANCE,
                 Map.INSTANCE,
-                KeyStrokes.INSTANCE
+                KeyStrokes.INSTANCE,
+                Spectrum.INSTANCE
         );
 
         initialized = true;
