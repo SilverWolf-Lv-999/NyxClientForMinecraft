@@ -2,6 +2,7 @@ package io.github.seraphina.nyx.client.module.movement;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.impl.ClickEvent;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.SlowdownEvent;
@@ -11,6 +12,7 @@ import io.github.seraphina.nyx.client.mixins.MultiPlayerGameModeAccessor;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.MovingUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
@@ -60,12 +62,19 @@ public class NoSlow extends Module {
     private boolean wasUsingItem;
     private int useDelay;
     private int onGroundTicks;
+    private boolean newGrimActive;
+    private boolean newGrimSwappedOffhand;
+    private boolean newGrimUseStarted;
+    private boolean newGrimRestorePending;
+    private int newGrimUseSlot = InventoryUtility.NOT_FOUND;
+    private int newGrimStartTicks;
 
     @Override
     public void onEnable() {
         onGroundTicks = 0;
         wasUsingItem = false;
         useDelay = 0;
+        resetNewGrimState();
         storedClicks.clear();
         releasingClicks.set(false);
     }
@@ -75,6 +84,8 @@ public class NoSlow extends Module {
         onGroundTicks = 0;
         wasUsingItem = false;
         useDelay = 0;
+        restoreNewGrimSwap();
+        resetNewGrimState();
         storedClicks.clear();
         releasingClicks.set(false);
     }
@@ -85,6 +96,7 @@ public class NoSlow extends Module {
             wasUsingItem = false;
             useDelay = 0;
             onGroundTicks = 0;
+            resetNewGrimState();
             storedClicks.clear();
             return;
         }
@@ -100,6 +112,8 @@ public class NoSlow extends Module {
         } else {
             onGroundTicks = 0;
         }
+
+        updateNewGrimState();
 
         if (wasUsingItem && !mc.player.isPassenger() && !mc.player.isFallFlying()) {
             runUseBypass();
@@ -141,6 +155,23 @@ public class NoSlow extends Module {
     }
 
     @EventTarget
+    public void onClick(ClickEvent event) {
+        if (isNull()) {
+            return;
+        }
+
+        if (newGrimRestorePending) {
+            restoreNewGrimSwap();
+            resetNewGrimState();
+            return;
+        }
+
+        if (mode.is(Mode.NEW_GRIM)) {
+            prepareNewGrimUse();
+        }
+    }
+
+    @EventTarget
     public void onSlowdown(SlowdownEvent event) {
         if (noSlow()) {
             event.setSlowdown(false);
@@ -162,6 +193,8 @@ public class NoSlow extends Module {
         if (mode.is(Mode.GRIM_PACKET) && isFoodLimitedItem(mc.player.getItemInHand(InteractionHand.MAIN_HAND))) {
             clickMenuSlotOne();
         }
+
+        updateNewGrimState();
     }
 
     @EventTarget
@@ -213,6 +246,10 @@ public class NoSlow extends Module {
 
         if ((currentMode == Mode.DROP || currentMode == Mode.GRIM_PACKET) && !wasUsingItem) {
             return false;
+        }
+
+        if (currentMode == Mode.NEW_GRIM) {
+            return shouldRunNewGrim();
         }
 
         if (!isNoSlowAllowedForCurrentItem()) {
@@ -365,9 +402,155 @@ public class NoSlow extends Module {
         }
 
         return switch (mode.getValue()) {
-            case GRIM_LAZY, GRIM_TICK, HEYPIXEL_2_3, GRIM_50, GRIM_1_3, JUMP -> noSlow();
+            case GRIM_LAZY, GRIM_TICK, HEYPIXEL_2_3, GRIM_50, GRIM_1_3, JUMP, NEW_GRIM -> noSlow();
             default -> false;
         };
+    }
+
+    private void prepareNewGrimUse() {
+        if (newGrimActive
+                || mc.screen != null
+                || mc.player == null
+                || mc.gameMode == null
+                || mc.player.connection == null
+                || mc.player.isUsingItem()
+                || mc.player.isPassenger()
+                || mc.player.isFallFlying()
+                || !mc.options.keyUse.isDown()
+                || mc.rightClickDelay > 0) {
+            return;
+        }
+
+        int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (!InventoryUtility.isHotbarSlot(selectedSlot)) {
+            return;
+        }
+
+        if (isNewGrimUseItem(mc.player.getMainHandItem())) {
+            return;
+        }
+
+        ItemStack offhand = mc.player.getOffhandItem();
+        if (!isNewGrimUseItem(offhand)) {
+            return;
+        }
+
+        if (swapSelectedSlotWithOffhand(selectedSlot)) {
+            beginNewGrimUse(selectedSlot, true);
+        }
+    }
+
+    private void beginNewGrimUse(int useSlot, boolean swappedOffhand) {
+        newGrimActive = true;
+        newGrimSwappedOffhand = swappedOffhand;
+        newGrimUseStarted = false;
+        newGrimRestorePending = false;
+        newGrimUseSlot = useSlot;
+        newGrimStartTicks = 0;
+    }
+
+    private void updateNewGrimState() {
+        if (!newGrimActive) {
+            return;
+        }
+
+        if (!mode.is(Mode.NEW_GRIM)
+                || mc.screen != null
+                || mc.player == null
+                || mc.gameMode == null) {
+            newGrimRestorePending = true;
+            return;
+        }
+
+        newGrimStartTicks++;
+        boolean usingExpectedMainHand = mc.player.isUsingItem()
+                && mc.player.getUsedItemHand() == InteractionHand.MAIN_HAND
+                && isNewGrimFood(mc.player.getUseItem())
+                && InventoryUtility.isHotbarSlot(newGrimUseSlot);
+
+        if (usingExpectedMainHand) {
+            newGrimUseStarted = true;
+            return;
+        }
+
+        if (newGrimUseStarted || newGrimStartTicks > 4) {
+            newGrimRestorePending = true;
+        }
+    }
+
+    private boolean shouldRunNewGrim() {
+        return mc.player.isUsingItem()
+                && mc.player.getUsedItemHand() == InteractionHand.MAIN_HAND
+                && food.getValue()
+                && isNewGrimFood(mc.player.getUseItem())
+                && newGrimActive;
+    }
+
+    private void restoreNewGrimSwap() {
+        if (!newGrimSwappedOffhand || !InventoryUtility.isHotbarSlot(newGrimUseSlot)) {
+            return;
+        }
+
+        if (mc.player != null && mc.gameMode != null && mc.player.connection != null) {
+            swapSelectedSlotWithOffhand(newGrimUseSlot);
+        }
+    }
+
+    private void resetNewGrimState() {
+        newGrimActive = false;
+        newGrimSwappedOffhand = false;
+        newGrimUseStarted = false;
+        newGrimRestorePending = false;
+        newGrimUseSlot = InventoryUtility.NOT_FOUND;
+        newGrimStartTicks = 0;
+    }
+
+    private boolean swapSelectedSlotWithOffhand(int hotbarSlot) {
+        if (mc.player == null
+                || mc.gameMode == null
+                || mc.player.connection == null
+                || !InventoryUtility.isHotbarSlot(hotbarSlot)) {
+            return false;
+        }
+
+        int previousSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (!InventoryUtility.isHotbarSlot(previousSlot)) {
+            return false;
+        }
+
+        boolean changedSlot = previousSlot != hotbarSlot;
+        if (changedSlot && !InventoryUtility.selectHotbarSlot(hotbarSlot, true)) {
+            return false;
+        }
+
+        try {
+            mc.player.connection.send(new ServerboundPlayerActionPacket(
+                    ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND,
+                    BlockPos.ZERO,
+                    Direction.DOWN
+            ));
+            swapLocalSelectedSlotWithOffhand(hotbarSlot);
+            return true;
+        } finally {
+            if (changedSlot) {
+                InventoryUtility.selectHotbarSlot(previousSlot, true);
+            }
+        }
+    }
+
+    private boolean isNewGrimUseItem(ItemStack stack) {
+        return food.getValue() && isNewGrimFood(stack);
+    }
+
+    private void swapLocalSelectedSlotWithOffhand(int hotbarSlot) {
+        ItemStack mainHand = mc.player.getInventory().getItem(hotbarSlot);
+        ItemStack offhand = mc.player.getInventory().getItem(InventoryUtility.OFFHAND_SLOT);
+        mc.player.getInventory().setItem(hotbarSlot, offhand);
+        mc.player.getInventory().setItem(InventoryUtility.OFFHAND_SLOT, mainHand);
+    }
+
+    private boolean isNewGrimFood(ItemStack stack) {
+        return !stack.isEmpty() && hasFoodComponent(stack);
     }
 
     private boolean isNoSlowAllowedForCurrentItem() {
@@ -470,7 +653,9 @@ public class NoSlow extends Module {
         GRIM_50("Grim50"),
         GRIM_1_3("Grim1_3"),
         JUMP("Jump"),
-        NONE("None");
+        NONE("None"),
+        NEW_GRIM("New Grim"),
+        ;
 
         private final String name;
 
