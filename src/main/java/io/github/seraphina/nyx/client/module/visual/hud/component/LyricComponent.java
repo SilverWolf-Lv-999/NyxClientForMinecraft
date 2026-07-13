@@ -2,7 +2,6 @@ package io.github.seraphina.nyx.client.module.visual.hud.component;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
-import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.music.LyricLine;
 import io.github.seraphina.nyx.client.music.LyricLineProcessor;
 import io.github.seraphina.nyx.client.music.MusicPlaybackService;
@@ -130,12 +129,11 @@ public final class LyricComponent implements UIComponent<HUD> {
         Render2DUtility.drawRect(SONG_INFO_WIDTH, VERTICAL_PADDING, DIVIDER_WIDTH, HEIGHT - VERTICAL_PADDING * 2.0F,
             Render2DUtility.applyOpacity(DIVIDER, opacity));
 
-        AABB bounds = HUDManager.getDisplayBounds(this);
         Render2DUtility.withClip(
-            (float)bounds.minX + lyricX * scale,
-            (float)bounds.minY,
-            lyricWidth * scale,
-            (float)bounds.getYsize(),
+            lyricX,
+            0.0F,
+            lyricWidth,
+            HEIGHT,
             () -> renderLyrics(font, state, lyricX, lyricWidth, opacity)
         );
     }
@@ -152,7 +150,7 @@ public final class LyricComponent implements UIComponent<HUD> {
     }
 
     private FontRenderer font() {
-        return FontManager.getAppleTextRenderer(12.0F);
+        return FontManager.getClickGuiRenderer(12.0F);
     }
 
     private LyricState lyricState() {
@@ -245,6 +243,7 @@ public final class LyricComponent implements UIComponent<HUD> {
             return;
         }
 
+        boolean renderedLine = false;
         for (int index = firstIndex; index <= lastIndex; index++) {
             if (index < 0 || index >= state.lyrics().size()) {
                 continue;
@@ -261,6 +260,14 @@ public final class LyricComponent implements UIComponent<HUD> {
             int baseColor = distance <= 0.5F ? TEXT : TEXT_MUTED;
             String text = trimToWidth(font, lyricText(state.lyrics().get(index)), width - HORIZONTAL_PADDING * 2.0F);
             font.drawCenteredString(text, x + width * 0.5F, y, Render2DUtility.applyOpacity(baseColor, lineOpacity));
+            renderedLine = true;
+        }
+
+        if (!renderedLine) {
+            int currentIndex = Math.max(0, Math.min(state.currentIndex(), state.lyrics().size() - 1));
+            LyricLine currentLine = state.lyrics().get(currentIndex);
+            String text = trimToWidth(font, lyricText(currentLine), width - HORIZONTAL_PADDING * 2.0F);
+            font.drawCenteredString(text, x + width * 0.5F, centerY, Render2DUtility.applyOpacity(TEXT, opacity));
         }
     }
 
