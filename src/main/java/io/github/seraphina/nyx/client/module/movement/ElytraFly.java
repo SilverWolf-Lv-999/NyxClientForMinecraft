@@ -30,18 +30,14 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector2f;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.LockSupport;
-
 @ModuleInfo(name = "nyxclient.module.elytrafly.name", description = "nyxclient.module.elytrafly.description", category = Category.MOVEMENT)
 public class ElytraFly extends Module {
     public static final ElytraFly INSTANCE = new ElytraFly();
 
     private static final int GRIM_FALL_FLYING_READY_TICKS = 3;
+    private static final int GRIM_ARMOR_FALL_FLYING_READY_TICKS = 1;
     private static final int GRIM_RESTORE_SLOT_DELAY_TICKS = 1;
     private static final long NANOS_PER_MILLISECOND = 1_000_000L;
-    private static final long GRIM_ARMOR_WORKER_INTERVAL_NS = 2L * NANOS_PER_MILLISECOND;
-    private static final long GRIM_ARMOR_FALL_FLYING_READY_NS = 20L * NANOS_PER_MILLISECOND;
     private static final long GRIM_ARMOR_EQUIP_TIMEOUT_NS = 1_500L * NANOS_PER_MILLISECOND;
     private static final long GRIM_ARMOR_FIREWORK_TIMEOUT_NS = 1_000L * NANOS_PER_MILLISECOND;
     private static final long GRIM_ARMOR_RESTORE_TIMEOUT_NS = 1_500L * NANOS_PER_MILLISECOND;
@@ -49,6 +45,7 @@ public class ElytraFly extends Module {
     private static final int GRIM_ARMOR_MIN_SWITCH_DELAY_MS = 50;
     private static final double GRIM_ARMOR_ROTATION_SPEED = 180.0D;
     private static final double GRIM_ARMOR_MIN_FIREWORK_SPEED = 1.0D;
+    private static final double GRIM_ARMOR_BOOST_COLLISION_CHECK_DISTANCE = 0.25D;
     private static final double NORMAL_ASCEND_ACCELERATION = 0.08D;
     private static final double NORMAL_DESCEND_ACCELERATION = 0.04D;
 
@@ -81,9 +78,6 @@ public class ElytraFly extends Module {
     private int fireworkOriginalSlot = InventoryUtility.NOT_FOUND;
     private int fireworkSlot = InventoryUtility.NOT_FOUND;
     private int fireworkRestoreSlotDelayTicks;
-    private final AtomicBoolean grimArmorFlyTaskQueued = new AtomicBoolean();
-    private volatile boolean grimArmorFlyWorkerRunning;
-    private Thread grimArmorFlyThread;
     private GrimArmorFlyStage grimArmorFlyStage = GrimArmorFlyStage.IDLE;
     private long grimArmorFlyStageStartTimeNs;
     private long grimArmorFlyNextActionTimeNs;
@@ -95,6 +89,8 @@ public class ElytraFly extends Module {
     private int grimArmorFlyOriginalSelectedSlot = InventoryUtility.NOT_FOUND;
     private ItemStack grimArmorFlyOriginalChestStack = ItemStack.EMPTY;
     private Vector2f grimArmorFlyRotations;
+    private int grimArmorFlyFallFlyingTicks;
+    private int grimArmorFlyLastFallFlyingTick = -1;
     private boolean grimArmorFlyReleasedJumpForGlide;
     private boolean grimArmorFlyReleaseJumpApplied;
     private boolean grimArmorFlyPressJumpForGlide;
@@ -102,66 +98,26 @@ public class ElytraFly extends Module {
     @Override
     public void onEnable() {
         resetFlightState();
-        startGrimArmorFlyWorker();
     }
 
     @Override
     public void onDisable() {
-        stopGrimArmorFlyWorker();
         resetFlightState();
-    }
-
-    private void startGrimArmorFlyWorker() {
-        if (grimArmorFlyWorkerRunning) {
-            return;
-        }
-
-        grimArmorFlyWorkerRunning = true;
-        grimArmorFlyThread = new Thread(this::runGrimArmorFlyWorker, "Nyx-GrimArmorFly");
-        grimArmorFlyThread.setDaemon(true);
-        grimArmorFlyThread.start();
-    }
-
-    private void stopGrimArmorFlyWorker() {
-        grimArmorFlyWorkerRunning = false;
-        Thread thread = grimArmorFlyThread;
-        if (thread != null) {
-            thread.interrupt();
-        }
-        grimArmorFlyThread = null;
-        grimArmorFlyTaskQueued.set(false);
-    }
-
-    private void runGrimArmorFlyWorker() {
-        while (grimArmorFlyWorkerRunning) {
-            if (flyType.is(FlyType.GRIM_ARMOR_FLY)
-                    && grimArmorFlyTaskQueued.compareAndSet(false, true)) {
-                mc.execute(() -> {
-                    try {
-                        if (grimArmorFlyWorkerRunning && flyType.is(FlyType.GRIM_ARMOR_FLY)) {
-                            resetFireworkUseState(true);
-                            runGrimArmorFly(System.nanoTime());
-                        }
-                    } finally {
-                        grimArmorFlyTaskQueued.set(false);
-                    }
-                });
-            }
-
-            LockSupport.parkNanos(GRIM_ARMOR_WORKER_INTERVAL_NS);
-            if (Thread.currentThread().isInterrupted()) {
-                Thread.interrupted();
-            }
-        }
     }
 
     @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
-        if (!flyType.is(FlyType.NORMAL) || !canRun()) {
+        if (flyType.is(FlyType.NORMAL)) {
+            if (canRun()) {
+                applyNormalVelocity();
+            }
             return;
         }
 
-        applyNormalVelocity();
+        if (flyType.is(FlyType.GRIM_ARMOR_FLY)) {
+            resetFireworkUseState(true);
+            runGrimArmorFly(System.nanoTime());
+        }
     }
 
     @EventTarget(4)
@@ -172,6 +128,7 @@ public class ElytraFly extends Module {
 
         event.setSprint(false);
         stopSprinting();
+        alignGrimArmorFlyMoveInput(event);
 
         if (grimArmorFlyStage != GrimArmorFlyStage.START_FALL_FLYING
                 && grimArmorFlyStage != GrimArmorFlyStage.WAIT_FALL_FLYING) {
@@ -240,7 +197,7 @@ public class ElytraFly extends Module {
             return;
         }
 
-        if (!isWearingElytra()
+        if ((!isWearingElytra() && !mc.player.isFallFlying())
                 || mc.player.onGround()
                 || mc.player.isPassenger()
                 || mc.player.isSpectator()
@@ -497,8 +454,14 @@ public class ElytraFly extends Module {
             if (grimArmorFlyFallFlyingStartTimeNs == 0L) {
                 grimArmorFlyFallFlyingStartTimeNs = nowNs;
             }
+            if (grimArmorFlyLastFallFlyingTick != mc.player.tickCount) {
+                grimArmorFlyFallFlyingTicks++;
+                grimArmorFlyLastFallFlyingTick = mc.player.tickCount;
+            }
         } else {
             grimArmorFlyFallFlyingStartTimeNs = 0L;
+            grimArmorFlyFallFlyingTicks = 0;
+            grimArmorFlyLastFallFlyingTick = -1;
         }
     }
 
@@ -520,6 +483,7 @@ public class ElytraFly extends Module {
         grimArmorFlyFireworkSlot = fireworkSlot;
         grimArmorFlyOriginalSelectedSlot = selectedSlot;
         grimArmorFlyOriginalChestStack = getChestStack().copy();
+        stopSprinting();
         grimArmorFlyNextActionTimeNs = nowNs;
         setGrimArmorFlyStage(GrimArmorFlyStage.EQUIP_ELYTRA, nowNs);
         return true;
@@ -544,7 +508,7 @@ public class ElytraFly extends Module {
     }
 
     private void runGrimArmorFlyStartFallFlying(long nowNs) {
-        if (!isWearingElytra()) {
+        if (!isWearingElytra() && !mc.player.isFallFlying()) {
             cancelGrimArmorFly(true);
             return;
         }
@@ -560,7 +524,7 @@ public class ElytraFly extends Module {
     }
 
     private void runGrimArmorFlyWaitFallFlying(long nowNs) {
-        if (!isWearingElytra()) {
+        if (!isWearingElytra() && !mc.player.isFallFlying()) {
             cancelGrimArmorFly(true);
             return;
         }
@@ -576,14 +540,13 @@ public class ElytraFly extends Module {
         }
         resetGrimArmorFlyGlideJumpState();
 
-        if (grimArmorFlyFallFlyingStartTimeNs != 0L
-                && nowNs - grimArmorFlyFallFlyingStartTimeNs >= GRIM_ARMOR_FALL_FLYING_READY_NS) {
+        if (grimArmorFlyFallFlyingTicks >= GRIM_ARMOR_FALL_FLYING_READY_TICKS) {
             setGrimArmorFlyStage(GrimArmorFlyStage.USE_FIREWORK, nowNs);
         }
     }
 
     private void runGrimArmorFlyUseFirework(long nowNs) {
-        if (!isWearingElytra()) {
+        if (!mc.player.isFallFlying()) {
             cancelGrimArmorFly(true);
             return;
         }
@@ -601,7 +564,7 @@ public class ElytraFly extends Module {
         Vector2f rotations = currentGrimArmorFlyRotations();
         GrimArmorFlyActionResult result = useGrimArmorFlyHotbarItem(grimArmorFlyFireworkSlot, rotations);
         if (result == GrimArmorFlyActionResult.SUCCESS) {
-            grimArmorFlyNextCycleTimeNs = nowNs + millisToNanos(armorCycleDelayMs.getValue());
+            grimArmorFlyNextCycleTimeNs = nowNs + getGrimArmorFlyCycleDelayNs();
             grimArmorFlyBoostEndTimeNs = nowNs + GRIM_ARMOR_FIREWORK_BOOST_NS;
             applyGrimArmorFlyFireworkBoost(rotations);
             setGrimArmorFlyStage(GrimArmorFlyStage.RESTORE_ARMOR, nowNs);
@@ -612,7 +575,7 @@ public class ElytraFly extends Module {
 
     private void runGrimArmorFlyRestoreArmor(long nowNs) {
         if (!isWearingElytra()) {
-            resetGrimArmorFlyState(true);
+            finishGrimArmorFlyCycle(false);
             return;
         }
 
@@ -644,11 +607,7 @@ public class ElytraFly extends Module {
 
     private void runGrimArmorFlyWaitArmorRestore(long nowNs) {
         if (!isWearingElytra()) {
-            if (!restoreGrimArmorFlySelectedSlotDelayed()) {
-                return;
-            }
-
-            resetGrimArmorFlyState(false);
+            finishGrimArmorFlyCycle(false);
             return;
         }
 
@@ -689,6 +648,15 @@ public class ElytraFly extends Module {
         }
 
         return legitimizeRotations(new Vector2f(yaw, pitch));
+    }
+
+    private void alignGrimArmorFlyMoveInput(MoveInputEvent event) {
+        if (event.getForward() == 0.0F && event.getStrafe() == 0.0F) {
+            return;
+        }
+
+        event.setForward(1.0F);
+        event.setStrafe(0.0F);
     }
 
     private int verticalInput() {
@@ -780,7 +748,22 @@ public class ElytraFly extends Module {
             return;
         }
 
-        mc.player.setDeltaMovement(velocity.add(direction.scale(speed - Math.max(0.0D, currentSpeed))));
+        Vec3 boost = direction.scale(speed - Math.max(0.0D, currentSpeed));
+        if (!canApplyGrimArmorFlyBoost(boost)) {
+            return;
+        }
+
+        mc.player.setDeltaMovement(velocity.add(boost));
+    }
+
+    private boolean canApplyGrimArmorFlyBoost(Vec3 boost) {
+        if (mc.player.horizontalCollision) {
+            return false;
+        }
+
+        double checkScale = Math.min(1.0D, GRIM_ARMOR_BOOST_COLLISION_CHECK_DISTANCE / Math.max(boost.length(), 1.0E-6D));
+        Vec3 checkedBoost = boost.scale(checkScale);
+        return MovingUtility.canMove(checkedBoost.x, checkedBoost.z, checkedBoost.y);
     }
 
     private GrimArmorFlyActionResult useGrimArmorFlyHotbarItem(int hotbarSlot, Vector2f rotations) {
@@ -860,6 +843,10 @@ public class ElytraFly extends Module {
 
     private long millisToNanos(long milliseconds) {
         return milliseconds * NANOS_PER_MILLISECOND;
+    }
+
+    private long getGrimArmorFlyCycleDelayNs() {
+        return millisToNanos(armorCycleDelayMs.getValue());
     }
 
     private boolean hasGrimArmorFlyStageElapsed(long nowNs, long durationNs) {
@@ -956,7 +943,15 @@ public class ElytraFly extends Module {
         grimArmorFlyOriginalSelectedSlot = InventoryUtility.NOT_FOUND;
         grimArmorFlyOriginalChestStack = ItemStack.EMPTY;
         grimArmorFlyRotations = null;
+        grimArmorFlyFallFlyingTicks = 0;
+        grimArmorFlyLastFallFlyingTick = -1;
         resetGrimArmorFlyGlideJumpState();
+    }
+
+    private void finishGrimArmorFlyCycle(boolean restoreSelectedSlot) {
+        long nextCycleTimeNs = grimArmorFlyNextCycleTimeNs;
+        resetGrimArmorFlyState(restoreSelectedSlot);
+        grimArmorFlyNextCycleTimeNs = nextCycleTimeNs;
     }
 
     private void restoreGrimArmorFlySelectedSlot() {
@@ -969,29 +964,6 @@ public class ElytraFly extends Module {
         if (selectedSlot == grimArmorFlyElytraSlot || selectedSlot == grimArmorFlyFireworkSlot) {
             InventoryUtility.selectHotbarSlot(grimArmorFlyOriginalSelectedSlot, true);
         }
-    }
-
-    private boolean restoreGrimArmorFlySelectedSlotDelayed() {
-        if (grimArmorFlyOriginalSelectedSlot == InventoryUtility.NOT_FOUND
-                || !InventoryUtility.isHotbarSlot(grimArmorFlyOriginalSelectedSlot)) {
-            return true;
-        }
-
-        int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
-        if (selectedSlot != grimArmorFlyElytraSlot && selectedSlot != grimArmorFlyFireworkSlot) {
-            return true;
-        }
-
-        if (!canRunGrimArmorFlyAction()) {
-            return false;
-        }
-
-        if (!InventoryUtility.selectHotbarSlot(grimArmorFlyOriginalSelectedSlot, true)) {
-            return false;
-        }
-
-        delayNextGrimArmorFlyAction();
-        return true;
     }
 
     private void setGrimArmorFlyStage(GrimArmorFlyStage stage) {
