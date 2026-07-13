@@ -73,7 +73,8 @@ public final class ModuleManager {
                 NoDownload.INSTANCE,
                 FakePlayer.INSTANCE,
                 MusicPlayer.INSTANCE,
-                Auto2048.INSTANCE
+                Auto2048.INSTANCE,
+                AutoNoWhite.INSTANCE
         );
         //Player
         registerModule(
