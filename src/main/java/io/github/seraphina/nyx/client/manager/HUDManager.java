@@ -32,7 +32,9 @@ import java.util.Map;
 
 public final class HUDManager implements IMinecraft {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final int CONFIG_VERSION = 2;
+    private static final int CONFIG_VERSION = 3;
+    private static final String MAIN_UI_KEY = "mainUI";
+    private static final String MAIN_UI_BACKGROUND_KEY = "background";
     private static final float MIN_SCALE = 0.5F;
     private static final float MAX_SCALE = 3.0F;
     private static final float SCALE_STEP = 0.08F;
@@ -64,6 +66,7 @@ public final class HUDManager implements IMinecraft {
     private static double lastDragMouseY = Double.NaN;
     private static float activeVerticalSnapLine = Float.NaN;
     private static float activeHorizontalSnapLine = Float.NaN;
+    private static String mainUIBackgroundKey;
     private static boolean loaded;
     private static boolean dirty;
     private static boolean shutdownHookRegistered;
@@ -102,6 +105,7 @@ public final class HUDManager implements IMinecraft {
             }
 
             JsonObject root = rootElement.getAsJsonObject();
+            readMainUIConfig(root);
             JsonObject components = root.has("components") && root.get("components").isJsonObject()
                 ? root.getAsJsonObject("components")
                 : root;
@@ -335,6 +339,26 @@ public final class HUDManager implements IMinecraft {
 
             boolean major = index % GUIDE_GRID_MAJOR_INTERVAL == 0;
             drawHorizontalGuideLine(0.0F, screenWidth, y, major ? 0.75F : GUIDE_GRID_STROKE, major ? GUIDE_GRID_MAJOR : GUIDE_GRID);
+        }
+    }
+
+    public static String getMainUIBackgroundKey() {
+        return mainUIBackgroundKey;
+    }
+
+    public static void setMainUIBackgroundKey(String backgroundKey) {
+        if (backgroundKey == null || backgroundKey.isBlank()) {
+            return;
+        }
+
+        if (backgroundKey.equals(mainUIBackgroundKey)) {
+            return;
+        }
+
+        mainUIBackgroundKey = backgroundKey;
+        dirty = true;
+        if (loaded) {
+            save();
         }
     }
 
@@ -657,6 +681,18 @@ public final class HUDManager implements IMinecraft {
         }
     }
 
+    private static void readMainUIConfig(JsonObject root) {
+        JsonElement element = root.get(MAIN_UI_KEY);
+        if (element == null || !element.isJsonObject()) {
+            return;
+        }
+
+        String backgroundKey = readString(element.getAsJsonObject(), MAIN_UI_BACKGROUND_KEY);
+        if (backgroundKey != null && !backgroundKey.isBlank()) {
+            mainUIBackgroundKey = backgroundKey;
+        }
+    }
+
     private static JsonObject createRoot() {
         JsonObject root = new JsonObject();
         JsonObject components = new JsonObject();
@@ -678,8 +714,17 @@ public final class HUDManager implements IMinecraft {
         }
 
         root.addProperty("version", CONFIG_VERSION);
+        root.add(MAIN_UI_KEY, writeMainUIConfig());
         root.add("components", components);
         return root;
+    }
+
+    private static JsonObject writeMainUIConfig() {
+        JsonObject object = new JsonObject();
+        if (mainUIBackgroundKey != null && !mainUIBackgroundKey.isBlank()) {
+            object.addProperty(MAIN_UI_BACKGROUND_KEY, mainUIBackgroundKey);
+        }
+        return object;
     }
 
     private static boolean clampLayoutToScreen(Layout layout, AABB base) {

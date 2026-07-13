@@ -73,26 +73,84 @@ public final class NeteaseMusicApi {
         JsonObject root = getJsonObject("/login/cellphone?phone=" + WebUtility.encode(phone.trim())
             + "&password=" + WebUtility.encode(password)
             + "&timestamp=" + System.currentTimeMillis());
-        int code = (int)number(root, "code");
-        if (code != 200) {
-            String message = string(root, "message");
-            if (message.isBlank()) {
-                message = string(root, "msg");
-            }
-            throw new IOException(message.isBlank() ? "Netease login failed: " + code : message);
-        }
-
-        JsonObject profile = object(root.get("profile"));
-        LoginSession session = new LoginSession(
-            number(profile, "userId"),
-            string(profile, "nickname"),
-            string(root, "cookie")
-        );
-        if (session.uid() <= 0L || session.cookie().isBlank()) {
-            throw new IOException("Netease login response did not include a usable session");
-        }
+        LoginSession session = sessionFromLoginResponse(root);
         loginSession = session;
         return session;
+    }
+
+    public static void sendCaptcha(String phone) throws IOException, InterruptedException {
+        if (phone == null || phone.isBlank()) {
+            throw new IOException("Phone number is empty");
+        }
+
+        JsonObject root = getJsonObject("/captcha/sent?phone=" + WebUtility.encode(phone.trim())
+            + "&timestamp=" + System.currentTimeMillis());
+        requireCode(root, 200, "Failed to send captcha");
+    }
+
+    public static LoginSession loginCellphoneCaptcha(String phone, String captcha) throws IOException, InterruptedException {
+        if (phone == null || phone.isBlank()) {
+            throw new IOException("Phone number is empty");
+        }
+        if (captcha == null || captcha.isBlank()) {
+            throw new IOException("Captcha is empty");
+        }
+
+        JsonObject root = getJsonObject("/login/cellphone?phone=" + WebUtility.encode(phone.trim())
+            + "&captcha=" + WebUtility.encode(captcha.trim())
+            + "&timestamp=" + System.currentTimeMillis());
+        LoginSession session = sessionFromLoginResponse(root);
+        loginSession = session;
+        return session;
+    }
+
+    public static QrLogin createQrLogin() throws IOException, InterruptedException {
+        JsonObject keyRoot = getJsonObject("/login/qr/key?timestamp=" + System.currentTimeMillis());
+        requireCode(keyRoot, 200, "Failed to create QR key");
+        String key = string(object(keyRoot.get("data")), "unikey");
+        if (key.isBlank()) {
+            throw new IOException("Netease QR login response did not include a key");
+        }
+
+        JsonObject qrRoot = getJsonObject("/login/qr/create?key=" + WebUtility.encode(key)
+            + "&qrimg=true"
+            + "&timestamp=" + System.currentTimeMillis());
+        requireCode(qrRoot, 200, "Failed to create QR code");
+        JsonObject data = object(qrRoot.get("data"));
+        String qrImage = string(data, "qrimg");
+        String qrUrl = string(data, "qrurl");
+        if (qrImage.isBlank() && qrUrl.isBlank()) {
+            throw new IOException("Netease QR login response did not include a QR code");
+        }
+        return new QrLogin(key, qrUrl, qrImage);
+    }
+
+    public static QrLoginStatus checkQrLogin(String key) throws IOException, InterruptedException {
+        if (key == null || key.isBlank()) {
+            throw new IOException("QR key is empty");
+        }
+
+        JsonObject root = getJsonObject("/login/qr/check?key=" + WebUtility.encode(key)
+            + "&timestamp=" + System.currentTimeMillis());
+        int code = (int)number(root, "code");
+        String message = errorMessage(root, switch (code) {
+            case 800 -> "QR code expired";
+            case 801 -> "Waiting for scan";
+            case 802 -> "Waiting for confirmation";
+            case 803 -> "QR login confirmed";
+            default -> "QR login failed: " + code;
+        });
+        if (code != 803) {
+            return new QrLoginStatus(code, message, null);
+        }
+
+        String cookie = string(root, "cookie");
+        if (cookie.isBlank()) {
+            throw new IOException("Netease QR login response did not include a cookie");
+        }
+        LoginSession session = loadSessionFromCookie(cookie);
+        loginSession = session;
+        return new QrLoginStatus(code, message, session);
     }
 
     public static void logout() {
@@ -217,6 +275,50 @@ public final class NeteaseMusicApi {
         }
     }
 
+    private static LoginSession sessionFromLoginResponse(JsonObject root) throws IOException {
+        requireCode(root, 200, "Netease login failed");
+        JsonObject profile = object(root.get("profile"));
+        LoginSession session = new LoginSession(
+            number(profile, "userId"),
+            string(profile, "nickname"),
+            string(root, "cookie")
+        );
+        if (session.uid() <= 0L || session.cookie().isBlank()) {
+            throw new IOException("Netease login response did not include a usable session");
+        }
+        return session;
+    }
+
+    private static LoginSession loadSessionFromCookie(String cookie) throws IOException, InterruptedException {
+        JsonObject root = getJsonObject("/user/account?cookie=" + WebUtility.encode(cookie)
+            + "&timestamp=" + System.currentTimeMillis());
+        JsonObject profile = object(root.get("profile"));
+        LoginSession session = new LoginSession(
+            number(profile, "userId"),
+            string(profile, "nickname"),
+            cookie
+        );
+        if (session.uid() <= 0L || session.cookie().isBlank()) {
+            throw new IOException("Netease account response did not include a usable session");
+        }
+        return session;
+    }
+
+    private static void requireCode(JsonObject root, int expected, String fallback) throws IOException {
+        int code = (int)number(root, "code");
+        if (code != expected) {
+            throw new IOException(errorMessage(root, fallback + ": " + code));
+        }
+    }
+
+    private static String errorMessage(JsonObject root, String fallback) {
+        String message = string(root, "message");
+        if (message.isBlank()) {
+            message = string(root, "msg");
+        }
+        return message.isBlank() ? fallback : message;
+    }
+
     private static String firstArtist(JsonArray artists) {
         if (artists.isEmpty()) {
             return "";
@@ -265,5 +367,11 @@ public final class NeteaseMusicApi {
     }
 
     public record LoginSession(long uid, String nickname, String cookie) {
+    }
+
+    public record QrLogin(String key, String qrUrl, String qrImage) {
+    }
+
+    public record QrLoginStatus(int code, String message, LoginSession session) {
     }
 }

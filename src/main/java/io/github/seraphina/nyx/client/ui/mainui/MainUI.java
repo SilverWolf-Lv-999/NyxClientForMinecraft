@@ -2,6 +2,7 @@ package io.github.seraphina.nyx.client.ui.mainui;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.manager.PathManager;
 import io.github.seraphina.nyx.client.ui.alt.AltManagerScreen;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
@@ -589,8 +590,14 @@ public final class MainUI extends Screen {
             return;
         }
 
+        String savedBackgroundKey = HUDManager.getMainUIBackgroundKey();
+        if (savedBackgroundKey != null && !savedBackgroundKey.equals(rememberedSelectedKey) && indexOfBackground(savedBackgroundKey) >= 0) {
+            rememberedSelectedKey = savedBackgroundKey;
+        }
+
         if (indexOfBackground(rememberedSelectedKey) < 0) {
             rememberedSelectedKey = BACKGROUND_CACHE.get(0).key();
+            HUDManager.setMainUIBackgroundKey(rememberedSelectedKey);
         }
     }
 
@@ -600,6 +607,7 @@ public final class MainUI extends Screen {
         }
 
         rememberedSelectedKey = BACKGROUND_CACHE.get(index).key();
+        HUDManager.setMainUIBackgroundKey(rememberedSelectedKey);
     }
 
     private static int indexOfBackground(String key) {

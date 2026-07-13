@@ -29,6 +29,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,12 +89,18 @@ public class MusicPlayerScreen extends Screen {
 
     private Page page = Page.HOME;
     private InputField focusedField = InputField.NONE;
+    private LoginMode loginMode = LoginMode.CAPTCHA;
     private Playlist selectedPlaylist;
     private String searchText = "";
     private String phoneText = "";
     private String passwordText = "";
+    private String captchaText = "";
     private String statusText = "Loading home data...";
     private boolean loading;
+    private boolean loginBusy;
+    private boolean qrPolling;
+    private NeteaseMusicApi.QrLogin qrLogin;
+    private volatile int qrLoginSerial;
     private float scroll;
     private float maxScroll;
     private float panelX;
@@ -218,6 +225,12 @@ public class MusicPlayerScreen extends Screen {
     }
 
     @Override
+    public void onClose() {
+        qrLoginSerial++;
+        super.onClose();
+    }
+
+    @Override
     protected void renderBlurredBackground(GuiGraphics guiGraphics) {
     }
 
@@ -277,7 +290,7 @@ public class MusicPlayerScreen extends Screen {
         float x = contentX();
         float y = panelY + 18.0F;
         drawTitle(title(), x, y - 1.0F, TEXT);
-        drawMeta(statusText, x, y + 16.0F, loading ? ACCENT : TEXT_DIM);
+        drawMeta(statusText, x, y + 16.0F, loading || loginBusy || qrPolling ? ACCENT : TEXT_DIM);
 
         if (page == Page.SEARCH) {
             renderSearchBox(guiGraphics, mouseX, mouseY);
@@ -311,19 +324,72 @@ public class MusicPlayerScreen extends Screen {
 
     private void renderLoginForm(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         float x = contentX();
-        float y = panelY + 70.0F;
-        float width = 260.0F;
-        Render2DUtility.drawRoundedRect(x, y, width, 142.0F, 7.0F, CARD);
-        Render2DUtility.drawOutlineRoundedRect(x, y, width, 142.0F, 7.0F, 1.0F, BORDER_SOFT);
+        float y = panelY + 62.0F;
+        float width = contentWidth();
+        Render2DUtility.drawRoundedRect(x, y, width, 192.0F, 7.0F, CARD);
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, 192.0F, 7.0F, 1.0F, BORDER_SOFT);
         drawTitle("Netease Login", x + 14.0F, y + 13.0F, TEXT);
         drawMeta("Login to load your playlists", x + 14.0F, y + 31.0F, TEXT_DIM);
-        renderInputField(InputField.PHONE, "Phone", phoneText, x + 14.0F, y + 52.0F, 232.0F, false, mouseX, mouseY);
-        renderInputField(InputField.PASSWORD, "Password", passwordText, x + 14.0F, y + 84.0F, 232.0F, true, mouseX, mouseY);
-        textButton("Login", x + 14.0F, y + 116.0F, 76.0F, 20.0F, loading ? TEXT_DIM : TEXT, mouseX, mouseY, () -> {
-            if (!loading) {
-                login();
+        loginModeButton("Code", LoginMode.CAPTCHA, x + 14.0F, y + 49.0F, 66.0F, mouseX, mouseY);
+        loginModeButton("QR", LoginMode.QR, x + 84.0F, y + 49.0F, 52.0F, mouseX, mouseY);
+        loginModeButton("Password", LoginMode.PASSWORD, x + 140.0F, y + 49.0F, 82.0F, mouseX, mouseY);
+
+        if (loginMode == LoginMode.QR) {
+            renderQrLogin(guiGraphics, x + 14.0F, y + 80.0F, mouseX, mouseY);
+            return;
+        }
+
+        renderInputField(InputField.PHONE, "Phone", phoneText, x + 14.0F, y + 84.0F, 232.0F, false, mouseX, mouseY);
+        if (loginMode == LoginMode.CAPTCHA) {
+            renderInputField(InputField.CAPTCHA, "Captcha", captchaText, x + 14.0F, y + 116.0F, 138.0F, false, mouseX, mouseY);
+            textButton("Send", x + 158.0F, y + 116.0F, 88.0F, 24.0F, loginBusy ? TEXT_DIM : TEXT_MUTED, mouseX, mouseY, () -> {
+                if (!loginBusy) {
+                    sendCaptcha();
+                }
+            });
+            textButton("Login", x + 14.0F, y + 152.0F, 76.0F, 22.0F, loginBusy ? TEXT_DIM : TEXT, mouseX, mouseY, () -> {
+                if (!loginBusy) {
+                    loginWithCaptcha();
+                }
+            });
+        } else {
+            renderInputField(InputField.PASSWORD, "Password", passwordText, x + 14.0F, y + 116.0F, 232.0F, true, mouseX, mouseY);
+            textButton("Login", x + 14.0F, y + 152.0F, 76.0F, 22.0F, loginBusy ? TEXT_DIM : TEXT, mouseX, mouseY, () -> {
+                if (!loginBusy) {
+                    login();
+                }
+            });
+        }
+    }
+
+    private void loginModeButton(String label, LoginMode mode, float x, float y, float width, int mouseX, int mouseY) {
+        boolean active = loginMode == mode;
+        boolean hovered = isInsideExclusive(mouseX, mouseY, x, y, width, 22.0F);
+        Render2DUtility.drawRoundedRect(x, y, width, 22.0F, 5.0F, active ? 0x1E57C7FF : hovered ? CARD_HOVER : CONTROL);
+        Render2DUtility.drawOutlineRoundedRect(x, y, width, 22.0F, 5.0F, 1.0F, active ? ACCENT : hovered ? ACCENT : BORDER_SOFT);
+        draw(trim(label, width - 12.0F), x + 8.0F, y + 6.5F, active ? ACCENT : TEXT_MUTED);
+        clickZones.add(new ClickZone(x, y, width, 22.0F, () -> switchLoginMode(mode)));
+    }
+
+    private void renderQrLogin(GuiGraphics guiGraphics, float x, float y, int mouseX, int mouseY) {
+        Render2DUtility.drawRoundedRect(x, y, 112.0F, 112.0F, 6.0F, CONTROL);
+        Render2DUtility.drawOutlineRoundedRect(x, y, 112.0F, 112.0F, 6.0F, 1.0F, BORDER_SOFT);
+        if (qrLogin != null && !qrLogin.qrImage().isBlank()) {
+            renderCover(qrLogin.qrImage(), x + 8.0F, y + 8.0F, 96.0F, 3.0F);
+        } else {
+            drawIcon(Icon.MUSIC, x + 46.0F, y + 38.0F, 20.0F, 20.0F, TEXT_DIM);
+            drawMeta(qrPolling || loginBusy ? "Loading..." : "No QR", x + 36.0F, y + 66.0F, TEXT_DIM);
+        }
+
+        float textX = x + 130.0F;
+        draw("Scan with Netease Music app", textX, y + 4.0F, TEXT);
+        drawMeta(trim(statusText, 270.0F), textX, y + 21.0F, qrPolling || loginBusy ? ACCENT : TEXT_DIM);
+        textButton(qrLogin == null ? "Create QR" : "Refresh", textX, y + 48.0F, 82.0F, 22.0F, loginBusy ? TEXT_DIM : TEXT, mouseX, mouseY, () -> {
+            if (!loginBusy) {
+                startQrLogin();
             }
         });
+        textButton("Cancel", textX + 90.0F, y + 48.0F, 62.0F, 22.0F, TEXT_MUTED, mouseX, mouseY, this::cancelQrLogin);
     }
 
     private void renderAccountBar(GuiGraphics guiGraphics, int mouseX, int mouseY) {
@@ -524,13 +590,148 @@ public class MusicPlayerScreen extends Screen {
         MusicPlaybackService.INSTANCE.playSong(song);
     }
 
+    private void switchLoginMode(LoginMode mode) {
+        loginMode = mode;
+        focusedField = InputField.NONE;
+        if (mode != LoginMode.QR) {
+            cancelQrLogin();
+        } else if (qrLogin == null && !loginBusy) {
+            startQrLogin();
+        }
+    }
+
+    private void sendCaptcha() {
+        if (phoneText.isBlank() || loginBusy) {
+            statusText = "Enter phone number";
+            return;
+        }
+
+        loginBusy = true;
+        statusText = "Sending captcha...";
+        CompletableFuture.runAsync(() -> {
+            try {
+                NeteaseMusicApi.sendCaptcha(phoneText);
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }, IO).whenComplete((ignored, throwable) -> Minecraft.getInstance().execute(() -> {
+            loginBusy = false;
+            statusText = throwable == null ? "Captcha sent" : failureText(throwable, "Failed to send captcha");
+        }));
+    }
+
+    private void loginWithCaptcha() {
+        if (phoneText.isBlank() || captchaText.isBlank() || loginBusy) {
+            statusText = "Enter phone and captcha";
+            return;
+        }
+
+        loginBusy = true;
+        statusText = "Logging in...";
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                NeteaseMusicApi.LoginSession session = NeteaseMusicApi.loginCellphoneCaptcha(phoneText, captchaText);
+                return new UserData(session, NeteaseMusicApi.getUserPlaylists());
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }, IO).whenComplete((data, throwable) -> Minecraft.getInstance().execute(() -> {
+            loginBusy = false;
+            if (throwable != null) {
+                statusText = failureText(throwable, "Login failed");
+                return;
+            }
+            captchaText = "";
+            completeLogin(data);
+        }));
+    }
+
+    private void startQrLogin() {
+        if (loginBusy) {
+            return;
+        }
+
+        int serial = ++qrLoginSerial;
+        qrLogin = null;
+        qrPolling = false;
+        loginBusy = true;
+        statusText = "Creating QR code...";
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return NeteaseMusicApi.createQrLogin();
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }, IO).whenComplete((login, throwable) -> Minecraft.getInstance().execute(() -> {
+            loginBusy = false;
+            if (serial != qrLoginSerial || loginMode != LoginMode.QR) {
+                return;
+            }
+            if (throwable != null) {
+                statusText = failureText(throwable, "Failed to create QR code");
+                return;
+            }
+            qrLogin = login;
+            qrPolling = true;
+            statusText = "Waiting for scan";
+            pollQrLogin(serial, login.key());
+        }));
+    }
+
+    private void pollQrLogin(int serial, String key) {
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                while (serial == qrLoginSerial && loginMode == LoginMode.QR) {
+                    NeteaseMusicApi.QrLoginStatus status = NeteaseMusicApi.checkQrLogin(key);
+                    Minecraft.getInstance().execute(() -> {
+                        if (serial == qrLoginSerial && loginMode == LoginMode.QR) {
+                            statusText = status.message();
+                        }
+                    });
+                    if (status.session() != null) {
+                        return new UserData(status.session(), NeteaseMusicApi.getUserPlaylists());
+                    }
+                    if (status.code() == 800) {
+                        throw new IllegalStateException(status.message());
+                    }
+                    Thread.sleep(2000L);
+                }
+                return null;
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }, IO).whenComplete((data, throwable) -> Minecraft.getInstance().execute(() -> {
+            if (serial != qrLoginSerial || loginMode != LoginMode.QR) {
+                return;
+            }
+            qrPolling = false;
+            if (throwable != null) {
+                statusText = failureText(throwable, "QR login failed");
+                return;
+            }
+            if (data != null) {
+                qrLogin = null;
+                completeLogin(data);
+            }
+        }));
+    }
+
+    private void cancelQrLogin() {
+        qrLoginSerial++;
+        qrLogin = null;
+        qrPolling = false;
+        if (loginMode == LoginMode.QR) {
+            statusText = "QR login cancelled";
+        }
+    }
+
     private void login() {
-        if (phoneText.isBlank() || passwordText.isBlank() || loading) {
+        if (phoneText.isBlank() || passwordText.isBlank() || loginBusy) {
             statusText = "Enter phone and password";
             return;
         }
 
-        loading = true;
+        loginBusy = true;
         statusText = "Logging in...";
         CompletableFuture.supplyAsync(() -> {
             try {
@@ -540,30 +741,39 @@ public class MusicPlayerScreen extends Screen {
                 throw new RuntimeException(exception);
             }
         }, IO).whenComplete((data, throwable) -> Minecraft.getInstance().execute(() -> {
-            loading = false;
+            loginBusy = false;
             if (throwable != null) {
                 statusText = failureText(throwable, "Login failed");
                 return;
             }
             passwordText = "";
-            focusedField = InputField.NONE;
-            page = Page.MY;
-            selectedPlaylist = null;
-            userPlaylists.clear();
-            userPlaylists.addAll(data.playlists());
-            visibleSongs.clear();
-            scroll = 0.0F;
-            statusText = data.session().nickname() + " · " + userPlaylists.size() + " playlists";
+            completeLogin(data);
         }));
     }
 
+    private void completeLogin(UserData data) {
+        focusedField = InputField.NONE;
+        page = Page.MY;
+        selectedPlaylist = null;
+        userPlaylists.clear();
+        userPlaylists.addAll(data.playlists());
+        visibleSongs.clear();
+        scroll = 0.0F;
+        statusText = data.session().nickname() + " · " + userPlaylists.size() + " playlists";
+    }
+
     private void logout() {
+        qrLoginSerial++;
         NeteaseMusicApi.logout();
         focusedField = InputField.NONE;
         selectedPlaylist = null;
         userPlaylists.clear();
         visibleSongs.clear();
         passwordText = "";
+        captchaText = "";
+        qrLogin = null;
+        qrPolling = false;
+        loginBusy = false;
         scroll = 0.0F;
         statusText = "Logged out";
     }
@@ -702,6 +912,7 @@ public class MusicPlayerScreen extends Screen {
             case SEARCH -> searchText += value;
             case PHONE -> phoneText += value;
             case PASSWORD -> passwordText += value;
+            case CAPTCHA -> captchaText += value;
             case NONE -> {
             }
         }
@@ -712,6 +923,7 @@ public class MusicPlayerScreen extends Screen {
             case SEARCH -> searchText = deleteLastCodePoint(searchText);
             case PHONE -> phoneText = deleteLastCodePoint(phoneText);
             case PASSWORD -> passwordText = deleteLastCodePoint(passwordText);
+            case CAPTCHA -> captchaText = deleteLastCodePoint(captchaText);
             case NONE -> {
             }
         }
@@ -720,7 +932,15 @@ public class MusicPlayerScreen extends Screen {
     private void submitFocusedField() {
         switch (focusedField) {
             case SEARCH -> runSearch();
-            case PHONE, PASSWORD -> login();
+            case PHONE -> {
+                if (loginMode == LoginMode.PASSWORD) {
+                    login();
+                } else if (loginMode == LoginMode.CAPTCHA) {
+                    loginWithCaptcha();
+                }
+            }
+            case PASSWORD -> login();
+            case CAPTCHA -> loginWithCaptcha();
             case NONE -> {
             }
         }
@@ -791,7 +1011,8 @@ public class MusicPlayerScreen extends Screen {
     @Nullable
     private static BufferedImage downloadAlbumTexture(String url) {
         try {
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(WebUtility.getBytes(url)));
+            byte[] bytes = url.startsWith("data:image/") ? decodeDataImage(url) : WebUtility.getBytes(url);
+            BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
             if (image == null) {
                 return null;
             }
@@ -799,6 +1020,14 @@ public class MusicPlayerScreen extends Screen {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static byte[] decodeDataImage(String url) {
+        int comma = url.indexOf(',');
+        if (comma < 0) {
+            return new byte[0];
+        }
+        return Base64.getDecoder().decode(url.substring(comma + 1));
     }
 
     private static BufferedImage scaleImage(BufferedImage source, int size) {
@@ -938,6 +1167,13 @@ public class MusicPlayerScreen extends Screen {
         NONE,
         SEARCH,
         PHONE,
+        PASSWORD,
+        CAPTCHA
+    }
+
+    private enum LoginMode {
+        CAPTCHA,
+        QR,
         PASSWORD
     }
 
