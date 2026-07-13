@@ -92,7 +92,8 @@ public final class ModuleManager {
                 PacketMine.INSTANCE,
                 PacketEat.INSTANCE,
                 Blink.INSTANCE,
-                LagBack.INSTANCE
+                LagBack.INSTANCE,
+                NoFall.INSTANCE
         );
         //Visual
         registerModule(
