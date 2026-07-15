@@ -36,7 +36,10 @@ public final class ModuleManager {
                 ClientSpoof.INSTANCE,
                 Zoom.INSTANCE,
                 NetworkOptimization.INSTANCE,
-                NameProtection.INSTANCE
+                NameProtection.INSTANCE,
+                EntityCulling.INSTANCE,
+                BlockCulling.INSTANCE,
+                ThreadRipper.INSTANCE
         );
         //Combat
         registerModule(

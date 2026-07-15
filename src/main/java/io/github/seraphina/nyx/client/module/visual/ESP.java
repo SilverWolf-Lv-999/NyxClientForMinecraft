@@ -129,6 +129,21 @@ public class ESP extends Module {
         }
     }
 
+    public boolean requiresEntityRender(Entity entity) {
+        if (!(entity instanceof LivingEntity livingEntity)
+                || !isEnabled()
+                || (!type.is(RenderType.BONE) && !type.is(RenderType.GLOW))
+                || (type.is(RenderType.BONE) && boneAlpha.getValue() <= 0)
+                || (type.is(RenderType.GLOW) && glowAlpha.getValue() <= 0)
+                || mc.player == null
+                || mc.level == null) {
+            return false;
+        }
+
+        int range = renderRange.getValue();
+        return isValidTarget(mc.player, livingEntity, (double)range * range);
+    }
+
     public <S extends LivingEntityRenderState> void captureModelBones(
             S state,
             EntityModel<? super S> model,

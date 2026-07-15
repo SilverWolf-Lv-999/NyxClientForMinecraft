@@ -16,6 +16,7 @@ import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.util.Util;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.Animal;
@@ -97,12 +98,21 @@ public class Chams extends Module {
         return multiplyColor(original, chamsColor);
     }
 
+    public boolean requiresEntityRender(Entity entity) {
+        return throughWalls.getValue()
+                && entity instanceof LivingEntity livingEntity
+                && shouldRenderChams(livingEntity);
+    }
+
     private boolean shouldRenderChams(LivingEntityRenderState state) {
+        return shouldRenderChams(entities.get(state));
+    }
+
+    private boolean shouldRenderChams(LivingEntity entity) {
         if (!isEnabled() || mc.player == null || mc.level == null) {
             return false;
         }
 
-        LivingEntity entity = entities.get(state);
         if (entity == null || entity.isRemoved() || entity.isSpectator()) {
             return false;
         }

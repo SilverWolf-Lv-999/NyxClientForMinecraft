@@ -12,6 +12,7 @@
     "AbstractContainerScreenAccessor",
     "AbstractContainerScreenMixin",
     "AvatarRendererMixin",
+    "BlockEntityRenderDispatcherMixin",
     "BlockCollisionsMixin",
     "CameraMixin",
     "ChatScreenMixin",
@@ -22,6 +23,7 @@
     "ContainerEventHandlerMixin",
     "EntityMixin",
     "EffectsInInventoryMixin",
+    "EntityRenderDispatcherMixin",
     "FontMixin",
     "FogRendererAccessor",
     "GameRendererMixin",
@@ -52,6 +54,7 @@
     "PlayerMixin",
     "PlayerTabOverlayMixin",
     "RecipeBookComponentMixin",
+    "SubmitNodeCollectionMixin",
     "TooltipRenderUtilMixin"
   ],
   "injectors": {

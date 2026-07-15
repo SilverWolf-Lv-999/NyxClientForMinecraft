@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.mixins;
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
+import io.github.seraphina.nyx.client.module.client.EntityCulling;
 import io.github.seraphina.nyx.client.module.visual.Chams;
 import io.github.seraphina.nyx.client.module.visual.ESP;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
@@ -11,6 +12,7 @@ import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.CameraRenderState;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
@@ -48,7 +50,10 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
             )
     )
     private void applyChams(Args args, S state, PoseStack poseStack, SubmitNodeCollector nodeCollector, CameraRenderState cameraRenderState) {
-        args.set(3, Chams.INSTANCE.getRenderType(state, getTextureLocation(state), args.get(3)));
+        RenderType renderType = args.get(3);
+        renderType = Chams.INSTANCE.getRenderType(state, getTextureLocation(state), renderType);
+        renderType = EntityCulling.INSTANCE.cullHiddenFaces(state, getTextureLocation(state), renderType);
+        args.set(3, renderType);
         args.set(6, Chams.INSTANCE.getModelTint(state, args.get(6)));
     }
 
@@ -66,6 +71,7 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
 
     @Inject(method = "extractRenderState(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;F)V", at = @At("TAIL"))
     private void modifyRotationAnimation(LivingEntity entity, S state, float partialTicks, CallbackInfo info) {
+        EntityCulling.INSTANCE.rememberEntity(entity, state);
         Chams.INSTANCE.rememberEntity(entity, state);
         ESP.INSTANCE.rememberModelBoneEntity(entity, state);
         ESP.INSTANCE.applyGlowOutline(entity, state);
