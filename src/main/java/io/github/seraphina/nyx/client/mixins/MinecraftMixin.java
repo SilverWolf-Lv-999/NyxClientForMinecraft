@@ -6,16 +6,12 @@ import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import io.github.seraphina.nyx.client.NyxClient;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
-import io.github.seraphina.nyx.client.events.impl.ClickEvent;
-import io.github.seraphina.nyx.client.events.impl.LevelUpdateEvent;
-import io.github.seraphina.nyx.client.events.impl.SetScreenEvent;
-import io.github.seraphina.nyx.client.events.impl.StartUseItemEvent;
-import io.github.seraphina.nyx.client.events.impl.TickEvent;
+import io.github.seraphina.nyx.client.events.impl.*;
 import io.github.seraphina.nyx.client.manager.FontManager;
-import io.github.seraphina.nyx.client.music.NeteaseMusicLocalService;
 import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import io.github.seraphina.nyx.client.module.combat.UseClick;
+import io.github.seraphina.nyx.client.music.NeteaseMusicLocalService;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
@@ -27,8 +23,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyConstant;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -140,5 +136,12 @@ public class MinecraftMixin {
         NeteaseMusicLocalService.stop();
         FontManager.close();
         Render2DUtility.close();
+    }
+
+    @Inject(method = "createTitle", at = @At("RETURN"), cancellable = true)
+    private void onCreateTitle(CallbackInfoReturnable<String> cir) {
+        WindowsTitleEvent event = new WindowsTitleEvent(cir.getReturnValue());
+        EventBus.INSTANCE.post(event);
+        cir.setReturnValue(event.getTitle());
     }
 }
