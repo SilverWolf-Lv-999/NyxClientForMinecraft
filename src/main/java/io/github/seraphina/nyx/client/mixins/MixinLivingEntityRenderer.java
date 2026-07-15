@@ -51,8 +51,9 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
     )
     private void applyChams(Args args, S state, PoseStack poseStack, SubmitNodeCollector nodeCollector, CameraRenderState cameraRenderState) {
         RenderType renderType = args.get(3);
-        renderType = Chams.INSTANCE.getRenderType(state, getTextureLocation(state), renderType);
-        renderType = EntityCulling.INSTANCE.cullHiddenFaces(state, getTextureLocation(state), renderType);
+        Identifier texture = getTextureLocation(state);
+        renderType = Chams.INSTANCE.getRenderType(state, texture, renderType);
+        renderType = EntityCulling.INSTANCE.cullHiddenFaces(state, texture, renderType);
         args.set(3, renderType);
         args.set(6, Chams.INSTANCE.getModelTint(state, args.get(6)));
     }

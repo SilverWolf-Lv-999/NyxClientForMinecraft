@@ -5,7 +5,6 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
-import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
@@ -21,7 +20,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
@@ -34,31 +33,69 @@ public class BlockCulling extends Module {
     private static final double BOX_EPSILON = 1.0E-3D;
     private static final double MAX_CULLABLE_BOX_SIZE = 64.0D;
     private static final double[] SAMPLE_FACTORS = {0.1D, 0.9D};
+    private static final int CACHE_TICKS = 8;
+    private static final int CACHE_TICK_JITTER = 5;
+    private static final int CACHE_PRUNE_INTERVAL_TICKS = 40;
+    private static final int CACHE_KEEPALIVE_TICKS = 120;
+    private static final int MAX_OCCLUSION_TESTS_PER_FRAME = 2;
 
-    public final IntValue checkRange = ValueBuild.intSetting("check range", 128, 8, 512, 8, this);
-    public final BoolValue blockEntityOcclusion = ValueBuild.boolSetting("block entity occlusion", true, this);
+    public final BoolValue rayOcclusion = ValueBuild.boolSetting("ray occlusion", false, this);
     public final BoolValue blockEntityFaces = ValueBuild.boolSetting("block entity faces", true, this);
     public final BoolValue preserveBreaking = ValueBuild.boolSetting("preserve breaking", true, this);
 
-    private final ThreadLocal<BlockEntityRenderState> submittingBlockEntity = new ThreadLocal<>();
-    private final Map<RenderType, RenderType> culledRenderTypes = Collections.synchronizedMap(new IdentityHashMap<>());
+    private final Map<Long, OcclusionCacheEntry> occlusionCache = new HashMap<>();
+    private final Map<RenderType, RenderType> culledRenderTypes = new IdentityHashMap<>();
 
     private Field renderTypeStateField;
     private Field renderSetupTexturesField;
     private Method textureBindingLocationMethod;
     private boolean renderTypeReflectionFailed;
+    private Object cachedLevel;
+    private long lastPruneTick = Long.MIN_VALUE;
+    private int remainingOcclusionTests = MAX_OCCLUSION_TESTS_PER_FRAME;
+    private int submittingBlockEntityDepth;
 
     public void beginBlockEntitySubmit(BlockEntityRenderState state) {
-        submittingBlockEntity.set(state);
+        if (state != null && shouldTrackBlockEntityFaces()) {
+            submittingBlockEntityDepth++;
+        }
     }
 
     public void endBlockEntitySubmit() {
-        submittingBlockEntity.remove();
+        if (submittingBlockEntityDepth > 0) {
+            submittingBlockEntityDepth--;
+        }
+    }
+
+    public void beginFrame() {
+        if (!isEnabled()) {
+            return;
+        }
+
+        remainingOcclusionTests = MAX_OCCLUSION_TESTS_PER_FRAME;
+
+        if (mc.level == null) {
+            cachedLevel = null;
+            occlusionCache.clear();
+            return;
+        }
+
+        if (!rayOcclusion.getValue()) {
+            if (!occlusionCache.isEmpty()) {
+                occlusionCache.clear();
+            }
+            cachedLevel = mc.level;
+            return;
+        }
+
+        ensureCurrentLevelCache();
+        pruneCache(mc.level.getGameTime());
     }
 
     @Override
     public void onDisable() {
-        submittingBlockEntity.remove();
+        submittingBlockEntityDepth = 0;
+        occlusionCache.clear();
         culledRenderTypes.clear();
     }
 
@@ -67,7 +104,22 @@ public class BlockCulling extends Module {
             return original;
         }
 
-        return culledRenderTypes.computeIfAbsent(original, this::createCulledRenderType);
+        RenderType cached = culledRenderTypes.get(original);
+        if (cached != null) {
+            return cached;
+        }
+
+        RenderType culled = createCulledRenderType(original);
+        culledRenderTypes.put(original, culled);
+        return culled;
+    }
+
+    public boolean shouldCheckBlockEntityOcclusion(ModelFeatureRenderer.CrumblingOverlay breakProgress) {
+        return isEnabled()
+                && rayOcclusion.getValue()
+                && mc.level != null
+                && mc.player != null
+                && (!preserveBreaking.getValue() || breakProgress == null);
     }
 
     public boolean shouldCullBlockEntity(
@@ -77,7 +129,7 @@ public class BlockCulling extends Module {
             ModelFeatureRenderer.CrumblingOverlay breakProgress
     ) {
         if (!isEnabled()
-                || !blockEntityOcclusion.getValue()
+                || !rayOcclusion.getValue()
                 || blockEntity == null
                 || cameraPos == null
                 || mc.level == null
@@ -98,22 +150,19 @@ public class BlockCulling extends Module {
             return false;
         }
 
-        int range = checkRange.getValue();
-        if (box.getCenter().distanceToSqr(cameraPos) > (double)range * range) {
-            return false;
-        }
-
         Entity clipEntity = mc.getCameraEntity() != null ? mc.getCameraEntity() : mc.player;
-        return !isBoxVisible(cameraPos, box, clipEntity);
+        return shouldCullCached(blockEntity, cameraPos, box, clipEntity);
     }
 
     private boolean shouldCullBlockEntityFaces(RenderType original) {
-        return isEnabled()
-                && blockEntityFaces.getValue()
-                && submittingBlockEntity.get() != null
+        return submittingBlockEntityDepth > 0
                 && original != null
                 && !renderTypeReflectionFailed
                 && !original.pipeline().isCull();
+    }
+
+    private boolean shouldTrackBlockEntityFaces() {
+        return isEnabled() && blockEntityFaces.getValue() && !renderTypeReflectionFailed;
     }
 
     private RenderType createCulledRenderType(RenderType original) {
@@ -181,6 +230,48 @@ public class BlockCulling extends Module {
         return textureBindingLocationMethod;
     }
 
+    private boolean shouldCullCached(BlockEntity blockEntity, Vec3 cameraPos, AABB box, Entity clipEntity) {
+        ensureCurrentLevelCache();
+
+        long gameTime = mc.level.getGameTime();
+        long blockKey = blockEntity.getBlockPos().asLong();
+        long cameraBlockKey = blockKey(cameraPos);
+        OcclusionCacheEntry cached = occlusionCache.get(blockKey);
+        if (cached != null) {
+            cached.lastSeenTick = gameTime;
+            if (cached.cameraBlockKey == cameraBlockKey && cached.validUntilTick >= gameTime) {
+                return cached.occluded;
+            }
+        }
+
+        if (remainingOcclusionTests <= 0) {
+            return false;
+        }
+
+        remainingOcclusionTests--;
+        boolean occluded = !isBoxVisible(cameraPos, box, clipEntity);
+        long validUntilTick = gameTime + CACHE_TICKS + Math.floorMod(Long.hashCode(blockKey), CACHE_TICK_JITTER + 1);
+        occlusionCache.put(blockKey, new OcclusionCacheEntry(occluded, cameraBlockKey, validUntilTick, gameTime));
+        return occluded;
+    }
+
+    private void ensureCurrentLevelCache() {
+        if (cachedLevel != mc.level) {
+            cachedLevel = mc.level;
+            occlusionCache.clear();
+            lastPruneTick = Long.MIN_VALUE;
+        }
+    }
+
+    private void pruneCache(long gameTime) {
+        if (gameTime - lastPruneTick < CACHE_PRUNE_INTERVAL_TICKS) {
+            return;
+        }
+
+        lastPruneTick = gameTime;
+        occlusionCache.values().removeIf(entry -> gameTime - entry.lastSeenTick > CACHE_KEEPALIVE_TICKS);
+    }
+
     private boolean isBoxVisible(Vec3 cameraPos, AABB box, Entity clipEntity) {
         if (isPointVisible(cameraPos, box.getCenter(), clipEntity, box)) {
             return true;
@@ -244,5 +335,27 @@ public class BlockCulling extends Module {
 
     private static double lerp(double min, double max, double factor) {
         return min + (max - min) * factor;
+    }
+
+    private static long blockKey(Vec3 pos) {
+        return packBlockKey((int)Math.floor(pos.x), (int)Math.floor(pos.y), (int)Math.floor(pos.z));
+    }
+
+    private static long packBlockKey(int x, int y, int z) {
+        return ((long)x & 0x3FFFFFFL) << 38 | ((long)z & 0x3FFFFFFL) << 12 | ((long)y & 0xFFFL);
+    }
+
+    private static final class OcclusionCacheEntry {
+        private final boolean occluded;
+        private final long cameraBlockKey;
+        private final long validUntilTick;
+        private long lastSeenTick;
+
+        private OcclusionCacheEntry(boolean occluded, long cameraBlockKey, long validUntilTick, long lastSeenTick) {
+            this.occluded = occluded;
+            this.cameraBlockKey = cameraBlockKey;
+            this.validUntilTick = validUntilTick;
+            this.lastSeenTick = lastSeenTick;
+        }
     }
 }

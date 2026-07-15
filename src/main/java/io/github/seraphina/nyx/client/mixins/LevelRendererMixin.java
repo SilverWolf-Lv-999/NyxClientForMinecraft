@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.AfterRender3DEvent;
 import io.github.seraphina.nyx.client.events.impl.Render3DEvent;
+import io.github.seraphina.nyx.client.module.client.BlockCulling;
 import io.github.seraphina.nyx.client.module.client.EntityCulling;
 import io.github.seraphina.nyx.client.module.visual.ESP;
 import net.minecraft.client.Camera;
@@ -23,7 +24,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class LevelRendererMixin {
     @Inject(method = "renderLevel", at = @At("HEAD"))
     private void onPreRenderLevel(GraphicsResourceAllocator resourceAllocator, DeltaTracker deltaTracker, boolean renderOutline, Camera camera, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, Matrix4f cullingProjectionMatrix, GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, CallbackInfo info) {
-        EntityCulling.INSTANCE.clearRenderStateCache();
+        EntityCulling.INSTANCE.beginFrame();
+        BlockCulling.INSTANCE.beginFrame();
         ESP.INSTANCE.clearModelBoneFrame();
     }
 

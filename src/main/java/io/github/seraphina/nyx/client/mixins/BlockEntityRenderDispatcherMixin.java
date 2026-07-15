@@ -46,6 +46,10 @@ public abstract class BlockEntityRenderDispatcherMixin {
             return;
         }
 
+        if (!BlockCulling.INSTANCE.shouldCheckBlockEntityOcclusion(breakProgress)) {
+            return;
+        }
+
         BlockEntityRenderer<E, S> renderer = getRenderer(blockEntity);
         if (renderer != null && BlockCulling.INSTANCE.shouldCullBlockEntity(blockEntity, renderer.getRenderBoundingBox(blockEntity), cameraPos, breakProgress)) {
             info.setReturnValue(null);

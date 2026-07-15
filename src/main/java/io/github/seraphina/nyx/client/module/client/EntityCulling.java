@@ -7,7 +7,6 @@ import io.github.seraphina.nyx.client.module.visual.Chams;
 import io.github.seraphina.nyx.client.module.visual.ESP;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
-import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
 import net.minecraft.client.renderer.rendertype.RenderType;
@@ -20,8 +19,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @ModuleInfo(name = "nyxclient.module.entityculling.name", description = "nyxclient.module.entityculling.description", category = Category.CLIENT)
 public class EntityCulling extends Module {
@@ -30,31 +31,75 @@ public class EntityCulling extends Module {
     private static final double MIN_VISIBLE_DISTANCE_SQR = 4.0D;
     private static final double HIT_EPSILON = 1.0E-4D;
     private static final double[] SAMPLE_FACTORS = {0.1D, 0.9D};
+    private static final int CACHE_TICKS = 4;
+    private static final int CACHE_TICK_JITTER = 3;
+    private static final int CACHE_PRUNE_INTERVAL_TICKS = 40;
+    private static final int CACHE_KEEPALIVE_TICKS = 100;
+    private static final int MAX_OCCLUSION_TESTS_PER_FRAME = 2;
 
-    public final IntValue checkRange = ValueBuild.intSetting("check range", 128, 8, 512, 8, this);
+    public final BoolValue rayOcclusion = ValueBuild.boolSetting("ray occlusion", false, this);
     public final BoolValue cullHiddenFaces = ValueBuild.boolSetting("cull hidden faces", true, this);
     public final BoolValue preserveVisualModules = ValueBuild.boolSetting("preserve visual modules", true, this);
     public final BoolValue preserveGlowing = ValueBuild.boolSetting("preserve glowing", true, this);
 
     private final Map<LivingEntityRenderState, LivingEntity> renderStateEntities = new IdentityHashMap<>();
+    private final Map<UUID, OcclusionCacheEntry> occlusionCache = new HashMap<>();
+
+    private Object cachedLevel;
+    private long lastPruneTick = Long.MIN_VALUE;
+    private int remainingOcclusionTests = MAX_OCCLUSION_TESTS_PER_FRAME;
 
     public void rememberEntity(LivingEntity entity, LivingEntityRenderState state) {
-        if (entity != null && state != null) {
-            renderStateEntities.put(state, entity);
+        if (!shouldTrackRenderStates() || entity == null || state == null) {
+            return;
         }
+
+        renderStateEntities.put(state, entity);
     }
 
     public void clearRenderStateCache() {
         renderStateEntities.clear();
     }
 
+    public void beginFrame() {
+        if (!isEnabled()) {
+            return;
+        }
+
+        if (shouldTrackRenderStates()) {
+            clearRenderStateCache();
+        } else if (!renderStateEntities.isEmpty()) {
+            clearRenderStateCache();
+        }
+
+        remainingOcclusionTests = MAX_OCCLUSION_TESTS_PER_FRAME;
+
+        if (mc.level == null) {
+            cachedLevel = null;
+            occlusionCache.clear();
+            return;
+        }
+
+        if (!rayOcclusion.getValue()) {
+            if (!occlusionCache.isEmpty()) {
+                occlusionCache.clear();
+            }
+            cachedLevel = mc.level;
+            return;
+        }
+
+        ensureCurrentLevelCache();
+        pruneCache(mc.level.getGameTime());
+    }
+
     @Override
     public void onDisable() {
         clearRenderStateCache();
+        occlusionCache.clear();
     }
 
     public boolean shouldCull(Entity entity, Camera camera) {
-        if (!isEnabled() || entity == null || camera == null || mc.level == null || mc.player == null) {
+        if (!isEnabled() || !rayOcclusion.getValue() || entity == null || camera == null || mc.level == null || mc.player == null) {
             return false;
         }
 
@@ -76,17 +121,12 @@ public class EntityCulling extends Module {
             return false;
         }
 
-        int range = checkRange.getValue();
-        if (box.getCenter().distanceToSqr(cameraPos) > (double)range * range) {
-            return false;
-        }
-
         Entity clipEntity = camera.entity() != null ? camera.entity() : mc.player;
-        return !isBoxVisible(cameraPos, box, clipEntity);
+        return shouldCullCached(entity, cameraPos, box, clipEntity);
     }
 
     public RenderType cullHiddenFaces(LivingEntityRenderState state, Identifier texture, RenderType original) {
-        if (!shouldCullHiddenFaces(state) || texture == null || original == null) {
+        if (!shouldCullHiddenFaces(state) || texture == null || original == null || original.pipeline().isCull()) {
             return original;
         }
 
@@ -97,7 +137,7 @@ public class EntityCulling extends Module {
     }
 
     private boolean shouldCullHiddenFaces(LivingEntityRenderState state) {
-        if (!isEnabled() || !cullHiddenFaces.getValue() || mc.player == null || mc.level == null || state == null) {
+        if (!shouldTrackRenderStates() || mc.player == null || mc.level == null || state == null) {
             return false;
         }
 
@@ -117,6 +157,55 @@ public class EntityCulling extends Module {
 
         return preserveVisualModules.getValue()
                 && (Chams.INSTANCE.requiresEntityRender(entity) || ESP.INSTANCE.requiresEntityRender(entity));
+    }
+
+    private boolean shouldTrackRenderStates() {
+        return isEnabled() && cullHiddenFaces.getValue();
+    }
+
+    private boolean shouldCullCached(Entity entity, Vec3 cameraPos, AABB box, Entity clipEntity) {
+        ensureCurrentLevelCache();
+
+        long gameTime = mc.level.getGameTime();
+        long cameraBlockKey = blockKey(cameraPos);
+        long entityBlockKey = blockKey(box.getCenter());
+        UUID key = entity.getUUID();
+        OcclusionCacheEntry cached = occlusionCache.get(key);
+        if (cached != null) {
+            cached.lastSeenTick = gameTime;
+            if (cached.cameraBlockKey == cameraBlockKey
+                    && cached.targetBlockKey == entityBlockKey
+                    && cached.validUntilTick >= gameTime) {
+                return cached.occluded;
+            }
+        }
+
+        if (remainingOcclusionTests <= 0) {
+            return false;
+        }
+
+        remainingOcclusionTests--;
+        boolean occluded = !isBoxVisible(cameraPos, box, clipEntity);
+        long validUntilTick = gameTime + CACHE_TICKS + Math.floorMod(key.hashCode(), CACHE_TICK_JITTER + 1);
+        occlusionCache.put(key, new OcclusionCacheEntry(occluded, cameraBlockKey, entityBlockKey, validUntilTick, gameTime));
+        return occluded;
+    }
+
+    private void ensureCurrentLevelCache() {
+        if (cachedLevel != mc.level) {
+            cachedLevel = mc.level;
+            occlusionCache.clear();
+            lastPruneTick = Long.MIN_VALUE;
+        }
+    }
+
+    private void pruneCache(long gameTime) {
+        if (gameTime - lastPruneTick < CACHE_PRUNE_INTERVAL_TICKS) {
+            return;
+        }
+
+        lastPruneTick = gameTime;
+        occlusionCache.values().removeIf(entry -> gameTime - entry.lastSeenTick > CACHE_KEEPALIVE_TICKS);
     }
 
     private boolean isBoxVisible(Vec3 cameraPos, AABB box, Entity clipEntity) {
@@ -169,5 +258,29 @@ public class EntityCulling extends Module {
 
     private static double lerp(double min, double max, double factor) {
         return min + (max - min) * factor;
+    }
+
+    private static long blockKey(Vec3 pos) {
+        return packBlockKey((int)Math.floor(pos.x), (int)Math.floor(pos.y), (int)Math.floor(pos.z));
+    }
+
+    private static long packBlockKey(int x, int y, int z) {
+        return ((long)x & 0x3FFFFFFL) << 38 | ((long)z & 0x3FFFFFFL) << 12 | ((long)y & 0xFFFL);
+    }
+
+    private static final class OcclusionCacheEntry {
+        private final boolean occluded;
+        private final long cameraBlockKey;
+        private final long targetBlockKey;
+        private final long validUntilTick;
+        private long lastSeenTick;
+
+        private OcclusionCacheEntry(boolean occluded, long cameraBlockKey, long targetBlockKey, long validUntilTick, long lastSeenTick) {
+            this.occluded = occluded;
+            this.cameraBlockKey = cameraBlockKey;
+            this.targetBlockKey = targetBlockKey;
+            this.validUntilTick = validUntilTick;
+            this.lastSeenTick = lastSeenTick;
+        }
     }
 }
