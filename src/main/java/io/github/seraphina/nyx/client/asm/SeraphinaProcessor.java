@@ -8,24 +8,32 @@ import org.apache.logging.log4j.Logger;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
+import java.util.List;
 import java.util.Set;
 
 public class SeraphinaProcessor implements ClassProcessor {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final ProcessorName NAME;
     private static final String ASM_UTILITY;
-    private static final Set<String> TARGETS;
+    private static final Set<String> VANILLA_TARGETS;
+    private static final List<String> COMPATIBILITY_PREFIXES;
 
     static {
         LOGGER.info("Loading Seraphina Processor.....");
         NAME = new ProcessorName("nyxclient", "thread_ripper_concurrency");
         ASM_UTILITY = "io/github/seraphina/nyx/client/utility/ASMUtility";
-        TARGETS = Set.of(
+        VANILLA_TARGETS = Set.of(
                 "net/minecraft/util/ClassInstanceMultiMap",
                 "net/minecraft/world/level/entity/EntitySection",
                 "net/minecraft/world/level/entity/EntitySectionStorage",
                 "net/minecraft/world/level/entity/EntityLookup",
                 "net/minecraft/world/level/entity/EntityTickList"
+        );
+        COMPATIBILITY_PREFIXES = List.of(
+                "dev/tr7zw/entityculling/",
+                "net/raphimc/immediatelyfast/",
+                "com/seibel/distanthorizons/",
+                "dev/tonimatas/packetfixer/"
         );
         LOGGER.info("clinit done...");
         LOGGER.debug("ClassLoader: {}", SeraphinaProcessor.class.getClassLoader());
@@ -43,21 +51,27 @@ public class SeraphinaProcessor implements ClassProcessor {
 
     @Override
     public boolean handlesClass(SelectionContext context) {
-        return TARGETS.contains(context.type().getInternalName());
+        String owner = context.type().getInternalName();
+        return VANILLA_TARGETS.contains(owner) || isCompatibilityTarget(owner);
     }
 
     @Override
     public ComputeFlags processClass(TransformationContext context) {
         ClassNode classNode = context.node();
         String owner = context.type().getInternalName();
-        boolean changed = switch (owner) {
-            case "net/minecraft/util/ClassInstanceMultiMap" -> transformClassInstanceMultiMap(classNode);
-            case "net/minecraft/world/level/entity/EntitySection" -> transformEntitySection(classNode);
-            case "net/minecraft/world/level/entity/EntitySectionStorage" -> transformEntitySectionStorage(classNode);
-            case "net/minecraft/world/level/entity/EntityLookup" -> transformEntityLookup(classNode);
-            case "net/minecraft/world/level/entity/EntityTickList" -> transformEntityTickList(classNode);
-            default -> false;
-        };
+        boolean changed;
+        if (VANILLA_TARGETS.contains(owner)) {
+            changed = switch (owner) {
+                case "net/minecraft/util/ClassInstanceMultiMap" -> transformClassInstanceMultiMap(classNode);
+                case "net/minecraft/world/level/entity/EntitySection" -> transformEntitySection(classNode);
+                case "net/minecraft/world/level/entity/EntitySectionStorage" -> transformEntitySectionStorage(classNode);
+                case "net/minecraft/world/level/entity/EntityLookup" -> transformEntityLookup(classNode);
+                case "net/minecraft/world/level/entity/EntityTickList" -> transformEntityTickList(classNode);
+                default -> false;
+            };
+        } else {
+            changed = transformCompatibilityClass(classNode);
+        }
 
         if (!changed) {
             return ComputeFlags.NO_REWRITE;
@@ -67,35 +81,17 @@ public class SeraphinaProcessor implements ClassProcessor {
         return ComputeFlags.COMPUTE_FRAMES;
     }
 
+    private static boolean isCompatibilityTarget(String owner) {
+        for (String prefix : COMPATIBILITY_PREFIXES) {
+            if (owner.startsWith(prefix) && owner.contains("/mixin")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean transformClassInstanceMultiMap(ClassNode classNode) {
-        boolean changed = false;
-        changed |= MethodUtility.replaceMethodCalls(
-            classNode,
-            "com/google/common/collect/Maps",
-            "newHashMap",
-            "()Ljava/util/HashMap;",
-            ASM_UTILITY,
-            "newConcurrentMap",
-            "()Ljava/util/Map;"
-        ) > 0;
-        changed |= MethodUtility.replaceMethodCalls(
-            classNode,
-            "com/google/common/collect/Lists",
-            "newArrayList",
-            "()Ljava/util/ArrayList;",
-            ASM_UTILITY,
-            "newCopyOnWriteList",
-            "()Ljava/util/List;"
-        ) > 0;
-        changed |= MethodUtility.replaceMethodCalls(
-            classNode,
-            "net/minecraft/Util",
-            "toMutableList",
-            "()Ljava/util/stream/Collector;",
-            ASM_UTILITY,
-            "toCopyOnWriteListCollector",
-            "()Ljava/util/stream/Collector;"
-        ) > 0;
+        boolean changed = applyThreadSafeFactoryReplacements(classNode);
 
         changed |= MethodUtility.markSynchronized(classNode, "add", "(Ljava/lang/Object;)Z");
         changed |= MethodUtility.markSynchronized(classNode, "remove", "(Ljava/lang/Object;)Z");
@@ -166,6 +162,90 @@ public class SeraphinaProcessor implements ClassProcessor {
             "snapshotIterable",
             "(Ljava/lang/Iterable;)Ljava/lang/Iterable;"
         ) > 0;
+        return changed;
+    }
+
+    private static boolean transformCompatibilityClass(ClassNode classNode) {
+        boolean changed = applyThreadSafeFactoryReplacements(classNode);
+        changed |= markTickCallbackHandlersSynchronized(classNode);
+        return changed;
+    }
+
+    private static boolean applyThreadSafeFactoryReplacements(ClassNode classNode) {
+        boolean changed = false;
+        changed |= MethodUtility.replaceMethodCalls(
+            classNode,
+            "com/google/common/collect/Maps",
+            "newHashMap",
+            "()Ljava/util/HashMap;",
+            ASM_UTILITY,
+            "newConcurrentMap",
+            "()Ljava/util/Map;"
+        ) > 0;
+        changed |= MethodUtility.replaceMethodCalls(
+            classNode,
+            "com/google/common/collect/Lists",
+            "newArrayList",
+            "()Ljava/util/ArrayList;",
+            ASM_UTILITY,
+            "newCopyOnWriteList",
+            "()Ljava/util/List;"
+        ) > 0;
+        changed |= MethodUtility.replaceMethodCalls(
+            classNode,
+            "com/google/common/collect/Sets",
+            "newHashSet",
+            "()Ljava/util/HashSet;",
+            ASM_UTILITY,
+            "newConcurrentSet",
+            "()Ljava/util/Set;"
+        ) > 0;
+        changed |= MethodUtility.replaceMethodCalls(
+            classNode,
+            "com/google/common/collect/Queues",
+            "newArrayDeque",
+            "()Ljava/util/ArrayDeque;",
+            ASM_UTILITY,
+            "newConcurrentQueue",
+            "()Ljava/util/Queue;"
+        ) > 0;
+        changed |= MethodUtility.replaceMethodCalls(
+            classNode,
+            "net/minecraft/Util",
+            "toMutableList",
+            "()Ljava/util/stream/Collector;",
+            ASM_UTILITY,
+            "toCopyOnWriteListCollector",
+            "()Ljava/util/stream/Collector;"
+        ) > 0;
+        changed |= MethodUtility.replaceMethodCalls(
+            classNode,
+            "java/util/stream/StreamSupport",
+            "stream",
+            "(Ljava/util/Spliterator;Z)Ljava/util/stream/Stream;",
+            ASM_UTILITY,
+            "streamSnapshot",
+            "(Ljava/util/Spliterator;Z)Ljava/util/stream/Stream;"
+        ) > 0;
+        return changed;
+    }
+
+    private static boolean markTickCallbackHandlersSynchronized(ClassNode classNode) {
+        boolean changed = false;
+        for (MethodNode method : classNode.methods) {
+            if ((method.access & Opcodes.ACC_SYNCHRONIZED) != 0) {
+                continue;
+            }
+            if (!method.desc.contains("Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;")) {
+                continue;
+            }
+            String name = method.name.toLowerCase();
+            if (!name.contains("tick")) {
+                continue;
+            }
+            method.access |= Opcodes.ACC_SYNCHRONIZED;
+            changed = true;
+        }
         return changed;
     }
 

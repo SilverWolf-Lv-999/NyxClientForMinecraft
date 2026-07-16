@@ -8,20 +8,33 @@ import net.minecraft.world.level.entity.EntitySectionStorage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.Spliterator;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
+@SuppressWarnings("all")
 public final class ASMUtility {
     private ASMUtility() {
     }
 
     public static <K, V> Map<K, V> newConcurrentMap() {
         return new ConcurrentHashMap<>();
+    }
+
+    public static <T> Set<T> newConcurrentSet() {
+        return ConcurrentHashMap.newKeySet();
+    }
+
+    public static <T> Queue<T> newConcurrentQueue() {
+        return new ConcurrentLinkedQueue<>();
     }
 
     public static <T> List<T> newCopyOnWriteList() {
@@ -40,6 +53,12 @@ public final class ASMUtility {
         List<T> snapshot = new ArrayList<>();
         iterable.forEach(snapshot::add);
         return snapshot;
+    }
+
+    public static <T> Stream<T> streamSnapshot(Spliterator<T> spliterator, boolean parallel) {
+        List<T> snapshot = StreamSupport.stream(spliterator, false).collect(Collectors.toCollection(ArrayList::new));
+        Stream<T> stream = snapshot.stream();
+        return parallel ? stream.parallel() : stream.sequential();
     }
 
     public static LongStream longStreamSnapshot(Spliterator.OfLong spliterator, boolean parallel) {

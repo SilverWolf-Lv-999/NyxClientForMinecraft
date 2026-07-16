@@ -142,6 +142,7 @@ dependencies {
     runtimeOnly "maven.modrinth:immediatelyfast:1.14.3+1.21.11-neoforge"
     runtimeOnly "maven.modrinth:distanthorizons:3.2.0-b-1.21.11"
     runtimeOnly "maven.modrinth:packet-fixer:3.3.5"
+    runtimeOnly "maven.modrinth:chunky:1.4.54"
 
     // Example mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
