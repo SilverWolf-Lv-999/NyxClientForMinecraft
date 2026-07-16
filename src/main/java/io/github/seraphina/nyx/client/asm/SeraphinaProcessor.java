@@ -3,23 +3,21 @@ package io.github.seraphina.nyx.client.asm;
 import io.github.seraphina.nyx.client.utility.MethodUtility;
 import net.neoforged.neoforgespi.transformation.ClassProcessor;
 import net.neoforged.neoforgespi.transformation.ProcessorName;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.InsnList;
-import org.objectweb.asm.tree.InsnNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.*;
 
 import java.util.Set;
 
 public class SeraphinaProcessor implements ClassProcessor {
+    private static final Logger LOGGER = LogManager.getLogger();
     private static final ProcessorName NAME;
     private static final String ASM_UTILITY;
     private static final Set<String> TARGETS;
 
     static {
-        System.out.println("Loading.....");
+        LOGGER.info("Loading Seraphina Processor.....");
         NAME = new ProcessorName("nyxclient", "thread_ripper_concurrency");
         ASM_UTILITY = "io/github/seraphina/nyx/client/utility/ASMUtility";
         TARGETS = Set.of(
@@ -28,6 +26,13 @@ public class SeraphinaProcessor implements ClassProcessor {
                 "net/minecraft/world/level/entity/EntityLookup",
                 "net/minecraft/world/level/entity/EntityTickList"
         );
+        LOGGER.info("clinit done...");
+        LOGGER.debug("ClassLoader: {}", SeraphinaProcessor.class.getClassLoader());
+    }
+
+    public SeraphinaProcessor() {
+        LOGGER.debug("init...");
+        LOGGER.debug("Now ClassLoading: {}", this.getClass().getClassLoader());
     }
 
     @Override

@@ -18,6 +18,10 @@ public final class MathUtility {
         return from + (to - from) * clamp(progress, 0.0F, 1.0F);
     }
 
+    public static double lerp(double min, double max, double factor) {
+        return min + (max - min) * factor;
+    }
+
     public static float phase(float start, float end, float value) {
         if (end <= start) {
             return value >= end ? 1.0F : 0.0F;

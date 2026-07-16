@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.module.client;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.utility.MathUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
@@ -278,11 +279,11 @@ public class BlockCulling extends Module {
         }
 
         for (double xFactor : SAMPLE_FACTORS) {
-            double x = lerp(box.minX, box.maxX, xFactor);
+            double x = MathUtility.lerp(box.minX, box.maxX, xFactor);
             for (double yFactor : SAMPLE_FACTORS) {
-                double y = lerp(box.minY, box.maxY, yFactor);
+                double y = MathUtility.lerp(box.minY, box.maxY, yFactor);
                 for (double zFactor : SAMPLE_FACTORS) {
-                    if (isPointVisible(cameraPos, new Vec3(x, y, lerp(box.minZ, box.maxZ, zFactor)), clipEntity, box)) {
+                    if (isPointVisible(cameraPos, new Vec3(x, y, MathUtility.lerp(box.minZ, box.maxZ, zFactor)), clipEntity, box)) {
                         return true;
                     }
                 }
@@ -331,10 +332,6 @@ public class BlockCulling extends Module {
                 && Double.isFinite(box.maxY)
                 && Double.isFinite(box.maxZ)
                 && box.getSize() <= MAX_CULLABLE_BOX_SIZE;
-    }
-
-    private static double lerp(double min, double max, double factor) {
-        return min + (max - min) * factor;
     }
 
     private static long blockKey(Vec3 pos) {

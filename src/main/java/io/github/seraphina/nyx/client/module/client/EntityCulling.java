@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.visual.Chams;
 import io.github.seraphina.nyx.client.module.visual.ESP;
+import io.github.seraphina.nyx.client.utility.MathUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import net.minecraft.client.Camera;
@@ -121,7 +122,7 @@ public class EntityCulling extends Module {
             return false;
         }
 
-        Entity clipEntity = camera.entity() != null ? camera.entity() : mc.player;
+        Entity clipEntity = camera.entity();
         return shouldCullCached(entity, cameraPos, box, clipEntity);
     }
 
@@ -214,11 +215,11 @@ public class EntityCulling extends Module {
         }
 
         for (double xFactor : SAMPLE_FACTORS) {
-            double x = lerp(box.minX, box.maxX, xFactor);
+            double x = MathUtility.lerp(box.minX, box.maxX, xFactor);
             for (double yFactor : SAMPLE_FACTORS) {
-                double y = lerp(box.minY, box.maxY, yFactor);
+                double y = MathUtility.lerp(box.minY, box.maxY, yFactor);
                 for (double zFactor : SAMPLE_FACTORS) {
-                    if (isPointVisible(cameraPos, new Vec3(x, y, lerp(box.minZ, box.maxZ, zFactor)), clipEntity)) {
+                    if (isPointVisible(cameraPos, new Vec3(x, y, MathUtility.lerp(box.minZ, box.maxZ, zFactor)), clipEntity)) {
                         return true;
                     }
                 }
@@ -254,10 +255,6 @@ public class EntityCulling extends Module {
                 entity.getY() + 0.5D,
                 entity.getZ() + 0.5D
         );
-    }
-
-    private static double lerp(double min, double max, double factor) {
-        return min + (max - min) * factor;
     }
 
     private static long blockKey(Vec3 pos) {

@@ -105,6 +105,7 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 dependencies {
     compileOnly "io.github.llamalad7:mixinextras-common:0.5.3"
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
+    compileOnly "org.projectlombok:lombok:1.18.42"
 
     implementation("org.bytedeco:javacv:1.5.13") {
         transitive = false
