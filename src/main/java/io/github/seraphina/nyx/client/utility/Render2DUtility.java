@@ -86,6 +86,20 @@ public final class Render2DUtility {
         float projectY(float x, float y);
     }
 
+    private record DrawBounds(float x, float y, float width, float height) {
+        private float right() {
+            return x + width;
+        }
+
+        private float bottom() {
+            return y + height;
+        }
+    }
+
+    private record TextureRegion(float u0, float v0, float u1, float v1) {
+        private static final TextureRegion FULL = new TextureRegion(0.0F, 0.0F, 1.0F, 1.0F);
+    }
+
     public static void withGuiGraphics(GuiGraphics graphics, Runnable action) {
         Objects.requireNonNull(graphics, "graphics");
         Objects.requireNonNull(action, "action");
@@ -143,22 +157,21 @@ public final class Render2DUtility {
     }
 
     public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height) {
-        drawTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, 0xFFFFFFFF);
+        drawTexture(texture, x, y, width, height, 0xFFFFFFFF);
     }
 
     public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height, int color) {
-        drawTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, color);
+        drawTexture(texture, new DrawBounds(x, y, width, height), TextureRegion.FULL, FilterMode.LINEAR, color);
     }
 
     public static void drawTexture(GpuTextureView texture, float x, float y, float width, float height,
                                    float u0, float v0, float u1, float v1, int color) {
-        drawTexture(texture, x, y, width, height, u0, v0, u1, v1, FilterMode.LINEAR, color);
+        drawTexture(texture, new DrawBounds(x, y, width, height), new TextureRegion(u0, v0, u1, v1), FilterMode.LINEAR, color);
     }
 
-    private static void drawTexture(GpuTextureView texture, float x, float y, float width, float height,
-                                    float u0, float v0, float u1, float v1, FilterMode filterMode, int color) {
+    private static void drawTexture(GpuTextureView texture, DrawBounds bounds, TextureRegion region, FilterMode filterMode, int color) {
         Objects.requireNonNull(texture, "texture");
-        if (!canDraw(width, height, color)) {
+        if (!canDraw(bounds.width(), bounds.height(), color)) {
             return;
         }
 
@@ -168,14 +181,14 @@ public final class Render2DUtility {
             RenderPipelines.GUI_TEXTURED,
             TextureSetup.singleTexture(texture, RenderSystem.getSamplerCache().getClampToEdge(filterMode)),
             new Matrix3x2f(graphics.pose()),
-            x,
-            y,
-            x + width,
-            y + height,
-            clamp01(u0),
-            clamp01(v0),
-            clamp01(u1),
-            clamp01(v1),
+            bounds.x(),
+            bounds.y(),
+            bounds.right(),
+            bounds.bottom(),
+            clamp01(region.u0()),
+            clamp01(region.v0()),
+            clamp01(region.u1()),
+            clamp01(region.v1()),
             color,
             graphics.peekScissorStack(),
             projector
@@ -199,6 +212,11 @@ public final class Render2DUtility {
             return;
         }
 
+        TextureRegion region = coverTextureRegion(sourceWidth, sourceHeight, width, height);
+        drawTexture(texture, new DrawBounds(x, y, width, height), region, FilterMode.LINEAR, color);
+    }
+
+    private static TextureRegion coverTextureRegion(float sourceWidth, float sourceHeight, float width, float height) {
         float sourceAspect = sourceWidth / sourceHeight;
         float targetAspect = width / height;
         float u0 = 0.0F;
@@ -217,7 +235,7 @@ public final class Render2DUtility {
             v1 = 1.0F - crop;
         }
 
-        drawTexture(texture, x, y, width, height, u0, v0, u1, v1, color);
+        return new TextureRegion(u0, v0, u1, v1);
     }
 
     public static void drawRoundedTexture(GpuTextureView texture, float x, float y, float width, float height, float radius) {
@@ -253,7 +271,7 @@ public final class Render2DUtility {
         float br = clampRadius(width, height, bottomRightRadius);
         float bl = clampRadius(width, height, bottomLeftRadius);
         if (tl <= 0.0F && tr <= 0.0F && br <= 0.0F && bl <= 0.0F) {
-            drawTexture(texture, x, y, width, height, u0, v0, u1, v1, filterMode, color);
+            drawTexture(texture, new DrawBounds(x, y, width, height), new TextureRegion(u0, v0, u1, v1), filterMode, color);
             return;
         }
 

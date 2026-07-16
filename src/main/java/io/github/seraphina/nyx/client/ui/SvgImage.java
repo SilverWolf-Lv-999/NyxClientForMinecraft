@@ -468,34 +468,30 @@ public class SvgImage {
             int sourceY = y * scale;
             for (int x = 0; x < width; x++) {
                 int sourceX = x * scale;
-                long alphaSum = 0L;
-                long redSum = 0L;
-                long greenSum = 0L;
-                long blueSum = 0L;
-
-                for (int sy = 0; sy < scale; sy++) {
-                    int sourceIndex = (sourceY + sy) * sourceStride + sourceX;
-                    for (int sx = 0; sx < scale; sx++) {
-                        int argb = sourcePixels[sourceIndex + sx];
-                        int alpha = (argb >>> 24) & 0xFF;
-                        alphaSum += alpha;
-                        redSum += (long) ((argb >>> 16) & 0xFF) * alpha;
-                        greenSum += (long) ((argb >>> 8) & 0xFF) * alpha;
-                        blueSum += (long) (argb & 0xFF) * alpha;
-                    }
-                }
-
-                int alpha = (int) ((alphaSum + sampleCount / 2L) / sampleCount);
-                int red = alphaSum == 0L ? 0 : (int) ((redSum + alphaSum / 2L) / alphaSum);
-                int green = alphaSum == 0L ? 0 : (int) ((greenSum + alphaSum / 2L) / alphaSum);
-                int blue = alphaSum == 0L ? 0 : (int) ((blueSum + alphaSum / 2L) / alphaSum);
-                targetPixels[y * width + x] = alpha << 24 | red << 16 | green << 8 | blue;
+                PixelColorAccumulator color = sampleSupersampledPixel(sourcePixels, sourceStride, sourceX, sourceY, scale);
+                targetPixels[y * width + x] = color.toAveragedArgb(sampleCount);
             }
         }
 
         return target;
     }
 
+    private static PixelColorAccumulator sampleSupersampledPixel(int[] sourcePixels, int sourceStride,
+                                                                 int sourceX, int sourceY, int scale) {
+        PixelColorAccumulator color = new PixelColorAccumulator();
+        for (int sy = 0; sy < scale; sy++) {
+            int sourceIndex = (sourceY + sy) * sourceStride + sourceX;
+            for (int sx = 0; sx < scale; sx++) {
+                color.addPremultiplied(sourcePixels[sourceIndex + sx]);
+            }
+        }
+        return color;
+    }
+
+    /*
+     * SVG antialiasing can leave fully transparent edge pixels with black RGB.
+     * Bleeding nearby colors into those pixels prevents dark fringes after OpenGL filtering.
+     */
     private static void bleedTransparentPixelColors(BufferedImage image) {
         int width = image.getWidth();
         int height = image.getHeight();
@@ -503,69 +499,59 @@ public class SvgImage {
         int[] current = pixels.clone();
 
         for (int pass = 0; pass < TRANSPARENT_COLOR_BLEED_PASSES; pass++) {
-            int[] next = current.clone();
-            boolean changed = false;
-
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    int index = y * width + x;
-                    if (((current[index] >>> 24) & 0xFF) != 0) {
-                        continue;
-                    }
-
-                    long redSum = 0L;
-                    long greenSum = 0L;
-                    long blueSum = 0L;
-                    long weightSum = 0L;
-
-                    for (int offsetY = -1; offsetY <= 1; offsetY++) {
-                        int neighborY = y + offsetY;
-                        if (neighborY < 0 || neighborY >= height) {
-                            continue;
-                        }
-
-                        for (int offsetX = -1; offsetX <= 1; offsetX++) {
-                            if (offsetX == 0 && offsetY == 0) {
-                                continue;
-                            }
-
-                            int neighborX = x + offsetX;
-                            if (neighborX < 0 || neighborX >= width) {
-                                continue;
-                            }
-
-                            int neighbor = current[neighborY * width + neighborX];
-                            int neighborAlpha = (neighbor >>> 24) & 0xFF;
-                            int neighborColor = neighbor & 0x00FFFFFF;
-                            if (neighborAlpha == 0 && neighborColor == 0) {
-                                continue;
-                            }
-
-                            int weight = Math.max(1, neighborAlpha);
-                            redSum += (long) ((neighbor >>> 16) & 0xFF) * weight;
-                            greenSum += (long) ((neighbor >>> 8) & 0xFF) * weight;
-                            blueSum += (long) (neighbor & 0xFF) * weight;
-                            weightSum += weight;
-                        }
-                    }
-
-                    if (weightSum > 0L) {
-                        int red = (int) ((redSum + weightSum / 2L) / weightSum);
-                        int green = (int) ((greenSum + weightSum / 2L) / weightSum);
-                        int blue = (int) ((blueSum + weightSum / 2L) / weightSum);
-                        next[index] = red << 16 | green << 8 | blue;
-                        changed = true;
-                    }
-                }
-            }
-
+            BleedPassResult result = bleedTransparentPixelColorsPass(current, width, height);
+            int[] next = result.pixels();
             current = next;
-            if (!changed) {
+            if (!result.changed()) {
                 break;
             }
         }
 
         System.arraycopy(current, 0, pixels, 0, pixels.length);
+    }
+
+    private static BleedPassResult bleedTransparentPixelColorsPass(int[] current, int width, int height) {
+        int[] next = current.clone();
+        boolean changed = false;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int index = y * width + x;
+                if (isVisible(current[index])) {
+                    continue;
+                }
+
+                PixelColorAccumulator color = collectNeighborColors(current, width, height, x, y);
+                if (color.hasWeightedColor()) {
+                    next[index] = color.toRgb();
+                    changed = true;
+                }
+            }
+        }
+
+        return new BleedPassResult(next, changed);
+    }
+
+    private static PixelColorAccumulator collectNeighborColors(int[] pixels, int width, int height, int x, int y) {
+        PixelColorAccumulator color = new PixelColorAccumulator();
+        int minY = Math.max(0, y - 1);
+        int maxY = Math.min(height - 1, y + 1);
+        int minX = Math.max(0, x - 1);
+        int maxX = Math.min(width - 1, x + 1);
+
+        for (int neighborY = minY; neighborY <= maxY; neighborY++) {
+            for (int neighborX = minX; neighborX <= maxX; neighborX++) {
+                if (neighborX != x || neighborY != y) {
+                    color.addBleedCandidate(pixels[neighborY * width + neighborX]);
+                }
+            }
+        }
+
+        return color;
+    }
+
+    private static boolean isVisible(int argb) {
+        return ((argb >>> 24) & 0xFF) != 0;
     }
 
     private static void applyAnimations(float timeSeconds, List<SvgAnimation> animations) {
@@ -766,24 +752,39 @@ public class SvgImage {
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child instanceof Element childElement) {
-                String tagName = tagName(childElement);
-                if ("animate".equals(tagName)) {
-                    SvgAnimation.fromAnimate(element, childElement).ifPresent(animation -> {
-                        if (!paintAnimationsEnabled && isPaintAnimationAttribute(animation.attributeName())) {
-                            if (disabledPaintAnimationColor != null) {
-                                animation.target().setAttribute(animation.attributeName(), toSvgColor(disabledPaintAnimationColor));
-                            }
-                            return;
-                        }
-                        result.add(animation);
-                    });
-                } else if ("animatetransform".equals(tagName)) {
-                    SvgAnimation.fromAnimateTransform(element, childElement).ifPresent(result::add);
-                } else {
-                    collectAnimations(childElement, result, paintAnimationsEnabled, disabledPaintAnimationColor);
-                }
+                collectAnimation(element, childElement, result, paintAnimationsEnabled, disabledPaintAnimationColor);
             }
         }
+    }
+
+    private static void collectAnimation(Element target, Element animationElement, List<SvgAnimation> result,
+                                         boolean paintAnimationsEnabled, Color disabledPaintAnimationColor) {
+        String tagName = tagName(animationElement);
+        if ("animate".equals(tagName)) {
+            SvgAnimation.fromAnimate(target, animationElement)
+                    .filter(animation -> shouldKeepAnimation(animation, paintAnimationsEnabled, disabledPaintAnimationColor))
+                    .ifPresent(result::add);
+            return;
+        }
+
+        if ("animatetransform".equals(tagName)) {
+            SvgAnimation.fromAnimateTransform(target, animationElement).ifPresent(result::add);
+            return;
+        }
+
+        collectAnimations(animationElement, result, paintAnimationsEnabled, disabledPaintAnimationColor);
+    }
+
+    private static boolean shouldKeepAnimation(SvgAnimation animation, boolean paintAnimationsEnabled,
+                                               Color disabledPaintAnimationColor) {
+        if (paintAnimationsEnabled || !isPaintAnimationAttribute(animation.attributeName())) {
+            return true;
+        }
+
+        if (disabledPaintAnimationColor != null) {
+            animation.target().setAttribute(animation.attributeName(), toSvgColor(disabledPaintAnimationColor));
+        }
+        return false;
     }
 
     private static boolean isPaintAnimationAttribute(String attributeName) {
@@ -809,53 +810,69 @@ public class SvgImage {
 
         Matcher matcher = TRANSFORM_PATTERN.matcher(value);
         while (matcher.find()) {
-            String type = matcher.group(1).toLowerCase(Locale.ROOT);
-            List<Float> numbers = parseNumberList(matcher.group(2));
-            switch (type) {
-                case "matrix" -> {
-                    if (numbers.size() >= 6) {
-                        transform.concatenate(new AffineTransform(
-                                numbers.get(0), numbers.get(1), numbers.get(2),
-                                numbers.get(3), numbers.get(4), numbers.get(5)
-                        ));
-                    }
-                }
-                case "translate" -> {
-                    if (!numbers.isEmpty()) {
-                        transform.translate(numbers.get(0), numbers.size() >= 2 ? numbers.get(1) : 0.0F);
-                    }
-                }
-                case "scale" -> {
-                    if (!numbers.isEmpty()) {
-                        transform.scale(numbers.get(0), numbers.size() >= 2 ? numbers.get(1) : numbers.get(0));
-                    }
-                }
-                case "rotate" -> {
-                    if (!numbers.isEmpty()) {
-                        double radians = Math.toRadians(numbers.get(0));
-                        if (numbers.size() >= 3) {
-                            transform.rotate(radians, numbers.get(1), numbers.get(2));
-                        } else {
-                            transform.rotate(radians);
-                        }
-                    }
-                }
-                case "skewx" -> {
-                    if (!numbers.isEmpty()) {
-                        transform.shear(Math.tan(Math.toRadians(numbers.get(0))), 0.0D);
-                    }
-                }
-                case "skewy" -> {
-                    if (!numbers.isEmpty()) {
-                        transform.shear(0.0D, Math.tan(Math.toRadians(numbers.get(0))));
-                    }
-                }
-                default -> {
-                }
-            }
+            applyTransformCommand(transform, matcher.group(1), parseNumberList(matcher.group(2)));
         }
 
         return transform;
+    }
+
+    private static void applyTransformCommand(AffineTransform transform, String type, List<Float> numbers) {
+        switch (type.toLowerCase(Locale.ROOT)) {
+            case "matrix" -> applyMatrixTransform(transform, numbers);
+            case "translate" -> applyTranslateTransform(transform, numbers);
+            case "scale" -> applyScaleTransform(transform, numbers);
+            case "rotate" -> applyRotateTransform(transform, numbers);
+            case "skewx" -> applySkewXTransform(transform, numbers);
+            case "skewy" -> applySkewYTransform(transform, numbers);
+            default -> {
+            }
+        }
+    }
+
+    private static void applyMatrixTransform(AffineTransform transform, List<Float> numbers) {
+        if (numbers.size() >= 6) {
+            transform.concatenate(new AffineTransform(
+                    numbers.get(0), numbers.get(1), numbers.get(2),
+                    numbers.get(3), numbers.get(4), numbers.get(5)
+            ));
+        }
+    }
+
+    private static void applyTranslateTransform(AffineTransform transform, List<Float> numbers) {
+        if (!numbers.isEmpty()) {
+            transform.translate(numbers.get(0), numbers.size() >= 2 ? numbers.get(1) : 0.0F);
+        }
+    }
+
+    private static void applyScaleTransform(AffineTransform transform, List<Float> numbers) {
+        if (!numbers.isEmpty()) {
+            transform.scale(numbers.get(0), numbers.size() >= 2 ? numbers.get(1) : numbers.get(0));
+        }
+    }
+
+    private static void applyRotateTransform(AffineTransform transform, List<Float> numbers) {
+        if (numbers.isEmpty()) {
+            return;
+        }
+
+        double radians = Math.toRadians(numbers.get(0));
+        if (numbers.size() >= 3) {
+            transform.rotate(radians, numbers.get(1), numbers.get(2));
+        } else {
+            transform.rotate(radians);
+        }
+    }
+
+    private static void applySkewXTransform(AffineTransform transform, List<Float> numbers) {
+        if (!numbers.isEmpty()) {
+            transform.shear(Math.tan(Math.toRadians(numbers.get(0))), 0.0D);
+        }
+    }
+
+    private static void applySkewYTransform(AffineTransform transform, List<Float> numbers) {
+        if (!numbers.isEmpty()) {
+            transform.shear(0.0D, Math.tan(Math.toRadians(numbers.get(0))));
+        }
     }
 
     private static List<Float> parseNumberList(String value) {
@@ -1077,6 +1094,71 @@ public class SvgImage {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private record BleedPassResult(int[] pixels, boolean changed) {
+    }
+
+    private static final class PixelColorAccumulator {
+        private long alphaSum;
+        private long redSum;
+        private long greenSum;
+        private long blueSum;
+        private long weightSum;
+
+        private void addPremultiplied(int argb) {
+            int alpha = (argb >>> 24) & 0xFF;
+            alphaSum += alpha;
+            addWeightedRgb(argb, alpha);
+        }
+
+        private void addBleedCandidate(int argb) {
+            int alpha = (argb >>> 24) & 0xFF;
+            int color = argb & 0x00FFFFFF;
+            if (alpha == 0 && color == 0) {
+                return;
+            }
+
+            addWeightedRgb(argb, Math.max(1, alpha));
+        }
+
+        private boolean hasWeightedColor() {
+            return weightSum > 0L;
+        }
+
+        private int toAveragedArgb(int sampleCount) {
+            int alpha = (int) ((alphaSum + sampleCount / 2L) / sampleCount);
+            if (alphaSum == 0L) {
+                return alpha << 24;
+            }
+
+            int red = weightedAverage(redSum, alphaSum);
+            int green = weightedAverage(greenSum, alphaSum);
+            int blue = weightedAverage(blueSum, alphaSum);
+            return alpha << 24 | red << 16 | green << 8 | blue;
+        }
+
+        private int toRgb() {
+            int red = weightedAverage(redSum, weightSum);
+            int green = weightedAverage(greenSum, weightSum);
+            int blue = weightedAverage(blueSum, weightSum);
+            return red << 16 | green << 8 | blue;
+        }
+
+        private void addWeightedRgb(int argb, long weight) {
+            if (weight <= 0L) {
+                return;
+            }
+
+            redSum += (long) ((argb >>> 16) & 0xFF) * weight;
+            greenSum += (long) ((argb >>> 8) & 0xFF) * weight;
+            blueSum += (long) (argb & 0xFF) * weight;
+            weightSum += weight;
+        }
+
+        private static int weightedAverage(long sum, long weight) {
+            return weight == 0L ? 0 : (int) ((sum + weight / 2L) / weight);
+        }
     }
 
     private record SvgStyle(Color fill, Color stroke, float strokeWidth, int lineCap, int lineJoin, float opacity,
