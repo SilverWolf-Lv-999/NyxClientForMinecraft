@@ -54,10 +54,11 @@ public class SvgImage {
     private static final Pattern PATH_TOKEN_PATTERN = Pattern.compile("[AaCcHhLlMmQqSsTtVvZz]|" + NUMBER_PATTERN.pattern());
     private static final Pattern TRANSFORM_PATTERN = Pattern.compile("([a-zA-Z]+)\\s*\\(([^)]*)\\)");
     private static final int RASTERIZATION_SUPERSAMPLE_SCALE = 4;
+    private static final int ANIMATED_RASTERIZATION_SUPERSAMPLE_SCALE = 2;
     private static final int MAX_RASTERIZATION_SUPERSAMPLE_SCALE = 5;
     private static final int TRANSPARENT_COLOR_BLEED_PASSES = 3;
     private static final long MAX_SUPERSAMPLED_PIXELS = 12_000_000L;
-    private static final long ANIMATION_FRAME_INTERVAL_MILLIS = 50L;
+    private static final long ANIMATION_FRAME_INTERVAL_MILLIS = 16L;
     private static final long FINAL_ANIMATION_FRAME_KEY = Long.MAX_VALUE;
 
     @Getter
@@ -294,7 +295,7 @@ public class SvgImage {
     }
 
     private void uploadRasterizedFrame(float timeSeconds) {
-        BufferedImage image = rasterize(document, textureWidth, textureHeight, timeSeconds, animations);
+        BufferedImage image = rasterize(document, textureWidth, textureHeight, timeSeconds, animations, animated);
         NativeImage nativeImage = toNativeImage(image);
         Runnable upload = () -> {
             if (texture == null) {
@@ -320,13 +321,18 @@ public class SvgImage {
             return textureLocation;
         }
 
+        if (frameKey != FINAL_ANIMATION_FRAME_KEY) {
+            uploadRasterizedFrame(timeSeconds);
+            return textureLocation;
+        }
+
         Identifier cachedLocation = animationFrameLocations.get(frameKey);
         if (cachedLocation != null) {
             return cachedLocation;
         }
 
         Identifier frameLocation = animationFrameTextureLocation(frameKey);
-        BufferedImage image = rasterize(document, textureWidth, textureHeight, timeSeconds, animations);
+        BufferedImage image = rasterize(document, textureWidth, textureHeight, timeSeconds, animations, animated);
         NativeImage nativeImage = toNativeImage(image);
         Runnable upload = () -> {
             DynamicTexture dynamicTexture = new DynamicTexture(() -> "nyx-svg-" + frameLocation, nativeImage);
@@ -386,13 +392,14 @@ public class SvgImage {
         }
     }
 
-    private static BufferedImage rasterize(Document document, int width, int height, float timeSeconds, List<SvgAnimation> animations) {
+    private static BufferedImage rasterize(Document document, int width, int height, float timeSeconds,
+                                           List<SvgAnimation> animations, boolean animatedFrame) {
         applyAnimations(timeSeconds, animations);
 
         Element root = document.getDocumentElement();
         Rectangle2D.Float viewBox = readViewBox(root, width, height);
         Map<String, Map<String, String>> classStyles = collectClassStyles(document);
-        int supersampleScale = supersampleScale(width, height);
+        int supersampleScale = supersampleScale(width, height, animatedFrame);
         int rasterWidth = width * supersampleScale;
         int rasterHeight = height * supersampleScale;
         BufferedImage supersampled = renderRaster(root, viewBox, classStyles, rasterWidth, rasterHeight);
@@ -412,7 +419,11 @@ public class SvgImage {
 
         try {
             applyQualityRenderingHints(graphics);
-            graphics.scale(width / viewBox.width, height / viewBox.height);
+            float scale = Math.min(width / viewBox.width, height / viewBox.height);
+            float offsetX = (width - viewBox.width * scale) * 0.5F;
+            float offsetY = (height - viewBox.height * scale) * 0.5F;
+            graphics.translate(offsetX, offsetY);
+            graphics.scale(scale, scale);
             graphics.translate(-viewBox.x, -viewBox.y);
             renderElement(graphics, root, SvgStyle.root(), classStyles);
         } finally {
@@ -433,10 +444,11 @@ public class SvgImage {
         graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
     }
 
-    private static int supersampleScale(int width, int height) {
+    private static int supersampleScale(int width, int height, boolean animatedFrame) {
+        int baseScale = animatedFrame ? ANIMATED_RASTERIZATION_SUPERSAMPLE_SCALE : RASTERIZATION_SUPERSAMPLE_SCALE;
         int scale = Math.min(width, height) <= 128
-                ? RASTERIZATION_SUPERSAMPLE_SCALE + 1
-                : RASTERIZATION_SUPERSAMPLE_SCALE;
+                ? baseScale + 1
+                : baseScale;
         scale = Math.min(scale, MAX_RASTERIZATION_SUPERSAMPLE_SCALE);
         long pixels = (long) width * height;
         while (scale > 1 && pixels * scale * scale > MAX_SUPERSAMPLED_PIXELS) {

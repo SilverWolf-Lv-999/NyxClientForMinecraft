@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.manager.PathManager;
+import io.github.seraphina.nyx.client.ui.SvgImage;
 import io.github.seraphina.nyx.client.ui.alt.AltManagerScreen;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundMedia;
@@ -17,6 +18,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
+import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.texture.DynamicTexture;
@@ -42,8 +44,15 @@ import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
 public final class MainUI extends Screen {
     private static final Identifier SETTINGS_ICON = Identifier.fromNamespaceAndPath("nyxclient", "ui/icon/settings.png");
+    private static final Identifier WELCOME_LOGO = Identifier.fromNamespaceAndPath("nyxclient", "ui/hello.svg");
     private static final float SETTINGS_BUTTON_SIZE = 34.0F;
     private static final float SETTINGS_BUTTON_MARGIN = 14.0F;
+    private static final float WELCOME_LOGO_ASPECT = 620.0F / 197.0F;
+    private static final float WELCOME_ANIMATION_SECONDS = 7.85F;
+    private static final float WELCOME_FADE_IN_SECONDS = 0.35F;
+    private static final float WELCOME_FADE_OUT_SECONDS = 0.5F;
+    private static final float WELCOME_TOTAL_SECONDS = WELCOME_ANIMATION_SECONDS + WELCOME_FADE_OUT_SECONDS;
+    private static final float WELCOME_BLUR_RADIUS = 24.0F;
     private static final float PANEL_MAX_WIDTH = 334.0F;
     private static final float PANEL_MIN_WIDTH = 236.0F;
     private static final float PANEL_HEADER_HEIGHT = 74.0F;
@@ -116,8 +125,10 @@ public final class MainUI extends Screen {
     private static float sharedSettingsPanelProgress;
     private static float sharedPanelScroll;
     private static float sharedMaxPanelScroll;
+    private static boolean welcomeAnimationPlayed;
 
     private final List<MainUIButton> mainButtons = new ArrayList<>();
+    private final SvgImage welcomeLogo = new SvgImage(WELCOME_LOGO, 620, 197);
     private static boolean sharedWindowsUserNameLoaded;
     private static boolean sharedWindowsAvatarImageLoaded;
     private static String sharedWindowsUserName;
@@ -125,11 +136,17 @@ public final class MainUI extends Screen {
     private static DynamicTexture sharedWindowsAvatarTexture;
 
     private long lastFrameNanos;
+    private long welcomeStartedNanos;
+    private boolean welcomeAnimationActive;
     private float frameSeconds = DEFAULT_FRAME_SECONDS;
     private MainUIButton multiplayerButton;
 
     public MainUI() {
         super(Component.empty());
+        if (!welcomeAnimationPlayed) {
+            welcomeAnimationPlayed = true;
+            this.welcomeAnimationActive = true;
+        }
     }
 
     @Override
@@ -139,6 +156,9 @@ public final class MainUI extends Screen {
         syncSharedSelectedBackground();
         initMainButtons();
         this.lastFrameNanos = 0L;
+        if (this.welcomeAnimationActive && this.welcomeStartedNanos == 0L) {
+            this.welcomeStartedNanos = System.nanoTime();
+        }
     }
 
     @Override
@@ -157,11 +177,16 @@ public final class MainUI extends Screen {
             updateMainButtonStates();
             super.render(guiGraphics, mouseX, mouseY, partialTick);
             renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
+            renderWelcomeOverlay(guiGraphics);
         });
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
         if (event.button() != GLFW_MOUSE_BUTTON_LEFT) {
             return super.mouseClicked(event, doubleClick);
         }
@@ -174,7 +199,29 @@ public final class MainUI extends Screen {
     }
 
     @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
+        return super.mouseReleased(event);
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
         if (mouseScrolledSharedBackgroundSelector(mouseX, mouseY, scrollY, this.width, this.height)) {
             return true;
         }
@@ -184,11 +231,24 @@ public final class MainUI extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
         if (event.isEscape() && closeSharedBackgroundSelector()) {
             return true;
         }
 
         return super.keyPressed(event);
+    }
+
+    @Override
+    public boolean charTyped(CharacterEvent event) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
+        return super.charTyped(event);
     }
 
     @Override
@@ -251,6 +311,75 @@ public final class MainUI extends Screen {
 
     private void renderUserCard() {
         renderSharedUserCard(this.width, this.height, 0.0F, 1.0F);
+    }
+
+    private void renderWelcomeOverlay(GuiGraphics guiGraphics) {
+        if (!this.welcomeAnimationActive) {
+            return;
+        }
+
+        float elapsedSeconds = welcomeElapsedSeconds();
+        if (elapsedSeconds >= WELCOME_TOTAL_SECONDS) {
+            this.welcomeAnimationActive = false;
+            return;
+        }
+
+        float alpha = welcomeAlpha(elapsedSeconds);
+        Render2DUtility.drawGaussianBlurredRect(0.0F, 0.0F, this.width, this.height, WELCOME_BLUR_RADIUS,
+            Render2DUtility.applyOpacity(0xFFFFFFFF, 0.9F * alpha));
+        Render2DUtility.drawVerticalGradientRect(
+            0.0F,
+            0.0F,
+            this.width,
+            this.height,
+            Render2DUtility.applyOpacity(0xD0060810, alpha),
+            Render2DUtility.applyOpacity(0xE6010206, alpha)
+        );
+
+        float maxLogoWidth = Math.max(1.0F, this.width - 56.0F);
+        float minLogoWidth = Math.min(220.0F, maxLogoWidth);
+        float logoWidth = clamp(this.width * 0.62F, minLogoWidth, maxLogoWidth);
+        float maxLogoHeight = Math.max(1.0F, this.height * 0.34F);
+        float logoHeight = logoWidth / WELCOME_LOGO_ASPECT;
+        if (logoHeight > maxLogoHeight) {
+            logoHeight = maxLogoHeight;
+            logoWidth = logoHeight * WELCOME_LOGO_ASPECT;
+        }
+
+        float logoX = (this.width - logoWidth) * 0.5F;
+        float logoY = (this.height - logoHeight) * 0.5F;
+        float logoTime = Math.min(elapsedSeconds, WELCOME_ANIMATION_SECONDS);
+        this.welcomeLogo.drawAtTime(guiGraphics, logoX, logoY, logoWidth, logoHeight, logoTime, alpha);
+    }
+
+    private boolean isWelcomeAnimationActive() {
+        if (!this.welcomeAnimationActive) {
+            return false;
+        }
+
+        if (welcomeElapsedSeconds() >= WELCOME_TOTAL_SECONDS) {
+            this.welcomeAnimationActive = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    private float welcomeElapsedSeconds() {
+        if (this.welcomeStartedNanos == 0L) {
+            this.welcomeStartedNanos = System.nanoTime();
+            return 0.0F;
+        }
+
+        return Math.max(0.0F, (System.nanoTime() - this.welcomeStartedNanos) / 1_000_000_000.0F);
+    }
+
+    private static float welcomeAlpha(float elapsedSeconds) {
+        float fadeIn = WELCOME_FADE_IN_SECONDS <= 0.0F ? 1.0F : elapsedSeconds / WELCOME_FADE_IN_SECONDS;
+        float fadeOut = WELCOME_FADE_OUT_SECONDS <= 0.0F
+            ? 1.0F
+            : (WELCOME_TOTAL_SECONDS - elapsedSeconds) / WELCOME_FADE_OUT_SECONDS;
+        return clamp(Math.min(fadeIn, fadeOut), 0.0F, 1.0F);
     }
 
     public static void renderSharedUserCard(float screenWidth, float screenHeight, float offsetX, float alpha) {
