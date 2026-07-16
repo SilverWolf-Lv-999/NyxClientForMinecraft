@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.utility;
 
+import net.minecraft.util.ClassInstanceMultiMap;
 import net.minecraft.world.level.entity.EntityAccess;
 import net.minecraft.world.level.entity.EntitySection;
 import net.minecraft.world.level.entity.EntitySectionStorage;
@@ -25,6 +26,10 @@ public final class ASMUtility {
 
     public static <T> List<T> newCopyOnWriteList() {
         return new CopyOnWriteArrayList<>();
+    }
+
+    public static <T> ClassInstanceMultiMap<T> newConcurrentClassInstanceMultiMap(Class<T> baseClass) {
+        return new ConcurrentClassInstanceMultiMap<>(baseClass);
     }
 
     public static <T> Collector<T, ?, List<T>> toCopyOnWriteListCollector() {

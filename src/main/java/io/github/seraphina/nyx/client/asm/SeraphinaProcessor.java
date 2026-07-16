@@ -22,6 +22,7 @@ public class SeraphinaProcessor implements ClassProcessor {
         ASM_UTILITY = "io/github/seraphina/nyx/client/utility/ASMUtility";
         TARGETS = Set.of(
                 "net/minecraft/util/ClassInstanceMultiMap",
+                "net/minecraft/world/level/entity/EntitySection",
                 "net/minecraft/world/level/entity/EntitySectionStorage",
                 "net/minecraft/world/level/entity/EntityLookup",
                 "net/minecraft/world/level/entity/EntityTickList"
@@ -51,6 +52,7 @@ public class SeraphinaProcessor implements ClassProcessor {
         String owner = context.type().getInternalName();
         boolean changed = switch (owner) {
             case "net/minecraft/util/ClassInstanceMultiMap" -> transformClassInstanceMultiMap(classNode);
+            case "net/minecraft/world/level/entity/EntitySection" -> transformEntitySection(classNode);
             case "net/minecraft/world/level/entity/EntitySectionStorage" -> transformEntitySectionStorage(classNode);
             case "net/minecraft/world/level/entity/EntityLookup" -> transformEntityLookup(classNode);
             case "net/minecraft/world/level/entity/EntityTickList" -> transformEntityTickList(classNode);
@@ -101,6 +103,20 @@ public class SeraphinaProcessor implements ClassProcessor {
         changed |= MethodUtility.markSynchronized(classNode, "find", "(Ljava/lang/Class;)Ljava/util/Collection;");
         changed |= MethodUtility.markSynchronized(classNode, "iterator", "()Ljava/util/Iterator;");
         changed |= MethodUtility.markSynchronized(classNode, "getAllInstances", "()Ljava/util/List;");
+        changed |= MethodUtility.markSynchronized(classNode, "size", "()I");
+        return changed;
+    }
+
+    private static boolean transformEntitySection(ClassNode classNode) {
+        boolean changed = replaceEntitySectionStorageConstruction(classNode);
+        changed |= MethodUtility.markSynchronized(classNode, "add", "(Lnet/minecraft/world/level/entity/EntityAccess;)V");
+        changed |= MethodUtility.markSynchronized(classNode, "remove", "(Lnet/minecraft/world/level/entity/EntityAccess;)Z");
+        changed |= MethodUtility.markSynchronized(classNode, "getEntities", "(Lnet/minecraft/world/phys/AABB;Lnet/minecraft/util/AbortableIterationConsumer;)Lnet/minecraft/util/AbortableIterationConsumer$Continuation;");
+        changed |= MethodUtility.markSynchronized(classNode, "getEntities", "(Lnet/minecraft/world/level/entity/EntityTypeTest;Lnet/minecraft/world/phys/AABB;Lnet/minecraft/util/AbortableIterationConsumer;)Lnet/minecraft/util/AbortableIterationConsumer$Continuation;");
+        changed |= MethodUtility.markSynchronized(classNode, "isEmpty", "()Z");
+        changed |= MethodUtility.markSynchronized(classNode, "getEntities", "()Ljava/util/stream/Stream;");
+        changed |= MethodUtility.markSynchronized(classNode, "getStatus", "()Lnet/minecraft/world/level/entity/Visibility;");
+        changed |= MethodUtility.markSynchronized(classNode, "updateChunkStatus", "(Lnet/minecraft/world/level/entity/Visibility;)Lnet/minecraft/world/level/entity/Visibility;");
         changed |= MethodUtility.markSynchronized(classNode, "size", "()I");
         return changed;
     }
@@ -188,5 +204,60 @@ public class SeraphinaProcessor implements ClassProcessor {
             return true;
         }
         return false;
+    }
+
+    private static boolean replaceEntitySectionStorageConstruction(ClassNode classNode) {
+        for (MethodNode method : classNode.methods) {
+            if (!MethodUtility.methodMatches(method, "<init>", "(Ljava/lang/Class;Lnet/minecraft/world/level/entity/Visibility;)V")) {
+                continue;
+            }
+
+            for (AbstractInsnNode instruction : method.instructions) {
+                if (instruction.getOpcode() != Opcodes.NEW || !(instruction instanceof TypeInsnNode typeInsn)) {
+                    continue;
+                }
+                if (!typeInsn.desc.equals("net/minecraft/util/ClassInstanceMultiMap")) {
+                    continue;
+                }
+
+                AbstractInsnNode dup = nextInstruction(instruction);
+                AbstractInsnNode baseClass = nextInstruction(dup);
+                AbstractInsnNode constructor = nextInstruction(baseClass);
+                if (dup == null || dup.getOpcode() != Opcodes.DUP
+                    || !(baseClass instanceof VarInsnNode varInsn) || varInsn.getOpcode() != Opcodes.ALOAD || varInsn.var != 1
+                    || !(constructor instanceof MethodInsnNode methodInsn)
+                    || methodInsn.getOpcode() != Opcodes.INVOKESPECIAL
+                    || !methodInsn.owner.equals("net/minecraft/util/ClassInstanceMultiMap")
+                    || !methodInsn.name.equals("<init>")
+                    || !methodInsn.desc.equals("(Ljava/lang/Class;)V")) {
+                    continue;
+                }
+
+                InsnList replacement = new InsnList();
+                replacement.add(new VarInsnNode(Opcodes.ALOAD, 1));
+                replacement.add(new MethodInsnNode(
+                    Opcodes.INVOKESTATIC,
+                    ASM_UTILITY,
+                    "newConcurrentClassInstanceMultiMap",
+                    "(Ljava/lang/Class;)Lnet/minecraft/util/ClassInstanceMultiMap;",
+                    false
+                ));
+                method.instructions.insertBefore(instruction, replacement);
+                method.instructions.remove(constructor);
+                method.instructions.remove(baseClass);
+                method.instructions.remove(dup);
+                method.instructions.remove(instruction);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static AbstractInsnNode nextInstruction(AbstractInsnNode instruction) {
+        AbstractInsnNode next = instruction == null ? null : instruction.getNext();
+        while (next != null && next.getOpcode() < 0) {
+            next = next.getNext();
+        }
+        return next;
     }
 }
