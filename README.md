@@ -1,15 +1,20 @@
 # NyxClient
 
-NyxClient 是一个基于 NeoForge 的 Minecraft 客户端模组，当前面向 Minecraft `1.21.11` 开发。项目包含模块系统、事件总线、Mixin 注入、配置持久化、Click GUI、字体渲染与多语言资源。
+NyxClient 是一个基于 NeoForge 的 Minecraft 客户端模组，当前面向 Minecraft `1.21.11` 开发。项目包含模块系统、事件总线、Mixin 注入、配置持久化、Click GUI、自定义主菜单、HUD 编辑、字体渲染、音乐播放器、账号管理、多语言资源与一批战斗、移动、玩家、视觉和实用模块。
 
-> 当前版本仍处于早期开发阶段，部分模块已经注册但尚未实现完整行为。请只在单机、开发测试或明确允许的服务器环境中使用，并遵守目标服务器规则。
+> 项目仍处于开发阶段。部分功能会改变客户端行为或网络交互，请只在单机、开发测试或明确允许的服务器环境中使用，并遵守目标服务器规则。
+
+## 游戏内截图
+
+![imgs](img/img1.png)
 
 ## 环境要求
 
 - Java 21
-- Minecraft 1.21.11
-- NeoForge 21.11.42 或兼容的 21.x 版本
+- Minecraft `1.21.11`
+- NeoForge `21.11.42` 或兼容的 `21.x` 版本
 - Gradle Wrapper，仓库已包含 `gradlew` / `gradlew.bat`
+- Node/npm 网络访问能力：构建时会下载并打包网易云音乐本地服务依赖与跨平台 Node 运行时
 
 ## 快速开始
 
@@ -31,6 +36,12 @@ build/libs/nyxclient-0.0.1.jar
 .\gradlew.bat runClient
 ```
 
+运行开发服务器：
+
+```powershell
+.\gradlew.bat runServer
+```
+
 生成数据资源：
 
 ```powershell
@@ -50,24 +61,108 @@ build/libs/nyxclient-0.0.1.jar
 
 - 默认按键：`Right Shift` 打开 Click GUI。
 - 在 Click GUI 中左键点击模块条目可以启用或关闭模块。
-- 鼠标滚轮可以滚动模块列表。
-- 客户端配置会在首次启动后创建，并在游戏关闭时保存。
+- 鼠标滚轮可以滚动模块列表，模块设置会随配置保存。
+- 客户端会替换标题界面和多人游戏界面为 Nyx 自定义主菜单。
+- 主菜单右上角设置按钮可以切换背景，背景文件来自 `<游戏目录>/nyxclient/gui/background/`。
+- `Music Player` 模块会打开网易云音乐播放器，底部频谱和 HUD 歌词组件可以配合使用。
+- `HUD` 模块启用后会显示水印、通知、TPS、坐标、生物群系、小地图、按键显示、歌词等组件；打开聊天界面时可以拖动组件，滚轮可以缩放悬停组件。
 
-配置文件位置：
+## 命令
+
+默认命令前缀是 `.`，可以在 `Client` 模块的 `command prefix` 设置中修改。
 
 ```text
-<游戏目录>/nyxclient/config/modules.json
+.toggle <module>          # 开关模块，例如 .toggle killaura
+.bind <module> <key>      # 绑定快捷键，例如 .bind clickgui right_shift
+.config list              # 查看配置列表，当前配置会带 *
+.config create <name>     # 创建并切换到新配置
+.config load <name>       # 切换到已有配置
+.friend list              # 查看好友列表
+.friend add <name>        # 添加好友
+.friend remove <name>     # 移除好友
 ```
 
-客户端还会创建以下目录：
+命令中的模块名使用模块类名的小写形式，例如 `clickgui`、`killaura`、`packetmine`、`musicplayer`。
+
+## 配置与数据文件
+
+客户端首次启动后会创建：
 
 ```text
 <游戏目录>/nyxclient/
 <游戏目录>/nyxclient/config/
+<游戏目录>/nyxclient/config/profiles/
 <游戏目录>/nyxclient/logs/
 <游戏目录>/nyxclient/cages/
 <游戏目录>/nyxclient/gui/
+<游戏目录>/nyxclient/gui/background/
+<游戏目录>/nyxclient/friend/
 ```
+
+主要文件：
+
+```text
+<游戏目录>/nyxclient/config/modules.json          # 默认模块配置
+<游戏目录>/nyxclient/config/profiles/*.json       # 额外配置档
+<游戏目录>/nyxclient/config/selected.txt          # 当前选中的配置档
+<游戏目录>/nyxclient/gui/hud.json                 # HUD 组件位置、缩放和主菜单背景选择
+<游戏目录>/nyxclient/alts.json                    # 账号管理器数据
+<游戏目录>/nyxclient/friend/friends.json          # 好友列表
+```
+
+## 当前模块
+
+### Client
+
+- `ClickGui`：打开 Click GUI。
+- `Client`：语言、命令前缀、窗口标题等客户端设置。
+- `NoChattingAllowed`：账号聊天受限时仍允许打开聊天栏。
+- `Debug`：聊天调试信息。
+- `Friend`：好友列表模块，供其他模块过滤目标。
+- `ClientSpoof`：修改发送给服务器的客户端品牌。
+- `Zoom`：按住放大视野。
+- `NetworkOptimization`：网络延迟与发包刷新优化。
+- `NameProtection`：替换界面中显示的玩家名。
+- `EntityCulling` / `BlockCulling`：实体和方块实体剔除优化。
+- `ThreadRipper`：将部分客户端 tick 工作拆分到工作线程。
+
+### Combat
+
+- `KillAura`、`Reach`、`UseClick`、`Backtrack`、`TpAura`
+- `CrystalAura`、`AnchorAura`
+- `MaceKill`、`MaceAura`
+- `SpearThrust`、`SpearCooldown`
+
+### Movement
+
+- `Scaffold`、`BHop`、`AutoJump`、`Sprint`、`Stuck`
+- `ElytraFly`、`FastFall`、`SafeWalk`、`AntiVoid`、`NoSlow`
+
+### Player
+
+- `AutoHeal`、`FastPlace`、`NoJumpDelay`、`AutoElytra`、`AutoTotem`
+- `AutoWindCharge`、`InstantSwitch`、`AutoLeave`、`AutoCrystal`
+- `PacketMine`、`PacketEat`、`Blink`、`LagBack`、`AntiEffects`、`NoFall`
+
+### Visual
+
+- `Cape`、`NoRenderer`、`HUD`、`Animations`、`FullBright`、`ModernGui`
+- `Chams`、`ContainerESP`、`ESP`、`ViewClip`、`HurtMaker`
+- `ModuleList`、`Ambient`、`NameTag`、`Filter`
+- `ProjectilePrediction`、`Map`、`KeyStrokes`、`Spectrum`
+- `MaceEffect`、`MotionCamera`
+
+### Other
+
+- `Target`：共享目标过滤配置。
+- `NoInteraction`：阻止攻击指定实体或好友。
+- `PlayerAlert`：玩家进入渲染距离时提醒。
+- `AutoLogin`：根据聊天提示自动注册或登录。
+- `NoDownload`：跳过服务器资源包下载并回报成功。
+- `FakePlayer`：生成本地测试假人。
+- `MusicPlayer`：打开网易云音乐播放器。
+- `Auto2048`、`AutoNoWhite`：小游戏辅助。
+- `Test`：测试模块。
 
 ## 构建一个模块
 
@@ -123,11 +218,14 @@ public class ExampleModule extends Module {
 }
 ```
 
-这些设置会保存到：
+这些设置会保存到当前配置档：
 
 ```text
 <游戏目录>/nyxclient/config/modules.json
+<游戏目录>/nyxclient/config/profiles/<name>.json
 ```
+
+如果一组设置需要在 UI 中分组，可以使用 `ValueBuild.settingGroup(...)` / `ValueBuild.valueGroup(...)` 并向组中加入值。
 
 ### 3. 监听事件
 
@@ -188,7 +286,7 @@ import io.github.seraphina.nyx.client.module.player.ExampleModule;
 ```java
 registerModule(
     FastPlace.INSTANCE,
-    DelayRemover.INSTANCE,
+    NoJumpDelay.INSTANCE,
     ExampleModule.INSTANCE
 );
 ```
@@ -216,19 +314,28 @@ nyxclient.module.example.description=示例模块
 ## 项目结构
 
 ```text
-src/main/java/io/github/seraphina/nyxclient/
-├── events/      # 事件 API、事件类型与事件总线
-├── manager/     # 模块、配置、按键、字体、路径、旋转等管理器
-├── mixins/      # Minecraft 客户端注入点
-├── module/      # 功能模块与分类
-├── ui/          # Click GUI 与其他界面
-├── utility/     # 渲染、玩家、旋转、语言、Web 等工具类
-└── value/       # 模块配置值系统
+src/main/java/io/github/seraphina/nyx/
+├── mod/         # NeoForge 模组入口
+└── client/      # NyxClient 主体
+    ├── alt/         # 外置账号与 Microsoft 账号数据
+    ├── asm/         # 启动期 class processor
+    ├── command/     # 客户端命令
+    ├── events/      # 事件 API、事件类型与事件总线
+    ├── loading/     # NeoForge 早期加载窗口与加载覆盖层
+    ├── manager/     # 模块、配置、按键、HUD、好友、字体、路径、旋转等管理器
+    ├── mixins/      # Minecraft 客户端注入点
+    ├── module/      # 功能模块与分类
+    ├── music/       # 网易云音乐 API、本地服务、播放与歌词
+    ├── ui/          # 主菜单、Click GUI、账号管理、音乐播放器、HUD 组件等界面
+    ├── utility/     # 渲染、玩家、旋转、语言、Web、数学等工具类
+    └── value/       # 模块配置值系统
 
 src/main/resources/
+├── assets/nyxclient/cape/        # 内置披风资源
 ├── assets/nyxclient/fonts/       # 内置字体
 ├── assets/nyxclient/language/    # 多语言文件
-├── assets/nyxclient/shader/      # 字体渲染 Shader
+├── assets/nyxclient/shader/      # 字体、模糊、Bloom 等 Shader
+├── assets/nyxclient/ui/          # 主菜单、图标、音乐播放器资源
 ├── META-INF/accesstransformer.cfg
 └── nyxclient.mixins.json
 ```
@@ -236,11 +343,13 @@ src/main/resources/
 ## 常用命令
 
 ```powershell
-.\gradlew.bat build        # 构建模组
-.\gradlew.bat runClient    # 启动开发客户端
-.\gradlew.bat runServer    # 启动开发服务器
-.\gradlew.bat runData      # 运行数据生成
-.\gradlew.bat clean        # 清理构建产物
+.\gradlew.bat build                    # 构建模组
+.\gradlew.bat runClient                # 启动开发客户端
+.\gradlew.bat runServer                # 启动开发服务器
+.\gradlew.bat runData                  # 运行数据生成
+.\gradlew.bat clean                    # 清理构建产物
+.\gradlew.bat installNeteaseMusicApi   # 单独安装网易云音乐 API 依赖
+.\gradlew.bat downloadBundledNode      # 单独下载内置 Node 运行时
 ```
 
 ## 许可证

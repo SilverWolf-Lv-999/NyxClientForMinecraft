@@ -23,6 +23,7 @@ repositories {
     }
     maven { url = 'https://maven.parchmentmc.org' }
     maven { url = 'https://jitpack.io' }
+    maven { url = 'https://api.modrinth.com/maven' }
 }
 
 base {
@@ -136,6 +137,11 @@ dependencies {
             prefer "1.10"
         }
     }
+
+    runtimeOnly "maven.modrinth:entityculling:1.10.5"
+    runtimeOnly "maven.modrinth:immediatelyfast:1.14.3+1.21.11-neoforge"
+    runtimeOnly "maven.modrinth:distanthorizons:3.2.0-b-1.21.11"
+    runtimeOnly "maven.modrinth:packet-fixer:3.3.5"
 
     // Example mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
