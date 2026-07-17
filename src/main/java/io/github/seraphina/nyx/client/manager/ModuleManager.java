@@ -66,7 +66,8 @@ public final class ModuleManager {
                 FastFall.INSTANCE,
                 SafeWalk.INSTANCE,
                 AntiVoid.INSTANCE,
-                NoSlow.INSTANCE
+                NoSlow.INSTANCE,
+                AutoIceBoot.INSTANCE
         );
         //Other
         registerModule(
