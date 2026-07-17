@@ -30,6 +30,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -118,6 +119,7 @@ public class MusicPlayerScreen extends LuaScreen {
     @Override
     protected void init() {
         super.init();
+        restoreLoginSession();
         loadHome();
     }
 
@@ -939,6 +941,51 @@ public class MusicPlayerScreen extends LuaScreen {
         }));
     }
 
+    private void restoreLoginSession() {
+        if (!NeteaseMusicApi.isLoggedIn() && !NeteaseMusicApi.hasSavedSession()) {
+            return;
+        }
+
+        loginBusy = true;
+        statusText = NeteaseMusicApi.isLoggedIn() ? "Loading account..." : "Restoring login...";
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                NeteaseMusicApi.LoginSession session = NeteaseMusicApi.restoreSession();
+                if (session == null) {
+                    return null;
+                }
+                return new UserData(session, NeteaseMusicApi.getUserPlaylists());
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }, IO).whenComplete((data, throwable) -> Minecraft.getInstance().execute(() -> {
+            loginBusy = false;
+            if (throwable != null) {
+                if (!loading || page == Page.MY) {
+                    statusText = failureText(throwable, "Failed to restore login");
+                }
+                return;
+            }
+            if (data == null) {
+                if (!loading || page == Page.MY) {
+                    statusText = page == Page.MY ? "Login required" : "Ready";
+                }
+                return;
+            }
+
+            selectedPlaylist = null;
+            userPlaylists.clear();
+            userPlaylists.addAll(data.playlists());
+            if (page == Page.MY) {
+                visibleSongs.clear();
+                resetMusicScroll();
+            }
+            if (!loading || page == Page.MY) {
+                statusText = page == Page.MY ? accountStatus() : "Ready";
+            }
+        }));
+    }
+
     private void completeLogin(UserData data) {
         focusedField = InputField.NONE;
         clearLuaInputFocus();
@@ -953,7 +1000,12 @@ public class MusicPlayerScreen extends LuaScreen {
 
     private void logout() {
         qrLoginSerial++;
-        NeteaseMusicApi.logout();
+        String logoutStatus = "Logged out";
+        try {
+            NeteaseMusicApi.logout();
+        } catch (IOException exception) {
+            logoutStatus = "Logged out, but saved login could not be removed";
+        }
         focusedField = InputField.NONE;
         selectedPlaylist = null;
         userPlaylists.clear();
@@ -965,7 +1017,7 @@ public class MusicPlayerScreen extends LuaScreen {
         loginBusy = false;
         clearLuaInputFocus();
         resetMusicScroll();
-        statusText = "Logged out";
+        statusText = logoutStatus;
     }
 
     private void loadUserPlaylists() {
@@ -1024,7 +1076,9 @@ public class MusicPlayerScreen extends LuaScreen {
                 visibleSongs.clear();
                 visibleSongs.addAll(homeSongs);
             }
-            statusText = "Ready";
+            if (!loginBusy) {
+                statusText = "Ready";
+            }
         }));
     }
 

@@ -1,17 +1,33 @@
 package io.github.seraphina.nyx.client.music;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
+import io.github.seraphina.nyx.client.manager.PathManager;
 import io.github.seraphina.nyx.client.utility.web.WebUtility;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 public final class NeteaseMusicApi {
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final int SESSION_VERSION = 1;
+    private static final Path SESSION_FILE = PathManager.CLIENT_PATH.resolve("netease-music-session.json");
     private static volatile LoginSession loginSession;
 
     private NeteaseMusicApi() {
@@ -73,9 +89,7 @@ public final class NeteaseMusicApi {
         JsonObject root = getJsonObject("/login/cellphone?phone=" + WebUtility.encode(phone.trim())
             + "&password=" + WebUtility.encode(password)
             + "&timestamp=" + System.currentTimeMillis());
-        LoginSession session = sessionFromLoginResponse(root);
-        loginSession = session;
-        return session;
+        return rememberSession(sessionFromLoginResponse(root));
     }
 
     public static void sendCaptcha(String phone) throws IOException, InterruptedException {
@@ -99,9 +113,7 @@ public final class NeteaseMusicApi {
         JsonObject root = getJsonObject("/login/cellphone?phone=" + WebUtility.encode(phone.trim())
             + "&captcha=" + WebUtility.encode(captcha.trim())
             + "&timestamp=" + System.currentTimeMillis());
-        LoginSession session = sessionFromLoginResponse(root);
-        loginSession = session;
-        return session;
+        return rememberSession(sessionFromLoginResponse(root));
     }
 
     public static QrLogin createQrLogin() throws IOException, InterruptedException {
@@ -148,13 +160,36 @@ public final class NeteaseMusicApi {
         if (cookie.isBlank()) {
             throw new IOException("Netease QR login response did not include a cookie");
         }
-        LoginSession session = loadSessionFromCookie(cookie);
-        loginSession = session;
+        LoginSession session = rememberSession(loadSessionFromCookie(cookie));
         return new QrLoginStatus(code, message, session);
     }
 
-    public static void logout() {
+    public static boolean hasSavedSession() {
+        return Files.isRegularFile(SESSION_FILE);
+    }
+
+    public static LoginSession restoreSession() throws IOException, InterruptedException {
+        LoginSession current = loginSession;
+        if (current != null) {
+            return current;
+        }
+
+        LoginSession savedSession = readSavedSession();
+        if (savedSession == null) {
+            return null;
+        }
+
+        try {
+            return rememberSession(loadSessionFromCookie(savedSession.cookie()));
+        } catch (InvalidLoginSessionException exception) {
+            deleteSavedSession();
+            return null;
+        }
+    }
+
+    public static void logout() throws IOException {
         loginSession = null;
+        deleteSavedSession();
     }
 
     public static boolean isLoggedIn() {
@@ -292,6 +327,15 @@ public final class NeteaseMusicApi {
     private static LoginSession loadSessionFromCookie(String cookie) throws IOException, InterruptedException {
         JsonObject root = getJsonObject("/user/account?cookie=" + WebUtility.encode(cookie)
             + "&timestamp=" + System.currentTimeMillis());
+        int code = (int)number(root, "code");
+        if (code != 200) {
+            String message = errorMessage(root, "Netease login session is invalid: " + code);
+            if (code == 301 || code == 302) {
+                throw new InvalidLoginSessionException(message);
+            }
+            throw new IOException(message);
+        }
+
         JsonObject profile = object(root.get("profile"));
         LoginSession session = new LoginSession(
             number(profile, "userId"),
@@ -299,9 +343,82 @@ public final class NeteaseMusicApi {
             cookie
         );
         if (session.uid() <= 0L || session.cookie().isBlank()) {
-            throw new IOException("Netease account response did not include a usable session");
+            throw new InvalidLoginSessionException("Netease account response did not include a usable session");
         }
         return session;
+    }
+
+    private static LoginSession rememberSession(LoginSession session) throws IOException {
+        writeSavedSession(session);
+        loginSession = session;
+        return session;
+    }
+
+    private static LoginSession readSavedSession() throws IOException {
+        if (!Files.isRegularFile(SESSION_FILE)) {
+            return null;
+        }
+
+        try (Reader reader = Files.newBufferedReader(SESSION_FILE, StandardCharsets.UTF_8)) {
+            JsonElement rootElement = JsonParser.parseReader(reader);
+            if (!rootElement.isJsonObject()) {
+                deleteSavedSession();
+                return null;
+            }
+
+            JsonObject root = rootElement.getAsJsonObject();
+            LoginSession session = new LoginSession(
+                number(root, "uid"),
+                string(root, "nickname"),
+                string(root, "cookie")
+            );
+            if (session.cookie().isBlank()) {
+                deleteSavedSession();
+                return null;
+            }
+            return session;
+        } catch (JsonParseException | IllegalStateException exception) {
+            deleteSavedSession();
+            return null;
+        }
+    }
+
+    private static void writeSavedSession(LoginSession session) throws IOException {
+        JsonObject root = new JsonObject();
+        root.addProperty("version", SESSION_VERSION);
+        root.addProperty("uid", session.uid());
+        root.addProperty("nickname", session.nickname());
+        root.addProperty("cookie", session.cookie());
+
+        Path target = SESSION_FILE.toAbsolutePath();
+        Path directory = target.getParent();
+        if (directory == null) {
+            throw new FileNotFoundException("Netease music session path has no parent: " + SESSION_FILE);
+        }
+
+        Files.createDirectories(directory);
+        Path tempFile = Files.createTempFile(directory, target.getFileName().toString(), ".tmp");
+        boolean moved = false;
+        try {
+            try (Writer writer = Files.newBufferedWriter(tempFile, StandardCharsets.UTF_8)) {
+                GSON.toJson(root, writer);
+            }
+
+            try {
+                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(tempFile);
+            }
+        }
+    }
+
+    private static void deleteSavedSession() throws IOException {
+        Files.deleteIfExists(SESSION_FILE);
     }
 
     private static void requireCode(JsonObject root, int expected, String fallback) throws IOException {
@@ -373,5 +490,11 @@ public final class NeteaseMusicApi {
     }
 
     public record QrLoginStatus(int code, String message, LoginSession session) {
+    }
+
+    private static final class InvalidLoginSessionException extends IOException {
+        private InvalidLoginSessionException(String message) {
+            super(message);
+        }
     }
 }
