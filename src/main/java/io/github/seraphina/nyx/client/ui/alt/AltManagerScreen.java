@@ -5,6 +5,7 @@ import com.mojang.authlib.yggdrasil.ProfileResult;
 import io.github.seraphina.nyx.client.alt.AltManager;
 import io.github.seraphina.nyx.client.alt.MicrosoftAuth;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.ui.LuaScreen;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
@@ -23,6 +24,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.StringUtil;
 import net.minecraft.world.entity.player.PlayerSkin;
 import org.jspecify.annotations.Nullable;
+import org.luaj.vm2.LuaValue;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -30,8 +32,10 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
@@ -45,7 +49,7 @@ import static org.lwjgl.glfw.GLFW.GLFW_KEY_F5;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_HOME;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
-public final class AltManagerScreen extends Screen {
+public final class AltManagerScreen extends LuaScreen {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT);
 
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
@@ -124,7 +128,7 @@ public final class AltManagerScreen extends Screen {
     private boolean accountsLoaded;
 
     public AltManagerScreen(Screen lastScreen) {
-        super(Component.literal(ALT_TITLE));
+        super("nyxclient:ui/screen/altmanager.lua", Component.literal(ALT_TITLE));
         this.lastScreen = lastScreen;
         initActionButtons();
     }
@@ -147,96 +151,114 @@ public final class AltManagerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        Render2DUtility.withGuiGraphics(guiGraphics, () -> {
-            updateFrameTime();
-            updateTransition();
-
-            MainUI.renderSharedBackground(this.width, this.height);
-            Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, Render2DUtility.applyOpacity(0x66000000, 0.32F * this.transitionProgress));
-            renderUserCardTransition();
-
-            PanelBounds mainPanel = mainPanelBounds();
-            PanelBounds targetPanel = targetPanelBounds();
-            PanelBounds currentPanel = currentPanelBounds(mainPanel, targetPanel);
-
-            renderFlippingPanel(currentPanel, mouseX, mouseY);
-            renderTitles(mainPanel, currentPanel);
-            layoutActionButtons(targetPanel);
-            renderActionButtons(mouseX, mouseY);
-            MainUI.renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
-        });
+        updateFrameTime();
+        updateTransition();
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-        if (event.button() != GLFW_MOUSE_BUTTON_LEFT || this.switchingBack) {
-            return super.mouseClicked(event, doubleClick);
-        }
-
-        if (MainUI.mouseClickedSharedBackgroundSelector(event, this.width, this.height)) {
+        if (this.switchingBack) {
             return true;
         }
-
-        if (isInteractive()) {
-            for (ActionButton button : this.actionButtons) {
-                if (button.active() && button.contains(event.x(), event.y())) {
-                    playClickSound();
-                    button.action.run();
-                    return true;
-                }
-            }
-
-            int row = accountRowAt(event.x(), event.y());
-            if (row >= 0) {
-                selectAccount(row);
-                if (doubleClick) {
-                    loginSelectedAccount();
-                } else {
-                    playClickSound();
-                }
-                return true;
-            }
-        }
-
         return super.mouseClicked(event, doubleClick);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (MainUI.mouseScrolledSharedBackgroundSelector(mouseX, mouseY, scrollY, this.width, this.height)) {
-            return true;
-        }
-
-        if (isInteractive() && isInsideList(mouseX, mouseY)) {
-            this.scroll = clamp(this.scroll - (float)scrollY * SCROLL_STEP, 0.0F, this.maxScroll);
-            return true;
-        }
-
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.isEscape() && MainUI.closeSharedBackgroundSelector()) {
-            return true;
-        }
-
-        if (event.isEscape()) {
-            beginBackTransition();
-            return true;
-        }
-
-        if (event.isSelection() && isInteractive()) {
-            loginSelectedAccount();
-            return true;
-        }
-
-        if (event.key() == GLFW_KEY_F5) {
-            reloadAccounts();
-            return true;
-        }
-
         return super.keyPressed(event);
+    }
+
+    @Override
+    protected void appendLuaState(Map<String, Object> state) {
+        List<Map<String, Object>> accounts = new ArrayList<>();
+        for (int index = 0; index < this.entries.size(); index++) {
+            AccountEntry entry = this.entries.get(index);
+            AltManager.Account account = entry.account;
+            Map<String, Object> accountState = new LinkedHashMap<>();
+            accountState.put("index", index + 1);
+            accountState.put("name", account.getName());
+            accountState.put("type_line", accountTypeLine(account));
+            accountState.put("info_line", accountInfoLine(account));
+            accountState.put("current", AltManager.isCurrent(account));
+            accountState.put("selected", index == this.selectedIndex);
+            accounts.add(accountState);
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        String currentName = minecraft == null || minecraft.getUser() == null ? "" : minecraft.getUser().getName();
+        state.put("accounts", accounts);
+        state.put("loaded", this.accountsLoaded);
+        state.put("interactive", isInteractive());
+        state.put("transition_progress", this.transitionProgress);
+        state.put("exiting", this.exiting);
+        state.put("current_name", currentName);
+        state.put("login_label", loginButtonLabel());
+        state.put("can_login", selectedAccount() != null && !AltManager.isCurrent(selectedAccount()));
+        state.put("can_delete", selectedAccount() != null);
+    }
+
+    @Override
+    protected boolean onLuaAction(String action, LuaValue payload) {
+        if (!isInteractive() && !action.equals("back")) {
+            return true;
+        }
+
+        return switch (action) {
+            case "select" -> {
+                selectAccount(payload.checkint() - 1);
+                yield true;
+            }
+            case "login" -> {
+                loginSelectedAccount();
+                yield true;
+            }
+            case "login_index" -> {
+                selectAccount(payload.checkint() - 1);
+                loginSelectedAccount();
+                yield true;
+            }
+            case "add" -> {
+                openAddAccount();
+                yield true;
+            }
+            case "delete" -> {
+                deleteSelectedAccount();
+                yield true;
+            }
+            case "refresh" -> {
+                reloadAccounts();
+                yield true;
+            }
+            case "back" -> {
+                beginBackTransition();
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    @Override
+    protected void renderLuaCustom(String name, LuaValue[] args) {
+        if (!name.equals("account_icon") || args.length < 5) {
+            return;
+        }
+        int index = args[0].checkint() - 1;
+        if (index < 0 || index >= this.entries.size()) {
+            return;
+        }
+        renderAccountIcon(
+            this.entries.get(index),
+            (float)args[1].checkdouble(),
+            (float)args[2].checkdouble(),
+            (float)args[3].checkdouble(),
+            (float)args[4].checkdouble()
+        );
     }
 
     @Override
@@ -991,7 +1013,7 @@ public final class AltManagerScreen extends Screen {
     public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
     }
 
-    private static final class AddAccountScreen extends Screen {
+    private static final class AddAccountScreen extends LuaScreen {
         private static final int PANEL_WIDTH = 340;
         private static final int CRACKED_PANEL_HEIGHT = 214;
         private static final int CREDENTIAL_PANEL_HEIGHT = 286;
@@ -1018,7 +1040,7 @@ public final class AltManagerScreen extends Screen {
         private float frameSeconds = DEFAULT_FRAME_SECONDS;
 
         private AddAccountScreen(AltManagerScreen parent) {
-            super(Component.literal("Add Account"));
+            super("nyxclient:ui/screen/addaccount.lua", Component.literal("Add Account"));
             this.parent = parent;
         }
 
@@ -1026,131 +1048,75 @@ public final class AltManagerScreen extends Screen {
         protected void init() {
             super.init();
             this.lastFrameNanos = 0L;
-            layoutControls();
-            focusInput(needsNameInput() ? this.nameInput : null);
         }
 
         @Override
         public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-            Render2DUtility.withGuiGraphics(guiGraphics, () -> {
-                updateFrameTime();
-                layoutControls();
-
-                MainUI.renderSharedBackground(this.width, this.height);
-                Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, 0x77000000);
-
-                float panelX = (this.width - PANEL_WIDTH) * 0.5F;
-                float panelY = (this.height - panelHeight()) * 0.5F;
-                Render2DUtility.drawDropShadow(panelX, panelY, PANEL_WIDTH, panelHeight(), 16.0F, 0.0F, 8.0F, 22.0F, 0x77000000);
-                Render2DUtility.drawGaussianBlurredPanel(
-                    panelX,
-                    panelY,
-                    PANEL_WIDTH,
-                    panelHeight(),
-                    16.0F,
-                    16.0F,
-                    PANEL_BLUR,
-                    PANEL_BACKGROUND,
-                    2.0F,
-                    PANEL_BORDER
-                );
-
-                FontRenderer titleFont = FontManager.getAppleDisplayRenderer(18.0F);
-                FontRenderer textFont = FontManager.getAppleTextRenderer(10.0F);
-                titleFont.drawString("Add Account", panelX + 20.0F, panelY + 18.0F, TEXT);
-                this.typeSelector.render(mouseX, mouseY, this.frameSeconds, typeButtonLabel());
-                if (needsNameInput()) {
-                    this.nameInput.render(mouseX, mouseY, this.frameSeconds);
-                }
-                if (requiresCredentials()) {
-                    this.uuidInput.render(mouseX, mouseY, this.frameSeconds);
-                    this.accessTokenInput.render(mouseX, mouseY, this.frameSeconds);
-                }
-                if (usesBrowserLogin() && this.statusMessage == null) {
-                    textFont.drawString(trimToWidthStatic(textFont, "Browser login will open for Microsoft sign-in.", PANEL_WIDTH - MODAL_PADDING * 2.0F),
-                        panelX + MODAL_PADDING, panelY + 110.0F, TEXT_SUBTLE);
-                }
-                if (this.statusMessage != null) {
-                    textFont.drawString(trimToWidthStatic(textFont, this.statusMessage, PANEL_WIDTH - MODAL_PADDING * 2.0F),
-                        panelX + MODAL_PADDING, panelY + panelHeight() - 62.0F, this.statusError ? 0xFFFFA0A0 : TEXT_SUBTLE);
-                }
-
-                this.addButton.render(mouseX, mouseY, this.frameSeconds, hasValidInput());
-                this.cancelButton.render(mouseX, mouseY, this.frameSeconds, true);
-            });
+            updateFrameTime();
+            super.render(guiGraphics, mouseX, mouseY, partialTick);
         }
 
         @Override
         public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-            if (event.button() != GLFW_MOUSE_BUTTON_LEFT) {
-                return super.mouseClicked(event, doubleClick);
-            }
-
-            layoutControls();
-            if (this.typeSelector.contains(event.x(), event.y())) {
-                this.parent.playClickSound();
-                blurInputs();
-                cycleType();
-                return true;
-            }
-
-            TextInput clickedInput = inputAt(event.x(), event.y());
-            if (clickedInput != null) {
-                focusInput(clickedInput);
-                clickedInput.placeCursor(event.x());
-                return true;
-            }
-
-            if (this.addButton.contains(event.x(), event.y())) {
-                this.parent.playClickSound();
-                confirm();
-                return true;
-            }
-
-            if (this.cancelButton.contains(event.x(), event.y())) {
-                this.parent.playClickSound();
-                returnToParent();
-                return true;
-            }
-
-            if (isInside(event.x(), event.y(), (this.width - PANEL_WIDTH) * 0.5F, (this.height - panelHeight()) * 0.5F, PANEL_WIDTH, panelHeight())) {
-                blurInputs();
-                return true;
-            }
-
             return super.mouseClicked(event, doubleClick);
         }
 
         @Override
         public boolean keyPressed(KeyEvent event) {
-            if (event.isEscape()) {
-                returnToParent();
-                return true;
-            }
-
-            if (event.isConfirmation()) {
-                confirm();
-                return true;
-            }
-
-            TextInput focusedInput = focusedInput();
-            if (focusedInput != null && focusedInput.keyPressed(event)) {
-                clearStatus();
-                return true;
-            }
-
             return super.keyPressed(event);
         }
 
         @Override
         public boolean charTyped(CharacterEvent event) {
-            TextInput focusedInput = focusedInput();
-            if (focusedInput != null && focusedInput.charTyped(event)) {
-                clearStatus();
-                return true;
-            }
-
             return super.charTyped(event);
+        }
+
+        @Override
+        protected void appendLuaState(Map<String, Object> state) {
+            state.put("type_label", typeButtonLabel());
+            state.put("requires_credentials", requiresCredentials());
+            state.put("uses_browser_login", usesBrowserLogin());
+            state.put("needs_name_input", needsNameInput());
+            state.put("name", this.nameInput.value());
+            state.put("uuid", this.uuidInput.value());
+            state.put("access_token", this.accessTokenInput.value());
+            state.put("valid", hasValidInput());
+            state.put("button_label", addButtonLabel());
+            state.put("status", this.statusMessage == null ? "" : this.statusMessage);
+            state.put("status_error", this.statusError);
+            state.put("busy", this.microsoftLoginInProgress);
+        }
+
+        @Override
+        protected boolean onLuaAction(String action, LuaValue payload) {
+            return switch (action) {
+                case "cycle_type" -> {
+                    cycleType();
+                    yield true;
+                }
+                case "confirm" -> {
+                    confirm();
+                    yield true;
+                }
+                case "cancel" -> {
+                    returnToParent();
+                    yield true;
+                }
+                default -> false;
+            };
+        }
+
+        @Override
+        protected void onLuaInputChanged(String id, String value) {
+            switch (id) {
+                case "name" -> this.nameInput.setValue(value);
+                case "uuid" -> this.uuidInput.setValue(value);
+                case "access_token" -> this.accessTokenInput.setValue(value);
+                default -> {
+                    return;
+                }
+            }
+            clearStatus();
         }
 
         @Override

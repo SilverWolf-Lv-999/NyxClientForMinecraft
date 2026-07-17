@@ -108,6 +108,13 @@ dependencies {
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
     compileOnly "org.projectlombok:lombok:1.18.42"
 
+    jarJar(implementation("org.luaj:luaj-jse:3.0.1")) {
+        version {
+            strictly "[3.0.1,4.0.0)"
+            prefer "3.0.1"
+        }
+    }
+
     implementation("org.bytedeco:javacv:1.5.13") {
         transitive = false
     }

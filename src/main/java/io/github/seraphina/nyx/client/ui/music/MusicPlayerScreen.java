@@ -9,6 +9,7 @@ import io.github.seraphina.nyx.client.music.NeteaseMusicApi;
 import io.github.seraphina.nyx.client.music.Playlist;
 import io.github.seraphina.nyx.client.music.Song;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.ui.LuaScreen;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import io.github.seraphina.nyx.client.utility.web.WebUtility;
@@ -21,6 +22,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import org.luaj.vm2.LuaValue;
 
 import javax.annotation.Nullable;
 import javax.imageio.ImageIO;
@@ -31,7 +33,9 @@ import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
@@ -47,7 +51,7 @@ import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
-public class MusicPlayerScreen extends Screen {
+public class MusicPlayerScreen extends LuaScreen {
     private static final ExecutorService IO = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "Nyx-MusicUi");
         thread.setDaemon(true);
@@ -108,115 +112,259 @@ public class MusicPlayerScreen extends Screen {
     private boolean draggingVolume;
 
     public MusicPlayerScreen() {
-        super(Component.literal("Music Player"));
+        super("nyxclient:ui/screen/musicplayer.lua", Component.literal("Music Player"));
     }
 
     @Override
     protected void init() {
+        super.init();
         loadHome();
     }
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
-        Render2DUtility.withGuiGraphics(guiGraphics, () -> {
-            clickZones.clear();
-            updateMetrics();
-            Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, SCREEN_DIM);
-            Render2DUtility.drawDropShadow(panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT, 12.0F, 0.0F, 18.0F, 30.0F, 0xA0000000);
-            Render2DUtility.drawRoundedRect(panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT, 10.0F, PANEL);
-            Render2DUtility.drawOutlineRoundedRect(panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT, 10.0F, 1.0F, BORDER);
-            Render2DUtility.withClip(panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT, () -> {
-                renderSidebar(guiGraphics, mouseX, mouseY);
-                renderContent(guiGraphics, mouseX, mouseY);
-                renderPlayer(guiGraphics, mouseX, mouseY);
-            });
-        });
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-        if (event.button() != GLFW_MOUSE_BUTTON_LEFT) {
-            return super.mouseClicked(event, doubleClick);
-        }
-
-        double mouseX = event.x();
-        double mouseY = event.y();
-        focusedField = InputField.NONE;
-        List<ClickZone> zones = List.copyOf(clickZones);
-        for (int i = zones.size() - 1; i >= 0; i--) {
-            ClickZone zone = zones.get(i);
-            if (isInsideExclusive(mouseX, mouseY, zone.x(), zone.y(), zone.width(), zone.height())) {
-                zone.action().run();
-                return true;
-            }
-        }
         return super.mouseClicked(event, doubleClick);
     }
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
-        if (event.button() == GLFW_MOUSE_BUTTON_LEFT && draggingVolume) {
-            draggingVolume = false;
-            return true;
-        }
         return super.mouseReleased(event);
     }
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (event.button() == GLFW_MOUSE_BUTTON_LEFT && draggingVolume) {
-            setVolumeFromMouse(event.x());
-            return true;
-        }
         return super.mouseDragged(event, dragX, dragY);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (isInsideExclusive(mouseX, mouseY, contentX(), contentListY(), contentWidth(), contentHeight())) {
-            scroll = clamp(scroll - (float)scrollY * 22.0F, 0.0F, maxScroll);
-            return true;
-        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (focusedField != InputField.NONE) {
-            switch (event.key()) {
-                case GLFW_KEY_BACKSPACE -> {
-                    deleteFocusedCharacter();
-                    return true;
-                }
-                case GLFW_KEY_ENTER, GLFW_KEY_KP_ENTER -> {
-                    submitFocusedField();
-                    return true;
-                }
-                case GLFW_KEY_ESCAPE -> {
-                    focusedField = InputField.NONE;
-                    return true;
-                }
-                default -> {
-                    return super.keyPressed(event);
-                }
-            }
-        }
-
-        if (event.isEscape()) {
-            this.onClose();
-            return true;
-        }
         return super.keyPressed(event);
     }
 
     @Override
     public boolean charTyped(CharacterEvent event) {
-        if (focusedField == InputField.NONE || !event.isAllowedChatCharacter()) {
-            return super.charTyped(event);
+        return super.charTyped(event);
+    }
+
+    @Override
+    protected void appendLuaState(Map<String, Object> state) {
+        MusicPlaybackService player = MusicPlaybackService.INSTANCE;
+        Song currentSong = player.currentSong();
+        NeteaseMusicApi.LoginSession session = NeteaseMusicApi.currentSession();
+
+        List<Map<String, Object>> playlistStates = new ArrayList<>();
+        List<Playlist> displayedPlaylists = displayedPlaylists();
+        for (int index = 0; index < displayedPlaylists.size(); index++) {
+            Playlist playlist = displayedPlaylists.get(index);
+            Map<String, Object> playlistState = new LinkedHashMap<>();
+            playlistState.put("index", index + 1);
+            playlistState.put("name", playlist.name());
+            playlistState.put("cover", playlist.coverUrl());
+            playlistState.put("play_count", formatCount(playlist.playCount()) + " plays");
+            playlistStates.add(playlistState);
         }
-        appendFocusedText(event.codepointAsString());
-        return true;
+
+        List<Map<String, Object>> songStates = new ArrayList<>();
+        for (int index = 0; index < this.visibleSongs.size(); index++) {
+            Song song = this.visibleSongs.get(index);
+            Map<String, Object> songState = new LinkedHashMap<>();
+            songState.put("index", index + 1);
+            songState.put("name", song.name());
+            songState.put("artist", song.displayArtist());
+            songState.put("cover", song.image());
+            songState.put("duration", MusicPlaybackService.formatTime(song.duration()));
+            songState.put("current", song.equals(currentSong));
+            songStates.add(songState);
+        }
+
+        List<LyricLine> lyrics = player.lyricsSnapshot();
+        int lyricIndex = LyricLineProcessor.currentIndex(lyrics, player.positionMs());
+        String lyric = lyricIndex >= 0 && lyricIndex < lyrics.size() ? lyrics.get(lyricIndex).text() : "";
+
+        state.put("page", this.page.name().toLowerCase(Locale.ROOT));
+        state.put("title", title());
+        state.put("status", this.statusText);
+        state.put("loading", this.loading);
+        state.put("login_busy", this.loginBusy);
+        state.put("qr_polling", this.qrPolling);
+        state.put("logged_in", NeteaseMusicApi.isLoggedIn());
+        state.put("login_mode", this.loginMode.name().toLowerCase(Locale.ROOT));
+        state.put("search_text", this.searchText);
+        state.put("phone_text", this.phoneText);
+        state.put("password_text", this.passwordText);
+        state.put("captcha_text", this.captchaText);
+        state.put("session_name", session == null || session.nickname().isBlank() ? "Netease Account" : session.nickname());
+        state.put("playlist_count", this.userPlaylists.size());
+        state.put("selected_playlist", this.selectedPlaylist != null);
+        state.put("playlists", playlistStates);
+        state.put("songs", songStates);
+        state.put("qr_image", this.qrLogin == null ? "" : this.qrLogin.qrImage());
+
+        state.put("current_song", currentSong == null ? "No song selected" : currentSong.name());
+        state.put("current_artist", currentSong == null ? player.status() : currentSong.displayArtist());
+        state.put("current_cover", currentSong == null ? "" : currentSong.image());
+        state.put("playing", player.isPlaying());
+        state.put("position", player.positionMs());
+        state.put("duration", player.totalDurationMs());
+        state.put("progress", player.totalDurationMs() <= 0L
+            ? 0.0F
+            : clamp(player.positionMs() / (float)player.totalDurationMs(), 0.0F, 1.0F));
+        state.put("time_label", MusicPlaybackService.formatTime(player.positionMs())
+            + " / " + MusicPlaybackService.formatTime(player.totalDurationMs()));
+        state.put("volume", player.volume());
+        state.put("volume_label", Math.round(player.volume() * 100.0F) + "%");
+        state.put("mode_label", player.playbackMode().label());
+        state.put("mode_icon", modeIcon(player.playbackMode()).name().toLowerCase(Locale.ROOT));
+        state.put("lyric", lyric == null || lyric.isBlank() ? "" : lyric);
+    }
+
+    @Override
+    protected void onLuaInputChanged(String id, String value) {
+        switch (id) {
+            case "search" -> this.searchText = value;
+            case "phone" -> this.phoneText = value;
+            case "password" -> this.passwordText = value;
+            case "captcha" -> this.captchaText = value;
+            default -> {
+            }
+        }
+    }
+
+    @Override
+    protected boolean onLuaAction(String action, LuaValue payload) {
+        MusicPlaybackService player = MusicPlaybackService.INSTANCE;
+        return switch (action) {
+            case "page" -> {
+                switchPage(Page.valueOf(payload.checkjstring().toUpperCase(Locale.ROOT)));
+                yield true;
+            }
+            case "search" -> {
+                runSearch();
+                yield true;
+            }
+            case "login_mode" -> {
+                switchLoginMode(LoginMode.valueOf(payload.checkjstring().toUpperCase(Locale.ROOT)));
+                yield true;
+            }
+            case "send_captcha" -> {
+                sendCaptcha();
+                yield true;
+            }
+            case "login_captcha" -> {
+                loginWithCaptcha();
+                yield true;
+            }
+            case "login_password" -> {
+                login();
+                yield true;
+            }
+            case "qr_start" -> {
+                startQrLogin();
+                yield true;
+            }
+            case "qr_cancel" -> {
+                cancelQrLogin();
+                yield true;
+            }
+            case "refresh_playlists" -> {
+                loadUserPlaylists();
+                yield true;
+            }
+            case "logout" -> {
+                logout();
+                yield true;
+            }
+            case "open_playlist" -> {
+                int index = payload.checkint() - 1;
+                List<Playlist> source = displayedPlaylists();
+                if (index >= 0 && index < source.size()) {
+                    loadPlaylist(source.get(index));
+                }
+                yield true;
+            }
+            case "play_song" -> {
+                int index = payload.checkint() - 1;
+                if (index >= 0 && index < this.visibleSongs.size()) {
+                    playVisibleSong(this.visibleSongs.get(index));
+                }
+                yield true;
+            }
+            case "previous" -> {
+                player.playPrevious();
+                yield true;
+            }
+            case "toggle" -> {
+                player.toggle();
+                yield true;
+            }
+            case "next" -> {
+                player.playNext();
+                yield true;
+            }
+            case "stop" -> {
+                player.stop();
+                yield true;
+            }
+            case "cycle_mode" -> {
+                player.cyclePlaybackMode();
+                yield true;
+            }
+            case "set_volume" -> {
+                LuaValue x = payload.get("x");
+                LuaValue width = payload.get("width");
+                if (x.isnumber() && width.isnumber() && width.checkdouble() > 0.0D) {
+                    player.setVolume(clamp(
+                        (float)((luaMouseX() - x.checkdouble()) / width.checkdouble()),
+                        0.0F,
+                        1.0F
+                    ));
+                }
+                yield true;
+            }
+            case "back" -> {
+                onClose();
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    @Override
+    protected void renderLuaCustom(String name, LuaValue[] args) {
+        if (name.equals("cover") && args.length >= 5) {
+            renderCover(
+                args[0].optjstring(""),
+                (float)args[1].checkdouble(),
+                (float)args[2].checkdouble(),
+                (float)args[3].checkdouble(),
+                (float)args[4].checkdouble()
+            );
+            return;
+        }
+        if (name.equals("icon") && args.length >= 6) {
+            try {
+                Icon icon = Icon.valueOf(args[0].checkjstring().toUpperCase(Locale.ROOT));
+                drawIcon(
+                    icon,
+                    (float)args[1].checkdouble(),
+                    (float)args[2].checkdouble(),
+                    (float)args[3].checkdouble(),
+                    (float)args[4].checkdouble(),
+                    (int)args[5].checklong()
+                );
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
     }
 
     @Override
@@ -590,9 +738,49 @@ public class MusicPlayerScreen extends Screen {
         MusicPlaybackService.INSTANCE.playSong(song);
     }
 
+    private List<Playlist> displayedPlaylists() {
+        if (this.selectedPlaylist != null) {
+            return List.of();
+        }
+        return switch (this.page) {
+            case HOME -> this.playlists;
+            case MY -> NeteaseMusicApi.isLoggedIn() ? this.userPlaylists : List.of();
+            case SEARCH -> List.of();
+        };
+    }
+
+    private void switchPage(Page targetPage) {
+        this.page = targetPage;
+        this.focusedField = InputField.NONE;
+        clearLuaInputFocus();
+        this.selectedPlaylist = null;
+        this.visibleSongs.clear();
+        if (targetPage == Page.HOME) {
+            this.visibleSongs.addAll(this.homeSongs);
+        } else if (targetPage == Page.SEARCH) {
+            this.visibleSongs.addAll(this.searchSongs);
+        } else if (NeteaseMusicApi.isLoggedIn() && this.userPlaylists.isEmpty() && !this.loading) {
+            resetMusicScroll();
+            loadUserPlaylists();
+            return;
+        }
+        resetMusicScroll();
+        this.statusText = switch (targetPage) {
+            case HOME -> "Ready";
+            case SEARCH -> searchStatus();
+            case MY -> accountStatus();
+        };
+    }
+
+    private void resetMusicScroll() {
+        this.scroll = 0.0F;
+        resetLuaScroll("music_content");
+    }
+
     private void switchLoginMode(LoginMode mode) {
         loginMode = mode;
         focusedField = InputField.NONE;
+        clearLuaInputFocus();
         if (mode != LoginMode.QR) {
             cancelQrLogin();
         } else if (qrLogin == null && !loginBusy) {
@@ -753,12 +941,13 @@ public class MusicPlayerScreen extends Screen {
 
     private void completeLogin(UserData data) {
         focusedField = InputField.NONE;
+        clearLuaInputFocus();
         page = Page.MY;
         selectedPlaylist = null;
         userPlaylists.clear();
         userPlaylists.addAll(data.playlists());
         visibleSongs.clear();
-        scroll = 0.0F;
+        resetMusicScroll();
         statusText = data.session().nickname() + " · " + userPlaylists.size() + " playlists";
     }
 
@@ -774,7 +963,8 @@ public class MusicPlayerScreen extends Screen {
         qrLogin = null;
         qrPolling = false;
         loginBusy = false;
-        scroll = 0.0F;
+        clearLuaInputFocus();
+        resetMusicScroll();
         statusText = "Logged out";
     }
 
@@ -801,7 +991,7 @@ public class MusicPlayerScreen extends Screen {
             userPlaylists.clear();
             userPlaylists.addAll(loadedPlaylists);
             visibleSongs.clear();
-            scroll = 0.0F;
+            resetMusicScroll();
             statusText = accountStatus();
         }));
     }
@@ -841,9 +1031,10 @@ public class MusicPlayerScreen extends Screen {
     private void loadPlaylist(Playlist playlist) {
         selectedPlaylist = playlist;
         focusedField = InputField.NONE;
+        clearLuaInputFocus();
         loading = true;
         statusText = "Loading " + playlist.name();
-        scroll = 0.0F;
+        resetMusicScroll();
         CompletableFuture.supplyAsync(() -> {
             try {
                 return NeteaseMusicApi.getPlaylistDetail(playlist.id());
@@ -870,7 +1061,7 @@ public class MusicPlayerScreen extends Screen {
         selectedPlaylist = null;
         loading = true;
         statusText = "Searching " + searchText;
-        scroll = 0.0F;
+        resetMusicScroll();
         CompletableFuture.supplyAsync(() -> {
             try {
                 return NeteaseMusicApi.search(searchText);

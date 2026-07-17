@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.manager.HUDManager;
 import io.github.seraphina.nyx.client.manager.PathManager;
+import io.github.seraphina.nyx.client.ui.LuaScreen;
 import io.github.seraphina.nyx.client.ui.SvgImage;
 import io.github.seraphina.nyx.client.ui.alt.AltManagerScreen;
 import io.github.seraphina.nyx.client.ui.mainui.background.BackgroundLibrary;
@@ -16,7 +17,6 @@ import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import io.github.seraphina.nyx.client.utility.web.MicrosoftUtility;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
@@ -24,6 +24,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import org.luaj.vm2.LuaValue;
 
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -32,6 +33,7 @@ import java.awt.image.WritableRaster;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.github.seraphina.nyx.client.utility.MathUtility.animateLinear;
@@ -42,7 +44,7 @@ import static io.github.seraphina.nyx.client.utility.MathUtility.stackedContentH
 import static io.github.seraphina.nyx.client.utility.MathUtility.stackedItemY;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
-public final class MainUI extends Screen {
+public final class MainUI extends LuaScreen {
     private static final Identifier SETTINGS_ICON = Identifier.fromNamespaceAndPath("nyxclient", "ui/icon/settings.png");
     private static final Identifier WELCOME_LOGO = Identifier.fromNamespaceAndPath("nyxclient", "ui/hello.svg");
     private static final float SETTINGS_BUTTON_SIZE = 34.0F;
@@ -142,7 +144,7 @@ public final class MainUI extends Screen {
     private MainUIButton multiplayerButton;
 
     public MainUI() {
-        super(Component.empty());
+        super("nyxclient:ui/screen/mainui.lua", Component.empty());
         if (!welcomeAnimationPlayed) {
             welcomeAnimationPlayed = true;
             this.welcomeAnimationActive = true;
@@ -154,7 +156,6 @@ public final class MainUI extends Screen {
         super.init();
         ensureBackgroundCacheLoaded();
         syncSharedSelectedBackground();
-        initMainButtons();
         this.lastFrameNanos = 0L;
         if (this.welcomeAnimationActive && this.welcomeStartedNanos == 0L) {
             this.welcomeStartedNanos = System.nanoTime();
@@ -168,17 +169,50 @@ public final class MainUI extends Screen {
             return;
         }
 
-        Render2DUtility.withGuiGraphics(guiGraphics, () -> {
-            updateFrameTime();
-            renderSelectedBackground();
-            renderUserCard();
-            renderCenterPanel();
-            layoutMainButtons();
-            updateMainButtonStates();
-            super.render(guiGraphics, mouseX, mouseY, partialTick);
-            renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
-            renderWelcomeOverlay(guiGraphics);
-        });
+        updateFrameTime();
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    protected void appendLuaState(Map<String, Object> state) {
+        Minecraft minecraft = Minecraft.getInstance();
+        state.put("multiplayer_allowed", minecraft != null && minecraft.allowsMultiplayer());
+    }
+
+    @Override
+    protected boolean onLuaAction(String action, LuaValue payload) {
+        if (isWelcomeAnimationActive()) {
+            return true;
+        }
+
+        return switch (action) {
+            case "singleplayer" -> {
+                openSinglePlayer();
+                yield true;
+            }
+            case "multiplayer" -> {
+                openMultiplayer();
+                yield true;
+            }
+            case "alt_manager" -> {
+                openAltManager();
+                yield true;
+            }
+            case "options" -> {
+                openOptions();
+                yield true;
+            }
+            case "exit" -> {
+                exitGame();
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    @Override
+    protected void afterLuaRender(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        renderWelcomeOverlay(guiGraphics);
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.logging.LogUtils;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.ui.LuaScreen;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
@@ -36,12 +37,15 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.network.EventLoopGroupHolder;
 import net.minecraft.sounds.SoundEvents;
 import org.jspecify.annotations.Nullable;
+import org.luaj.vm2.LuaValue;
 import org.slf4j.Logger;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -59,7 +63,7 @@ import static io.github.seraphina.nyx.client.utility.MathUtility.stackedItemY;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_F5;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
-public final class MutiPlayerUI extends Screen {
+public final class MutiPlayerUI extends LuaScreen {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final ThreadPoolExecutor SERVER_PING_POOL = new ScheduledThreadPoolExecutor(
         5,
@@ -156,7 +160,7 @@ public final class MutiPlayerUI extends Screen {
     private boolean serversLoaded;
 
     public MutiPlayerUI(Screen lastScreen) {
-        super(Component.translatable("multiplayer.title"));
+        super("nyxclient:ui/screen/multiplayer.lua", Component.translatable("multiplayer.title"));
         this.lastScreen = lastScreen;
         initActionButtons();
     }
@@ -193,99 +197,122 @@ public final class MutiPlayerUI extends Screen {
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        Render2DUtility.withGuiGraphics(guiGraphics, () -> {
-            updateFrameTime();
-            updateTransition();
-
-            MainUI.renderSharedBackground(this.width, this.height);
-            Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, Render2DUtility.applyOpacity(0x66000000, 0.32F * transitionProgress));
-            renderUserCardTransition();
-
-            PanelBounds mainPanel = mainPanelBounds();
-            PanelBounds targetPanel = targetPanelBounds();
-            PanelBounds currentPanel = currentPanelBounds(mainPanel, targetPanel);
-
-            renderFlippingPanel(currentPanel, mouseX, mouseY);
-            renderTitles(mainPanel, currentPanel);
-            layoutActionButtons(targetPanel);
-            renderActionButtons(mouseX, mouseY);
-            MainUI.renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
-        });
+        updateFrameTime();
+        updateTransition();
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-        if (event.button() != GLFW_MOUSE_BUTTON_LEFT || this.switchingBack) {
-            return super.mouseClicked(event, doubleClick);
-        }
-
-        if (MainUI.mouseClickedSharedBackgroundSelector(event, this.width, this.height)) {
+        if (this.switchingBack) {
             return true;
         }
-
-        if (isInteractive()) {
-            for (ActionButton button : this.actionButtons) {
-                if (button.active() && button.contains(event.x(), event.y())) {
-                    playClickSound();
-                    button.action.run();
-                    return true;
-                }
-            }
-
-            int row = serverRowAt(event.x(), event.y());
-            if (row >= 0 && row < this.entries.size()) {
-                ServerEntry entry = this.entries.get(row);
-                if (entry.selectable()) {
-                    selectEntry(row);
-                    if (doubleClick) {
-                        joinSelectedServer();
-                    } else {
-                        playClickSound();
-                    }
-                    return true;
-                }
-            }
-        }
-
         return super.mouseClicked(event, doubleClick);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (MainUI.mouseScrolledSharedBackgroundSelector(mouseX, mouseY, scrollY, this.width, this.height)) {
-            return true;
-        }
-
-        if (isInteractive() && isInsideList(mouseX, mouseY)) {
-            this.scroll = clamp(this.scroll - (float)scrollY * SCROLL_STEP, 0.0F, this.maxScroll);
-            return true;
-        }
-
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.isEscape() && MainUI.closeSharedBackgroundSelector()) {
-            return true;
-        }
-
-        if (event.isEscape()) {
-            beginBackTransition();
-            return true;
-        }
-
-        if (event.isSelection() && isInteractive()) {
-            joinSelectedServer();
-            return true;
-        }
-
-        if (event.key() == GLFW_KEY_F5) {
-            refreshServers();
-            return true;
-        }
-
         return super.keyPressed(event);
+    }
+
+    @Override
+    protected void appendLuaState(Map<String, Object> state) {
+        List<Map<String, Object>> servers = new ArrayList<>();
+        for (int index = 0; index < this.entries.size(); index++) {
+            ServerEntry entry = this.entries.get(index);
+            entry.requestPing();
+            entry.uploadIconIfChanged();
+
+            Map<String, Object> server = new LinkedHashMap<>();
+            server.put("index", index + 1);
+            server.put("kind", entry.kind.name().toLowerCase(java.util.Locale.ROOT));
+            server.put("title", entry.title());
+            server.put("detail", entry.detailLine());
+            server.put("status", entry.statusLine());
+            server.put("selectable", entry.selectable());
+            server.put("selected", index == this.selectedIndex && entry.selectable());
+            servers.add(server);
+        }
+
+        state.put("servers", servers);
+        state.put("loaded", this.serversLoaded);
+        state.put("interactive", isInteractive());
+        state.put("transition_progress", this.transitionProgress);
+        state.put("exiting", this.exiting);
+        state.put("can_join", selectedEntry() != null);
+        state.put("can_edit", selectedOnlineServer() != null);
+        state.put("can_delete", selectedOnlineServer() != null);
+    }
+
+    @Override
+    protected boolean onLuaAction(String action, LuaValue payload) {
+        if (!isInteractive() && !action.equals("back")) {
+            return true;
+        }
+
+        return switch (action) {
+            case "select" -> {
+                selectEntry(payload.checkint() - 1);
+                yield true;
+            }
+            case "join" -> {
+                joinSelectedServer();
+                yield true;
+            }
+            case "join_index" -> {
+                selectEntry(payload.checkint() - 1);
+                joinSelectedServer();
+                yield true;
+            }
+            case "direct" -> {
+                openDirectJoin();
+                yield true;
+            }
+            case "add" -> {
+                openAddServer();
+                yield true;
+            }
+            case "edit" -> {
+                openEditServer();
+                yield true;
+            }
+            case "delete" -> {
+                openDeleteServer();
+                yield true;
+            }
+            case "refresh" -> {
+                refreshServers();
+                yield true;
+            }
+            case "back" -> {
+                beginBackTransition();
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    @Override
+    protected void renderLuaCustom(String name, LuaValue[] args) {
+        if (!name.equals("server_icon") || args.length < 5) {
+            return;
+        }
+        int index = args[0].checkint() - 1;
+        if (index < 0 || index >= this.entries.size()) {
+            return;
+        }
+        renderServerIcon(
+            this.entries.get(index),
+            (float)args[1].checkdouble(),
+            (float)args[2].checkdouble(),
+            (float)args[3].checkdouble(),
+            (float)args[4].checkdouble()
+        );
     }
 
     @Override

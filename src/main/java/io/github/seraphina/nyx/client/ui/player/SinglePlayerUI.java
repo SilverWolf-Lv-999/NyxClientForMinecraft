@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.ui.player;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.datafixers.util.Pair;
 import io.github.seraphina.nyx.client.manager.FontManager;
+import io.github.seraphina.nyx.client.ui.LuaScreen;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
@@ -34,6 +35,7 @@ import net.minecraft.world.level.storage.LevelSummary;
 import net.minecraft.world.level.validation.ContentValidationException;
 import net.minecraft.world.level.validation.ForbiddenSymlinkInfo;
 import org.jspecify.annotations.Nullable;
+import org.luaj.vm2.LuaValue;
 import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 
@@ -50,8 +52,10 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -71,7 +75,7 @@ import static io.github.seraphina.nyx.client.utility.MathUtility.stackedContentH
 import static io.github.seraphina.nyx.client.utility.MathUtility.stackedItemY;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
-public final class SinglePlayerUI extends Screen {
+public final class SinglePlayerUI extends LuaScreen {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT);
 
@@ -153,7 +157,7 @@ public final class SinglePlayerUI extends Screen {
     private boolean levelsLoaded;
 
     public SinglePlayerUI(Screen lastScreen) {
-        super(Component.translatable("selectWorld.title"));
+        super("nyxclient:ui/screen/singleplayer.lua", Component.translatable("selectWorld.title"));
         this.lastScreen = lastScreen;
         initActionButtons();
     }
@@ -169,92 +173,124 @@ public final class SinglePlayerUI extends Screen {
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        Render2DUtility.withGuiGraphics(guiGraphics, () -> {
-            updateFrameTime();
-            updateTransition();
-            pollWorldLoad();
-
-            MainUI.renderSharedBackground(this.width, this.height);
-            Render2DUtility.drawRect(0.0F, 0.0F, this.width, this.height, Render2DUtility.applyOpacity(0x66000000, 0.32F * transitionProgress));
-            renderUserCardTransition();
-
-            PanelBounds mainPanel = mainPanelBounds();
-            PanelBounds targetPanel = targetPanelBounds();
-            PanelBounds currentPanel = currentPanelBounds(mainPanel, targetPanel);
-
-            renderFlippingPanel(currentPanel, mouseX, mouseY);
-            renderTitles(mainPanel, currentPanel);
-            layoutActionButtons(targetPanel);
-            renderActionButtons(mouseX, mouseY);
-            MainUI.renderSharedBackgroundSelector(this.width, this.height, mouseX, mouseY, this.frameSeconds);
-        });
+        updateFrameTime();
+        updateTransition();
+        pollWorldLoad();
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-        if (event.button() != GLFW_MOUSE_BUTTON_LEFT || this.switchingBack) {
-            return super.mouseClicked(event, doubleClick);
-        }
-
-        if (MainUI.mouseClickedSharedBackgroundSelector(event, this.width, this.height)) {
+        if (this.switchingBack) {
             return true;
         }
-
-        if (isInteractive()) {
-            for (ActionButton button : this.actionButtons) {
-                if (button.active() && button.contains(event.x(), event.y())) {
-                    playClickSound();
-                    button.action.run();
-                    return true;
-                }
-            }
-
-            int row = worldRowAt(event.x(), event.y());
-            if (row >= 0) {
-                selectWorld(row);
-                if (doubleClick) {
-                    joinSelectedWorld();
-                } else {
-                    playClickSound();
-                }
-                return true;
-            }
-        }
-
         return super.mouseClicked(event, doubleClick);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (MainUI.mouseScrolledSharedBackgroundSelector(mouseX, mouseY, scrollY, this.width, this.height)) {
-            return true;
-        }
-
-        if (isInteractive() && isInsideList(mouseX, mouseY)) {
-            this.scroll = clamp(this.scroll - (float)scrollY * SCROLL_STEP, 0.0F, this.maxScroll);
-            return true;
-        }
-
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.isEscape() && MainUI.closeSharedBackgroundSelector()) {
-            return true;
-        }
-
-        if (event.isEscape()) {
-            beginBackTransition();
-            return true;
-        }
-
-        if (event.isSelection() && isInteractive()) {
-            joinSelectedWorld();
-            return true;
-        }
-
         return super.keyPressed(event);
+    }
+
+    @Override
+    protected void appendLuaState(Map<String, Object> state) {
+        List<Map<String, Object>> worlds = new ArrayList<>();
+        for (int index = 0; index < this.entries.size(); index++) {
+            LevelSummary summary = this.entries.get(index).summary;
+            Map<String, Object> world = new LinkedHashMap<>();
+            world.put("index", index + 1);
+            world.put("name", summary.getLevelName());
+            world.put("detail", detailLine(summary));
+            world.put("info", summary.getInfo().getString());
+            world.put("active", summary.primaryActionActive());
+            world.put("selected", index == this.selectedIndex);
+            worlds.add(world);
+        }
+
+        LevelSummary selected = selectedSummary();
+        state.put("worlds", worlds);
+        state.put("loading", this.pendingLevels != null && !this.pendingLevels.isDone());
+        state.put("load_error", this.loadError == null ? "" : this.loadError.getString());
+        state.put("interactive", isInteractive());
+        state.put("transition_progress", this.transitionProgress);
+        state.put("exiting", this.exiting);
+        state.put("select_label", selectButtonLabel());
+        state.put("can_join", selected != null && selected.primaryActionActive());
+        state.put("can_edit", selected != null && selected.canEdit());
+        state.put("can_delete", selected != null && selected.canDelete());
+        state.put("can_backup", selected != null && selected.canDelete());
+        state.put("can_recreate", selected != null && selected.canRecreate());
+    }
+
+    @Override
+    protected boolean onLuaAction(String action, LuaValue payload) {
+        if (!isInteractive() && !action.equals("back")) {
+            return true;
+        }
+
+        return switch (action) {
+            case "select" -> {
+                selectWorld(payload.checkint() - 1);
+                yield true;
+            }
+            case "join" -> {
+                joinSelectedWorld();
+                yield true;
+            }
+            case "join_index" -> {
+                selectWorld(payload.checkint() - 1);
+                joinSelectedWorld();
+                yield true;
+            }
+            case "create" -> {
+                createWorld();
+                yield true;
+            }
+            case "edit" -> {
+                editSelectedWorld();
+                yield true;
+            }
+            case "delete" -> {
+                deleteSelectedWorld();
+                yield true;
+            }
+            case "backup" -> {
+                backupSelectedWorld();
+                yield true;
+            }
+            case "recreate" -> {
+                recreateSelectedWorld();
+                yield true;
+            }
+            case "back" -> {
+                beginBackTransition();
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    @Override
+    protected void renderLuaCustom(String name, LuaValue[] args) {
+        if (!name.equals("world_icon") || args.length < 5) {
+            return;
+        }
+        int index = args[0].checkint() - 1;
+        if (index < 0 || index >= this.entries.size()) {
+            return;
+        }
+        renderWorldIcon(
+            this.entries.get(index),
+            (float)args[1].checkdouble(),
+            (float)args[2].checkdouble(),
+            (float)args[3].checkdouble(),
+            (float)args[4].checkdouble()
+        );
     }
 
     @Override
