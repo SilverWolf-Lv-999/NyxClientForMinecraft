@@ -1,13 +1,9 @@
 package io.github.seraphina.nyx.client.module.movement;
 
-import java.util.ArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.ClickEvent;
 import io.github.seraphina.nyx.client.events.impl.JumpEvent;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
-import io.github.seraphina.nyx.client.events.impl.PacketEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
 import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
@@ -24,11 +20,8 @@ import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
-import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
-import net.minecraft.network.syncher.EntityDataSerializers;
-import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -48,8 +41,6 @@ public class ElytraFly extends Module {
     private static final int GRIM_FALL_FLYING_READY_TICKS = 3;
     private static final int GRIM_ARMOR_FALL_FLYING_READY_TICKS = 1;
     private static final int GRIM_RESTORE_SLOT_DELAY_TICKS = 1;
-    private static final int SHARED_FLAGS_DATA_ID = 0;
-    private static final int FALL_FLYING_FLAG_MASK = 1 << 7;
     private static final long NANOS_PER_MILLISECOND = 1_000_000L;
     private static final long GRIM_ARMOR_EQUIP_TIMEOUT_NS = 1_500L * NANOS_PER_MILLISECOND;
     private static final long GRIM_ARMOR_FIREWORK_TIMEOUT_NS = 1_000L * NANOS_PER_MILLISECOND;
@@ -111,7 +102,6 @@ public class ElytraFly extends Module {
     private boolean grimArmorFlyReleaseJumpApplied;
     private boolean grimArmorFlyPressJumpForGlide;
     private boolean grimArmorFlySuppressMovementInput;
-    private final AtomicBoolean grimArmorFlyRestartRequested = new AtomicBoolean();
 
     @Override
     public void onEnable() {
@@ -135,37 +125,6 @@ public class ElytraFly extends Module {
         if (flyType.is(FlyType.GRIM_ARMOR_FLY)) {
             resetFireworkUseState(true);
             runGrimArmorFly(System.nanoTime());
-        }
-    }
-
-    @EventTarget
-    public void onPacketReceive(PacketEvent.Receive event) {
-        if (!flyType.is(FlyType.GRIM_ARMOR_FLY)
-                || !canRunGrimArmorFly()
-                || !mc.player.isFallFlying()
-                || !(event.getPacket() instanceof ClientboundSetEntityDataPacket packet)
-                || packet.id() != mc.player.getId()) {
-            return;
-        }
-
-        for (int i = 0; i < packet.packedItems().size(); i++) {
-            SynchedEntityData.DataValue<?> dataValue = packet.packedItems().get(i);
-            if (dataValue.id() != SHARED_FLAGS_DATA_ID
-                    || dataValue.serializer() != EntityDataSerializers.BYTE
-                    || !(dataValue.value() instanceof Byte flags)
-                    || (flags & FALL_FLYING_FLAG_MASK) != 0) {
-                continue;
-            }
-
-            ArrayList<SynchedEntityData.DataValue<?>> patchedItems = new ArrayList<>(packet.packedItems());
-            patchedItems.set(i, new SynchedEntityData.DataValue<>(
-                    dataValue.id(),
-                    EntityDataSerializers.BYTE,
-                    (byte) (flags | FALL_FLYING_FLAG_MASK)
-            ));
-            event.setPacket(new ClientboundSetEntityDataPacket(packet.id(), patchedItems));
-            grimArmorFlyRestartRequested.set(true);
-            return;
         }
     }
 
@@ -473,20 +432,14 @@ public class ElytraFly extends Module {
         }
 
         updateGrimArmorFlyFallFlyingTime(nowNs);
-        restartGrimArmorFlyIfRequested();
 
         Vector2f inputRotations = calculateGrimArmorFlyInputRotations();
         if (grimArmorFlyStage == GrimArmorFlyStage.IDLE) {
-            boolean restartRequested = grimArmorFlyRestartRequested.get();
-            if (!restartRequested && nowNs < grimArmorFlyNextCycleTimeNs) {
+            if (nowNs < grimArmorFlyNextCycleTimeNs) {
                 return;
             }
 
-            if ((!restartRequested && inputRotations == null)
-                    || !prepareGrimArmorFly(nowNs, restartRequested)) {
-                if (restartRequested) {
-                    abandonGrimArmorFlyRestart();
-                }
+            if (inputRotations == null || !prepareGrimArmorFly(nowNs)) {
                 return;
             }
         }
@@ -539,7 +492,7 @@ public class ElytraFly extends Module {
         }
     }
 
-    private boolean prepareGrimArmorFly(long nowNs, boolean restartRequested) {
+    private boolean prepareGrimArmorFly(long nowNs) {
         if (isWearingElytra() || !isChestArmorStack(getChestStack())) {
             return false;
         }
@@ -548,15 +501,13 @@ public class ElytraFly extends Module {
         int fireworkSlot = InventoryUtility.findHotbarSlot(Items.FIREWORK_ROCKET);
         int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
         if (!canHoldHotbarItem(elytraSlot, Items.ELYTRA)
-                || (!restartRequested && !canUseHotbarItem(fireworkSlot, Items.FIREWORK_ROCKET))
+                || !canUseHotbarItem(fireworkSlot, Items.FIREWORK_ROCKET)
                 || !InventoryUtility.isHotbarSlot(selectedSlot)) {
             return false;
         }
 
         grimArmorFlyElytraSlot = elytraSlot;
-        grimArmorFlyFireworkSlot = canUseHotbarItem(fireworkSlot, Items.FIREWORK_ROCKET)
-                ? fireworkSlot
-                : InventoryUtility.NOT_FOUND;
+        grimArmorFlyFireworkSlot = fireworkSlot;
         grimArmorFlyOriginalSelectedSlot = selectedSlot;
         grimArmorFlyOriginalChestStack = getChestStack().copy();
         grimArmorFlyBaseYaw = mc.player.getYRot();
@@ -564,21 +515,6 @@ public class ElytraFly extends Module {
         grimArmorFlyNextActionTimeNs = nowNs;
         setGrimArmorFlyStage(GrimArmorFlyStage.EQUIP_ELYTRA, nowNs);
         return true;
-    }
-
-    private void restartGrimArmorFlyIfRequested() {
-        if (!isWearingElytra()
-                || !canRunGrimArmorFlyAction()
-                || !grimArmorFlyRestartRequested.compareAndSet(true, false)) {
-            return;
-        }
-
-        mc.player.connection.send(new ServerboundPlayerCommandPacket(
-                mc.player,
-                ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
-        ));
-        mc.player.startFallFlying();
-        delayNextGrimArmorFlyAction();
     }
 
     private void runGrimArmorFlyEquipElytra(long nowNs) {
@@ -1110,14 +1046,6 @@ public class ElytraFly extends Module {
     }
 
     private void resetGrimArmorFlyState(boolean restoreSelectedSlot) {
-        resetGrimArmorFlyState(restoreSelectedSlot, true);
-    }
-
-    private void resetGrimArmorFlyState(boolean restoreSelectedSlot, boolean clearRestartRequest) {
-        if (clearRestartRequest) {
-            abandonGrimArmorFlyRestart();
-        }
-
         if (restoreSelectedSlot) {
             restoreGrimArmorFlySelectedSlot();
         }
@@ -1145,14 +1073,8 @@ public class ElytraFly extends Module {
 
     private void finishGrimArmorFlyCycle(boolean restoreSelectedSlot) {
         long nextCycleTimeNs = grimArmorFlyNextCycleTimeNs;
-        resetGrimArmorFlyState(restoreSelectedSlot, false);
+        resetGrimArmorFlyState(restoreSelectedSlot);
         grimArmorFlyNextCycleTimeNs = nextCycleTimeNs;
-    }
-
-    private void abandonGrimArmorFlyRestart() {
-        if (grimArmorFlyRestartRequested.getAndSet(false) && mc.player != null) {
-            mc.player.stopFallFlying();
-        }
     }
 
     private void restoreGrimArmorFlySelectedSlot() {
