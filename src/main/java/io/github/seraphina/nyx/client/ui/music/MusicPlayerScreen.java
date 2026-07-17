@@ -90,6 +90,7 @@ public class MusicPlayerScreen extends LuaScreen {
     private final List<Playlist> userPlaylists = new ArrayList<>();
     private final List<Song> visibleSongs = new ArrayList<>();
     private final Map<String, AlbumTexture> albumTextures = new ConcurrentHashMap<>();
+    private final Map<String, AlbumTexture> detailAlbumTextures = new ConcurrentHashMap<>();
     private final Map<IconButton, Float> buttonHoverProgress = new HashMap<>();
 
     private Page page = Page.HOME;
@@ -106,6 +107,7 @@ public class MusicPlayerScreen extends LuaScreen {
     private boolean qrPolling;
     private NeteaseMusicApi.QrLogin qrLogin;
     private volatile int qrLoginSerial;
+    private boolean detailOpen;
     private float scroll;
     private float maxScroll;
     private float panelX;
@@ -192,6 +194,18 @@ public class MusicPlayerScreen extends LuaScreen {
         List<LyricLine> lyrics = player.lyricsSnapshot();
         int lyricIndex = LyricLineProcessor.currentIndex(lyrics, player.positionMs());
         String lyric = lyricIndex >= 0 && lyricIndex < lyrics.size() ? lyrics.get(lyricIndex).text() : "";
+        int detailLyricIndex = lyrics.isEmpty() ? -1 : Math.max(0, Math.min(lyricIndex, lyrics.size() - 1));
+        List<Map<String, Object>> detailLyrics = new ArrayList<>();
+        if (detailLyricIndex >= 0) {
+            int start = Math.max(0, detailLyricIndex - 8);
+            int end = Math.min(lyrics.size(), detailLyricIndex + 9);
+            for (int index = start; index < end; index++) {
+                Map<String, Object> lyricState = new LinkedHashMap<>();
+                lyricState.put("index", index + 1);
+                lyricState.put("text", lyrics.get(index).text());
+                detailLyrics.add(lyricState);
+            }
+        }
 
         state.put("page", this.page.name().toLowerCase(Locale.ROOT));
         state.put("title", title());
@@ -215,12 +229,15 @@ public class MusicPlayerScreen extends LuaScreen {
         state.put("current_song", currentSong == null ? "No song selected" : currentSong.name());
         state.put("current_artist", currentSong == null ? player.status() : currentSong.displayArtist());
         state.put("current_cover", currentSong == null ? "" : currentSong.image());
+        state.put("has_current_song", currentSong != null);
         state.put("playing", player.isPlaying());
         state.put("position", player.positionMs());
         state.put("duration", player.totalDurationMs());
         state.put("progress", player.totalDurationMs() <= 0L
             ? 0.0F
             : clamp(player.positionMs() / (float)player.totalDurationMs(), 0.0F, 1.0F));
+        state.put("position_label", MusicPlaybackService.formatTime(player.positionMs()));
+        state.put("duration_label", MusicPlaybackService.formatTime(player.totalDurationMs()));
         state.put("time_label", MusicPlaybackService.formatTime(player.positionMs())
             + " / " + MusicPlaybackService.formatTime(player.totalDurationMs()));
         state.put("volume", player.volume());
@@ -228,6 +245,9 @@ public class MusicPlayerScreen extends LuaScreen {
         state.put("mode_label", player.playbackMode().label());
         state.put("mode_icon", modeIcon(player.playbackMode()).name().toLowerCase(Locale.ROOT));
         state.put("lyric", lyric == null || lyric.isBlank() ? "" : lyric);
+        state.put("detail_open", this.detailOpen && currentSong != null);
+        state.put("detail_lyric_index", detailLyricIndex + 1);
+        state.put("detail_lyrics", detailLyrics);
     }
 
     @Override
@@ -321,6 +341,27 @@ public class MusicPlayerScreen extends LuaScreen {
                 player.cyclePlaybackMode();
                 yield true;
             }
+            case "open_detail" -> {
+                this.detailOpen = player.currentSong() != null;
+                yield true;
+            }
+            case "close_detail" -> {
+                this.detailOpen = false;
+                yield true;
+            }
+            case "detail_block" -> true;
+            case "set_progress" -> {
+                LuaValue x = payload.get("x");
+                LuaValue width = payload.get("width");
+                if (x.isnumber() && width.isnumber() && width.checkdouble() > 0.0D) {
+                    player.seekTo(clamp(
+                        (float)((luaMouseX() - x.checkdouble()) / width.checkdouble()),
+                        0.0F,
+                        1.0F
+                    ));
+                }
+                yield true;
+            }
             case "set_volume" -> {
                 LuaValue x = payload.get("x");
                 LuaValue width = payload.get("width");
@@ -334,7 +375,11 @@ public class MusicPlayerScreen extends LuaScreen {
                 yield true;
             }
             case "back" -> {
-                onClose();
+                if (this.detailOpen) {
+                    this.detailOpen = false;
+                } else {
+                    onClose();
+                }
                 yield true;
             }
             default -> false;
@@ -345,6 +390,16 @@ public class MusicPlayerScreen extends LuaScreen {
     protected void renderLuaCustom(String name, LuaValue[] args) {
         if (name.equals("cover") && args.length >= 5) {
             renderCover(
+                args[0].optjstring(""),
+                (float)args[1].checkdouble(),
+                (float)args[2].checkdouble(),
+                (float)args[3].checkdouble(),
+                (float)args[4].checkdouble()
+            );
+            return;
+        }
+        if (name.equals("detail_cover") && args.length >= 5) {
+            renderDetailCover(
                 args[0].optjstring(""),
                 (float)args[1].checkdouble(),
                 (float)args[2].checkdouble(),
@@ -1221,9 +1276,33 @@ public class MusicPlayerScreen extends LuaScreen {
             return;
         }
 
-        AlbumTexture albumTexture = albumTextures.computeIfAbsent(url, this::requestAlbumTexture);
+        AlbumTexture albumTexture = albumTextures.computeIfAbsent(url, key -> requestAlbumTexture(key, 96));
         if (albumTexture.texture != null) {
             Render2DUtility.drawRoundedTexture(albumTexture.texture.getTextureView(), x, y, size, size, radius);
+            Render2DUtility.drawOutlineRoundedRect(x, y, size, size, radius, 1.0F, BORDER_SOFT);
+            return;
+        }
+
+        drawCoverPlaceholder(x, y, size, radius);
+    }
+
+    private void renderDetailCover(String url, float x, float y, float size, float radius) {
+        Render2DUtility.drawRoundedRect(x, y, size, size, radius, CONTROL);
+        if (url == null || url.isBlank()) {
+            drawCoverPlaceholder(x, y, size, radius);
+            return;
+        }
+
+        AlbumTexture detailTexture = detailAlbumTextures.computeIfAbsent(url, key -> requestAlbumTexture(key, 384));
+        if (detailTexture.texture != null) {
+            Render2DUtility.drawRoundedTexture(detailTexture.texture.getTextureView(), x, y, size, size, radius);
+            Render2DUtility.drawOutlineRoundedRect(x, y, size, size, radius, 1.0F, BORDER_SOFT);
+            return;
+        }
+
+        AlbumTexture thumbnail = albumTextures.get(url);
+        if (thumbnail != null && thumbnail.texture != null) {
+            Render2DUtility.drawRoundedTexture(thumbnail.texture.getTextureView(), x, y, size, size, radius);
             Render2DUtility.drawOutlineRoundedRect(x, y, size, size, radius, 1.0F, BORDER_SOFT);
             return;
         }
@@ -1238,9 +1317,9 @@ public class MusicPlayerScreen extends LuaScreen {
         Render2DUtility.drawOutlineRoundedRect(x, y, size, size, radius, 1.0F, BORDER_SOFT);
     }
 
-    private AlbumTexture requestAlbumTexture(String url) {
+    private AlbumTexture requestAlbumTexture(String url, int textureSize) {
         AlbumTexture albumTexture = new AlbumTexture();
-        CompletableFuture.supplyAsync(() -> downloadAlbumTexture(url), IO).whenComplete((image, throwable) -> {
+        CompletableFuture.supplyAsync(() -> downloadAlbumTexture(url, textureSize), IO).whenComplete((image, throwable) -> {
             if (throwable != null || image == null) {
                 albumTexture.failed = true;
                 return;
@@ -1254,14 +1333,14 @@ public class MusicPlayerScreen extends LuaScreen {
     }
 
     @Nullable
-    private static BufferedImage downloadAlbumTexture(String url) {
+    private static BufferedImage downloadAlbumTexture(String url, int textureSize) {
         try {
             byte[] bytes = url.startsWith("data:image/") ? decodeDataImage(url) : WebUtility.getBytes(url);
             BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
             if (image == null) {
                 return null;
             }
-            return scaleImage(image, 96);
+            return scaleImage(image, textureSize);
         } catch (Exception ignored) {
             return null;
         }

@@ -202,6 +202,30 @@ public final class MusicPlaybackService implements StreamPlayerListener {
         });
     }
 
+    public void seekTo(float progress) {
+        float safeProgress = Math.max(0.0F, Math.min(1.0F, progress));
+        executor.execute(() -> {
+            if (currentFile == null || totalDurationMs <= 0L || changingSong) {
+                return;
+            }
+
+            try {
+                int durationSeconds = player.getDurationInSeconds();
+                if (durationSeconds <= 0) {
+                    return;
+                }
+                int targetSeconds = Math.min(
+                    durationSeconds - 1,
+                    (int)Math.floor(durationSeconds * safeProgress)
+                );
+                player.seekTo(targetSeconds);
+                positionMs = Math.min(totalDurationMs - 1L, Math.round(totalDurationMs * safeProgress));
+            } catch (Exception exception) {
+                NyxClient.LOGGER.warn("Failed to seek music", exception);
+            }
+        });
+    }
+
     public Song currentSong() {
         return currentSong;
     }
