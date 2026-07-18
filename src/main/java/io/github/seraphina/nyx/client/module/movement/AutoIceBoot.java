@@ -78,6 +78,13 @@ public class AutoIceBoot extends Module {
     private static final double STRAIGHT_BIAS = 1.5D;
     private static final double FORWARD_BIAS = 1.0D;
     private static final double SCORE_EPSILON = 1.0E-6D;
+    private static final double MIN_GUIDANCE_SPEED = 0.12D;
+    private static final double MAX_GUIDANCE_YAW_STEP = 24.0D;
+    private static final double GUIDANCE_LOCK_ANGLE = 115.0D;
+    private static final double GUIDED_PROGRESS_WEIGHT = 7.0D;
+    private static final double REVERSE_PROGRESS_PENALTY = 18.0D;
+    private static final double MISALIGNED_FORWARD_YAW = 100.0D;
+    private static final double MISALIGNED_FORWARD_PENALTY = 0.11D;
 
     private static final PlanningProfile AUTO_PROFILE = new PlanningProfile(
             0.50D,
@@ -101,6 +108,8 @@ public class AutoIceBoot extends Module {
     public final IntValue beamWidth = ValueBuild.intSetting("beam width", 30, 9, 60, 3, this);
 
     private Action lastAction = Action.FORWARD_STRAIGHT;
+    private double travelHeadingYaw;
+    private boolean hasTravelHeading;
     private final GpuPlanner gpuPlanner = new GpuPlanner();
 
     @Override
@@ -201,9 +210,17 @@ public class AutoIceBoot extends Module {
         double angularVelocity = Mth.wrapDegrees(boat.getYRot() - boat.yRotO);
         angularVelocity = Mth.clamp(angularVelocity, -40.0D, 40.0D);
         double speed = Math.hypot(movement.x, movement.z);
+        double initialTravelHeadingYaw = currentTravelHeading(boat, movement, speed);
         int horizon = adaptivePredictionTicks(speed, initialSurface.friction());
 
-        Action gpuAction = gpuPlanner.chooseAction(context, initialSurface, movement, angularVelocity, horizon);
+        Action gpuAction = gpuPlanner.chooseAction(
+                context,
+                initialSurface,
+                movement,
+                angularVelocity,
+                initialTravelHeadingYaw,
+                horizon
+        );
         if (gpuAction != null) {
             return gpuAction;
         }
@@ -215,6 +232,7 @@ public class AutoIceBoot extends Module {
                 movement.z,
                 boat.getYRot(),
                 angularVelocity,
+                initialTravelHeadingYaw,
                 initialSurface,
                 null,
                 lastAction,
@@ -314,6 +332,7 @@ public class AutoIceBoot extends Module {
         double propulsion = action.propulsionAcceleration();
         velocityX += Math.sin(-yawRadians) * propulsion;
         velocityZ += Math.cos(yawRadians) * propulsion;
+        double nextTravelHeadingYaw = nextTravelHeading(state.travelHeadingYaw(), velocityX, velocityZ);
 
         double nextX = state.x() + velocityX;
         double nextZ = state.z() + velocityZ;
@@ -356,7 +375,8 @@ public class AutoIceBoot extends Module {
                 velocityX,
                 velocityZ,
                 yaw,
-                angularVelocity
+                angularVelocity,
+                nextTravelHeadingYaw
         );
 
         return new StepResult(
@@ -367,6 +387,7 @@ public class AutoIceBoot extends Module {
                         velocityZ,
                         yaw,
                         angularVelocity,
+                        nextTravelHeadingYaw,
                         surface,
                         firstAction,
                         action,
@@ -386,7 +407,8 @@ public class AutoIceBoot extends Module {
             double velocityX,
             double velocityZ,
             double yaw,
-            double angularVelocity
+            double angularVelocity,
+            double travelHeadingYaw
     ) {
         double speed = Math.hypot(velocityX, velocityZ);
         double yawRadians = Math.toRadians(yaw);
@@ -395,15 +417,24 @@ public class AutoIceBoot extends Module {
                 ? Math.toDegrees(Math.atan2(-velocityX, velocityZ))
                 : yaw;
         double driftAngle = Math.abs(Mth.wrapDegrees(yaw - velocityYaw));
+        double travelYawRadians = Math.toRadians(travelHeadingYaw);
+        double guidedVelocity = velocityX * Math.sin(-travelYawRadians) + velocityZ * Math.cos(travelYawRadians);
+        double headingYawDelta = Math.abs(Mth.wrapDegrees(yaw - travelHeadingYaw));
+        double headingAlignment = Math.max(0.0D, Math.cos(Math.toRadians(headingYawDelta)));
 
         double score = SURVIVAL_SCORE;
         score += minimumCoverage * profile.coverageWeight();
         score += minimumMargin * profile.marginWeight();
         score += stayedCentered ? 10.0D : 0.0D;
         score += speed * profile.speedWeight();
-        score += Math.max(0.0D, forwardVelocity) * 2.0D;
+        score += Math.max(0.0D, forwardVelocity) * 2.0D * headingAlignment;
+        score += Math.max(0.0D, guidedVelocity) * GUIDED_PROGRESS_WEIGHT;
+        score -= Math.max(0.0D, -guidedVelocity) * (REVERSE_PROGRESS_PENALTY + speed * 4.0D);
         score -= Math.abs(angularVelocity) * 0.16D;
         score -= driftAngle * (0.03D + speed * 0.025D);
+        if (action.throttle() == Throttle.FORWARD && headingYawDelta > MISALIGNED_FORWARD_YAW) {
+            score -= (headingYawDelta - MISALIGNED_FORWARD_YAW) * MISALIGNED_FORWARD_PENALTY;
+        }
         score -= speed * speed * Math.pow(1.0D - minimumMargin, 2.0D) * 2.5D;
         score -= action.steer() == Steer.STRAIGHT ? 0.0D : 0.35D;
         score -= action.throttle().actionPenalty();
@@ -419,6 +450,40 @@ public class AutoIceBoot extends Module {
         }
 
         return score;
+    }
+
+    private double currentTravelHeading(AbstractBoat boat, Vec3 movement, double speed) {
+        if (!hasTravelHeading) {
+            travelHeadingYaw = speed >= MIN_GUIDANCE_SPEED ? yawFromVelocity(movement.x, movement.z) : boat.getYRot();
+            hasTravelHeading = true;
+            return travelHeadingYaw;
+        }
+
+        if (speed >= MIN_GUIDANCE_SPEED) {
+            travelHeadingYaw = updateTravelHeading(travelHeadingYaw, movement.x, movement.z);
+        }
+        return travelHeadingYaw;
+    }
+
+    private static double nextTravelHeading(double currentHeadingYaw, double velocityX, double velocityZ) {
+        double speed = Math.hypot(velocityX, velocityZ);
+        return speed >= MIN_GUIDANCE_SPEED
+                ? updateTravelHeading(currentHeadingYaw, velocityX, velocityZ)
+                : currentHeadingYaw;
+    }
+
+    private static double updateTravelHeading(double currentHeadingYaw, double velocityX, double velocityZ) {
+        double velocityYaw = yawFromVelocity(velocityX, velocityZ);
+        double delta = Mth.wrapDegrees(velocityYaw - currentHeadingYaw);
+        if (Math.abs(delta) > GUIDANCE_LOCK_ANGLE) {
+            return currentHeadingYaw;
+        }
+
+        return Mth.wrapDegrees(currentHeadingYaw + Mth.clamp(delta, -MAX_GUIDANCE_YAW_STEP, MAX_GUIDANCE_YAW_STEP));
+    }
+
+    private static double yawFromVelocity(double velocityX, double velocityZ) {
+        return Math.toDegrees(Math.atan2(-velocityX, velocityZ));
     }
 
     private List<SimState> selectBeam(List<SimState> candidates, int limit) {
@@ -649,6 +714,7 @@ public class AutoIceBoot extends Module {
 
     private void resetSteering() {
         lastAction = Action.FORWARD_STRAIGHT;
+        hasTravelHeading = false;
     }
 
     public enum ServerType {
@@ -757,8 +823,8 @@ public class AutoIceBoot extends Module {
     }
 
     private final class GpuPlanner {
-        private static final int STATE_STRIDE = 10;
-        private static final int OUTPUT_STRIDE = 15;
+        private static final int STATE_STRIDE = 11;
+        private static final int OUTPUT_STRIDE = 16;
         private static final int CELL_STRIDE = 4;
         private static final int WORKGROUP_SIZE = 64;
         private static final String COMPUTE_SOURCE = """
@@ -811,6 +877,13 @@ public class AutoIceBoot extends Module {
                 const float COLLISION_SAFETY_MARGIN = 0.035;
                 const float COLLISION_SPEED_MARGIN = 0.035;
                 const float MAX_COLLISION_SAFETY_MARGIN = 0.16;
+                const float MIN_GUIDANCE_SPEED = 0.12;
+                const float MAX_GUIDANCE_YAW_STEP = 24.0;
+                const float GUIDANCE_LOCK_ANGLE = 115.0;
+                const float GUIDED_PROGRESS_WEIGHT = 7.0;
+                const float REVERSE_PROGRESS_PENALTY = 18.0;
+                const float MISALIGNED_FORWARD_YAW = 100.0;
+                const float MISALIGNED_FORWARD_PENALTY = 0.11;
 
                 struct Surface {
                     float coverage;
@@ -956,25 +1029,41 @@ public class AutoIceBoot extends Module {
                     return sa != 0 && sb != 0 && sa != sb;
                 }
 
+                float nextTravelHeading(float currentHeadingYaw, float vx, float vz) {
+                    if (length(vec2(vx, vz)) < MIN_GUIDANCE_SPEED) {
+                        return currentHeadingYaw;
+                    }
+
+                    float velocityYaw = degrees(atan(-vx, vz));
+                    float delta = wrapDegrees(velocityYaw - currentHeadingYaw);
+                    if (abs(delta) > GUIDANCE_LOCK_ANGLE) {
+                        return currentHeadingYaw;
+                    }
+
+                    return wrapDegrees(currentHeadingYaw + clamp(delta, -MAX_GUIDANCE_YAW_STEP, MAX_GUIDANCE_YAW_STEP));
+                }
+
                 void writeCandidate(uint gid, float x, float z, float vx, float vz, float yaw, float angularVelocity,
+                                    float travelHeadingYaw,
                                     Surface surface, float firstAction, float lastAction, float score, float valid,
                                     float failurePenalty) {
-                    uint base = gid * 15u;
+                    uint base = gid * 16u;
                     outputs[base] = x;
                     outputs[base + 1u] = z;
                     outputs[base + 2u] = vx;
                     outputs[base + 3u] = vz;
                     outputs[base + 4u] = yaw;
                     outputs[base + 5u] = angularVelocity;
-                    outputs[base + 6u] = surface.friction;
-                    outputs[base + 7u] = surface.coverage;
-                    outputs[base + 8u] = surface.margin;
-                    outputs[base + 9u] = surface.centerIce;
-                    outputs[base + 10u] = firstAction;
-                    outputs[base + 11u] = lastAction;
-                    outputs[base + 12u] = score;
-                    outputs[base + 13u] = valid;
-                    outputs[base + 14u] = failurePenalty;
+                    outputs[base + 6u] = travelHeadingYaw;
+                    outputs[base + 7u] = surface.friction;
+                    outputs[base + 8u] = surface.coverage;
+                    outputs[base + 9u] = surface.margin;
+                    outputs[base + 10u] = surface.centerIce;
+                    outputs[base + 11u] = firstAction;
+                    outputs[base + 12u] = lastAction;
+                    outputs[base + 13u] = score;
+                    outputs[base + 14u] = valid;
+                    outputs[base + 15u] = failurePenalty;
                 }
 
                 void main() {
@@ -986,17 +1075,18 @@ public class AutoIceBoot extends Module {
 
                     int stateIndex = int(gid / 9u);
                     int action = int(gid - uint(stateIndex * 9));
-                    int base = stateIndex * 10;
+                    int base = stateIndex * 11;
                     float x = states[base];
                     float z = states[base + 1];
                     float vx = states[base + 2];
                     float vz = states[base + 3];
                     float yaw = states[base + 4];
                     float angularVelocity = states[base + 5];
-                    float friction = clamp(states[base + 6], MIN_PHYSICS_FRICTION, MAX_PHYSICS_FRICTION);
-                    float firstAction = states[base + 7] < 0.0 ? float(action) : states[base + 7];
-                    int lastAction = int(states[base + 8] + 0.5);
-                    float previousScore = states[base + 9];
+                    float travelHeadingYaw = states[base + 6];
+                    float friction = clamp(states[base + 7], MIN_PHYSICS_FRICTION, MAX_PHYSICS_FRICTION);
+                    float firstAction = states[base + 8] < 0.0 ? float(action) : states[base + 8];
+                    int lastAction = int(states[base + 9] + 0.5);
+                    float previousScore = states[base + 10];
 
                     float nextVx = vx * friction;
                     float nextVz = vz * friction;
@@ -1006,6 +1096,7 @@ public class AutoIceBoot extends Module {
                     float propulsion = propulsionOf(action);
                     nextVx += sin(-yawRadians) * propulsion;
                     nextVz += cos(yawRadians) * propulsion;
+                    float nextTravelHeadingYaw = nextTravelHeading(travelHeadingYaw, nextVx, nextVz);
 
                     float nextX = x + nextVx;
                     float nextZ = z + nextVz;
@@ -1025,6 +1116,7 @@ public class AutoIceBoot extends Module {
                         if (!isDriveable(surface)) {
                             float uncovered = 1.0 - surface.coverage;
                             writeCandidate(gid, nextX, nextZ, nextVx, nextVz, nextYaw, nextAngularVelocity,
+                                    nextTravelHeadingYaw,
                                     surface, firstAction, float(action), previousScore - OFF_ICE_FAILURE_PENALTY - uncovered * 180.0,
                                     0.0, OFF_ICE_FAILURE_PENALTY + uncovered * 180.0);
                             return;
@@ -1033,6 +1125,7 @@ public class AutoIceBoot extends Module {
 
                     if (sweptCollision(x, z, nextX, nextZ)) {
                         writeCandidate(gid, nextX, nextZ, nextVx, nextVz, nextYaw, nextAngularVelocity,
+                                nextTravelHeadingYaw,
                                 surface, firstAction, float(action), previousScore - COLLISION_FAILURE_PENALTY,
                                 0.0, COLLISION_FAILURE_PENALTY);
                         return;
@@ -1042,14 +1135,23 @@ public class AutoIceBoot extends Module {
                     float forwardVelocity = nextVx * sin(-yawRadians) + nextVz * cos(yawRadians);
                     float velocityYaw = speed > SCORE_EPSILON ? degrees(atan(-nextVx, nextVz)) : nextYaw;
                     float driftAngle = abs(wrapDegrees(nextYaw - velocityYaw));
+                    float travelYawRadians = radians(nextTravelHeadingYaw);
+                    float guidedVelocity = nextVx * sin(-travelYawRadians) + nextVz * cos(travelYawRadians);
+                    float headingYawDelta = abs(wrapDegrees(nextYaw - nextTravelHeadingYaw));
+                    float headingAlignment = max(0.0, cos(radians(headingYawDelta)));
                     float score = SURVIVAL_SCORE;
                     score += minimumCoverage * uCoverageWeight;
                     score += minimumMargin * uMarginWeight;
                     score += stayedCentered ? 10.0 : 0.0;
                     score += speed * uSpeedWeight;
-                    score += max(0.0, forwardVelocity) * 2.0;
+                    score += max(0.0, forwardVelocity) * 2.0 * headingAlignment;
+                    score += max(0.0, guidedVelocity) * GUIDED_PROGRESS_WEIGHT;
+                    score -= max(0.0, -guidedVelocity) * (REVERSE_PROGRESS_PENALTY + speed * 4.0);
                     score -= abs(nextAngularVelocity) * 0.16;
                     score -= driftAngle * (0.03 + speed * 0.025);
+                    if (throttleOf(action) == 0 && headingYawDelta > MISALIGNED_FORWARD_YAW) {
+                        score -= (headingYawDelta - MISALIGNED_FORWARD_YAW) * MISALIGNED_FORWARD_PENALTY;
+                    }
                     score -= speed * speed * pow(1.0 - minimumMargin, 2.0) * 2.5;
                     score -= steerOf(action) == 0 ? 0.0 : 0.35;
                     score -= actionPenalty(action);
@@ -1058,6 +1160,7 @@ public class AutoIceBoot extends Module {
                     score -= oppositeSteer(action, lastAction) ? 0.65 : 0.0;
 
                     writeCandidate(gid, nextX, nextZ, nextVx, nextVz, nextYaw, nextAngularVelocity,
+                            nextTravelHeadingYaw,
                             surface, firstAction, float(action), previousScore + score, 1.0, 0.0);
                 }
                 """;
@@ -1075,6 +1178,7 @@ public class AutoIceBoot extends Module {
                 SurfaceMetrics initialSurface,
                 Vec3 movement,
                 double angularVelocity,
+                double initialTravelHeadingYaw,
                 int horizon
         ) {
             if (disabled || !RenderSystem.isOnRenderThread() || !ensureReady()) {
@@ -1085,8 +1189,23 @@ public class AutoIceBoot extends Module {
                 double speed = Math.hypot(movement.x, movement.z);
                 GpuGrid grid = buildGrid(context, speed, horizon);
                 uploadGrid(grid);
-                Action action = runPlan(context, initialSurface, movement, angularVelocity, horizon, grid);
-                return isFirstStepSafe(context, initialSurface, movement, angularVelocity, action) ? action : null;
+                Action action = runPlan(
+                        context,
+                        initialSurface,
+                        movement,
+                        angularVelocity,
+                        initialTravelHeadingYaw,
+                        horizon,
+                        grid
+                );
+                return isFirstStepSafe(
+                        context,
+                        initialSurface,
+                        movement,
+                        angularVelocity,
+                        initialTravelHeadingYaw,
+                        action
+                ) ? action : null;
             } catch (RuntimeException ignored) {
                 disabled = true;
                 close();
@@ -1154,6 +1273,7 @@ public class AutoIceBoot extends Module {
                 SurfaceMetrics initialSurface,
                 Vec3 movement,
                 double angularVelocity,
+                double initialTravelHeadingYaw,
                 int horizon,
                 GpuGrid grid
         ) {
@@ -1165,6 +1285,7 @@ public class AutoIceBoot extends Module {
                     movement.z,
                     boat.getYRot(),
                     angularVelocity,
+                    initialTravelHeadingYaw,
                     initialSurface,
                     null,
                     lastAction,
@@ -1232,6 +1353,7 @@ public class AutoIceBoot extends Module {
                 input.put((float) state.velocityZ());
                 input.put((float) state.yaw());
                 input.put((float) state.angularVelocity());
+                input.put((float) state.travelHeadingYaw());
                 input.put((float) state.surface().friction());
                 input.put(state.firstAction() == null ? -1.0F : (float) state.firstAction().ordinal());
                 input.put((float) state.lastAction().ordinal());
@@ -1263,13 +1385,13 @@ public class AutoIceBoot extends Module {
             for (int i = 0; i < candidateCount; i++) {
                 int base = i * OUTPUT_STRIDE;
                 SurfaceMetrics surface = new SurfaceMetrics(
-                        output.get(base + 7),
                         output.get(base + 8),
-                        output.get(base + 6),
-                        output.get(base + 9) > 0.5F
+                        output.get(base + 9),
+                        output.get(base + 7),
+                        output.get(base + 10) > 0.5F
                 );
-                int firstAction = Mth.clamp(Math.round(output.get(base + 10)), 0, Action.values().length - 1);
-                int lastAction = Mth.clamp(Math.round(output.get(base + 11)), 0, Action.values().length - 1);
+                int firstAction = Mth.clamp(Math.round(output.get(base + 11)), 0, Action.values().length - 1);
+                int lastAction = Mth.clamp(Math.round(output.get(base + 12)), 0, Action.values().length - 1);
                 candidates.add(new GpuCandidate(
                         output.get(base),
                         output.get(base + 1),
@@ -1277,11 +1399,12 @@ public class AutoIceBoot extends Module {
                         output.get(base + 3),
                         output.get(base + 4),
                         output.get(base + 5),
+                        output.get(base + 6),
                         surface,
                         Action.values()[firstAction],
                         Action.values()[lastAction],
-                        output.get(base + 12),
-                        output.get(base + 13) > 0.5F
+                        output.get(base + 13),
+                        output.get(base + 14) > 0.5F
                 ));
             }
 
@@ -1383,6 +1506,7 @@ public class AutoIceBoot extends Module {
                 SurfaceMetrics initialSurface,
                 Vec3 movement,
                 double angularVelocity,
+                double initialTravelHeadingYaw,
                 Action action
         ) {
             if (action == null) {
@@ -1397,6 +1521,7 @@ public class AutoIceBoot extends Module {
                     movement.z,
                     boat.getYRot(),
                     angularVelocity,
+                    initialTravelHeadingYaw,
                     initialSurface,
                     null,
                     lastAction,
@@ -1458,6 +1583,7 @@ public class AutoIceBoot extends Module {
             double velocityZ,
             double yaw,
             double angularVelocity,
+            double travelHeadingYaw,
             SurfaceMetrics surface,
             Action firstAction,
             Action lastAction,
@@ -1472,6 +1598,7 @@ public class AutoIceBoot extends Module {
                     velocityZ,
                     yaw,
                     angularVelocity,
+                    travelHeadingYaw,
                     surface,
                     firstAction,
                     lastAction,
@@ -1526,6 +1653,7 @@ public class AutoIceBoot extends Module {
             double velocityZ,
             double yaw,
             double angularVelocity,
+            double travelHeadingYaw,
             SurfaceMetrics surface,
             Action firstAction,
             Action lastAction,
