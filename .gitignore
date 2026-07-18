@@ -4,4 +4,6 @@ build/
 run/
 run-temp/
 run-data/
-push.bat
+push.bat/
+src/main/cpp/cmake-build-debug/
+src/main/cpp/.idea/

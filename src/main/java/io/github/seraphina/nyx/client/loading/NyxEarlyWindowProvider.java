@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.loading;
 
 import joptsimple.OptionParser;
+import io.github.seraphina.nyx.client.utility.SeraNative;
 import net.neoforged.fml.ModLoadingIssue;
 import net.neoforged.fml.earlydisplay.DisplayWindow;
 import net.neoforged.fml.earlydisplay.error.ErrorDisplay;
@@ -109,6 +110,9 @@ public final class NyxEarlyWindowProvider extends DisplayWindow {
 
     @Override
     public void initialize(ProgramArgs arguments) {
+        LOGGER.info("Sera native high-performance GPU hint {}", SeraNative.loadStatus());
+        LOGGER.info("Native high-performance GPU request status {}", SeraNative.requestNativeHighPerformanceGpu());
+        LOGGER.info("Windows high-performance GPU preference status {}", SeraNative.ensureHighPerformanceGpuPreference());
         NyxEarlyLocatedPathCleaner.removeNyxModPathsFromFmlLocated("immediate window provider");
 
         OptionParser parser = new OptionParser();

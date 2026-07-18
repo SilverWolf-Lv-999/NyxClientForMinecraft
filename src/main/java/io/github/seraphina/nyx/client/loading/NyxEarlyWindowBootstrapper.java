@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.loading;
 
+import io.github.seraphina.nyx.client.utility.SeraNative;
 import net.neoforged.fml.loading.FMLConfig;
 import net.neoforged.neoforgespi.earlywindow.GraphicsBootstrapper;
 import org.slf4j.Logger;
@@ -15,6 +16,9 @@ public final class NyxEarlyWindowBootstrapper implements GraphicsBootstrapper {
 
     @Override
     public void bootstrap(String[] arguments) {
+        LOGGER.info("Sera native high-performance GPU hint {}", SeraNative.loadStatus());
+        LOGGER.info("Native high-performance GPU request status {}", SeraNative.requestNativeHighPerformanceGpu());
+        LOGGER.info("Windows high-performance GPU preference status {}", SeraNative.ensureHighPerformanceGpuPreference());
         if (Boolean.getBoolean("nyxclient.skipEarlyWindowProvider")) {
             return;
         }

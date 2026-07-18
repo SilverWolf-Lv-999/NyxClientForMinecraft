@@ -147,7 +147,7 @@ dependencies {
 
     runtimeOnly "maven.modrinth:entityculling:1.10.5"
     runtimeOnly "maven.modrinth:immediatelyfast:1.14.3+1.21.11-neoforge"
-    runtimeOnly "maven.modrinth:distanthorizons:3.2.0-b-1.21.11"
+//    runtimeOnly "maven.modrinth:distanthorizons:3.2.0-b-1.21.11"
     runtimeOnly "maven.modrinth:packet-fixer:3.3.5"
     runtimeOnly "maven.modrinth:chunky:1.4.54"
 
@@ -178,8 +178,126 @@ def bundledNodeVersion = '22.13.1'
 def bundledMusicServiceDir = layout.buildDirectory.dir('generated/resources/neteaseMusicService')
 def bundledMusicServiceAssets = bundledMusicServiceDir.map { it.dir('assets/nyxclient/music-service') }
 def installedNeteaseMusicApiDir = layout.buildDirectory.dir('neteaseMusicService/api')
+def bundledNativeDir = layout.buildDirectory.dir('generated/resources/seraNative')
+def nativeBuildDir = layout.buildDirectory.dir('seraNative/cmake')
+def clionNativeBuildDir = file('src/main/cpp/cmake-build-debug')
+def bundledClionDir = file('D:/tools/JetBrains/CLion 2025.3.3')
 def npmExecutable = providers.provider {
     org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npm.cmd' : 'npm'
+}
+def findExistingExecutable = { List<String> candidates ->
+    candidates.find { it != null && file(it).isFile() }
+}
+def cmakeExecutable = providers.provider {
+    def configured = providers.gradleProperty('nyx.cmake').orNull ?: System.getenv('NYX_CMAKE')
+    def bundled = findExistingExecutable([
+        new File(bundledClionDir, 'bin/cmake/win/x64/bin/cmake.exe').absolutePath,
+        new File(bundledClionDir, 'bin/cmake/cygwin/x64/bin/cmake.exe').absolutePath
+    ])
+    configured ?: bundled ?: (org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'cmake.exe' : 'cmake')
+}
+def ninjaExecutable = providers.provider {
+    providers.gradleProperty('nyx.ninja').orNull ?: System.getenv('NYX_NINJA') ?: findExistingExecutable([
+        new File(bundledClionDir, 'bin/ninja/win/x64/ninja.exe').absolutePath,
+        new File(bundledClionDir, 'bin/ninja/cygwin/x64/ninja.exe').absolutePath
+    ])
+}
+def mingwCCompiler = providers.provider {
+    providers.gradleProperty('nyx.cc').orNull ?: System.getenv('NYX_CC') ?: findExistingExecutable([
+        new File(bundledClionDir, 'bin/mingw/bin/gcc.exe').absolutePath
+    ])
+}
+def mingwCxxCompiler = providers.provider {
+    providers.gradleProperty('nyx.cxx').orNull ?: System.getenv('NYX_CXX') ?: findExistingExecutable([
+        new File(bundledClionDir, 'bin/mingw/bin/g++.exe').absolutePath
+    ])
+}
+def nativePlatformId = providers.provider {
+    def os = org.gradle.internal.os.OperatingSystem.current()
+    def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT).contains('64') ? 'x64' : 'x86'
+    if (os.isWindows()) {
+        return "windows-${arch}"
+    }
+    if (os.isMacOsX()) {
+        return "macos-${arch}"
+    }
+    return "linux-${arch}"
+}
+
+def isCommandAvailable = { String command ->
+    if (file(command).isFile()) {
+        return true
+    }
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine command, '--version'
+            standardOutput = stdout
+            errorOutput = stdout
+            ignoreExitValue = true
+        }.exitValue == 0
+    } catch (Exception ignored) {
+        false
+    }
+}
+
+tasks.register('configureSeraNative', Exec) {
+    onlyIf { isCommandAvailable(cmakeExecutable.get()) }
+    inputs.files fileTree('src/main/cpp')
+    outputs.dir nativeBuildDir
+
+    def args = [
+        cmakeExecutable.get(),
+        '-S', file('src/main/cpp').absolutePath,
+        '-B', nativeBuildDir.get().asFile.absolutePath,
+        '-DCMAKE_BUILD_TYPE=Release'
+    ]
+    if (ninjaExecutable.get() != null) {
+        args.addAll('-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=${ninjaExecutable.get()}")
+    }
+    if (mingwCCompiler.get() != null) {
+        args.add("-DCMAKE_C_COMPILER=${mingwCCompiler.get()}")
+    }
+    if (mingwCxxCompiler.get() != null) {
+        args.add("-DCMAKE_CXX_COMPILER=${mingwCxxCompiler.get()}")
+    }
+    commandLine args
+}
+
+tasks.register('buildSeraNative', Exec) {
+    dependsOn tasks.named('configureSeraNative')
+    onlyIf { isCommandAvailable(cmakeExecutable.get()) }
+    inputs.files fileTree('src/main/cpp')
+    outputs.dir nativeBuildDir
+
+    commandLine cmakeExecutable.get(),
+        '--build', nativeBuildDir.get().asFile.absolutePath,
+        '--config', 'Release'
+}
+
+tasks.register('packageSeraNative', Copy) {
+    if (providers.gradleProperty('nyx.buildNative').map { it.toBoolean() }.getOrElse(false)) {
+        dependsOn tasks.named('buildSeraNative')
+    }
+    from(nativeBuildDir) {
+        include '**/sera_native.dll'
+        include '**/libsera_native.dll'
+        include '**/libsera_native.so'
+        include '**/libsera_native.dylib'
+        eachFile { details ->
+            details.path = "assets/nyxclient/native/${nativePlatformId.get()}/${details.name}"
+        }
+        includeEmptyDirs = false
+    }
+    from(clionNativeBuildDir) {
+        include '**/sera_native.dll'
+        include '**/libsera_native.dll'
+        eachFile { details ->
+            details.path = "assets/nyxclient/native/${nativePlatformId.get()}/${details.name}"
+        }
+        includeEmptyDirs = false
+    }
+    into bundledNativeDir
 }
 
 tasks.register('installNeteaseMusicApi', Exec) {
@@ -256,9 +374,11 @@ tasks.register('downloadBundledNode') {
 tasks.named('processResources') {
     dependsOn tasks.named('packageNeteaseMusicApi')
     dependsOn tasks.named('downloadBundledNode')
+    dependsOn tasks.named('packageSeraNative')
 }
 
 sourceSets.main.resources.srcDir bundledMusicServiceDir
+sourceSets.main.resources.srcDir bundledNativeDir
 
 // This block of code expands all declared replace properties in the specified resource targets.
 // A missing property will result in an error. Properties are expanded using ${} Groovy notation.
