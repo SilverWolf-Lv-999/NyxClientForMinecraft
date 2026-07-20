@@ -40,6 +40,7 @@ public class Client extends Module {
 
     public enum ClickGuiCategory {
         SERAPHINA,
-        JELLO_FOR_SIGMA
+        JELLO_FOR_SIGMA,
+        ARRAY_LIST
     }
 }

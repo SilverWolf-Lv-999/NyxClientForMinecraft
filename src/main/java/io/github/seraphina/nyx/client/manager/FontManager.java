@@ -17,6 +17,9 @@ import java.util.Optional;
 public final class FontManager {
     public static final float DEFAULT_FONT_SIZE = 18.0F;
     private static final String CLICK_GUI_FONT_RESOURCE = "/assets/nyxclient/fonts/MapleMono-CN-Medium.ttf";
+    private static final String ARRAY_LIST_REGULAR_FONT_RESOURCE = "/assets/nyxclient/fonts/axiforma_regular.ttf";
+    private static final String ARRAY_LIST_BOLD_FONT_RESOURCE = "/assets/nyxclient/fonts/axiforma_bold.ttf";
+    private static final String MATERIAL_ICON_FONT_RESOURCE = "/assets/nyxclient/fonts/material.ttf";
     private static final String DEBUG_CHAT_FONT_RESOURCE = "/assets/nyxclient/fonts/MapleMono-CN-Medium.ttf";
 
     private static final String[] APPLE_DISPLAY_FONTS = {
@@ -49,6 +52,9 @@ public final class FontManager {
     private static Font appleDisplayFont;
     private static Font appleTextFont;
     private static Font clickGuiFont;
+    private static Font arrayListRegularFont;
+    private static Font arrayListBoldFont;
+    private static Font materialIconFont;
     private static Font debugChatFont;
     private static Font debugChatBoldFont;
 
@@ -106,6 +112,30 @@ public final class FontManager {
         return getRenderer(clickGuiFont, size);
     }
 
+    public static synchronized FontRenderer getArrayListRegularRenderer(float size) {
+        if (arrayListRegularFont == null) {
+            arrayListRegularFont = loadResourceFont(ARRAY_LIST_REGULAR_FONT_RESOURCE)
+                .orElseGet(() -> preferredFont(APPLE_TEXT_FONTS));
+        }
+        return getRenderer(arrayListRegularFont, size);
+    }
+
+    public static synchronized FontRenderer getArrayListBoldRenderer(float size) {
+        if (arrayListBoldFont == null) {
+            arrayListBoldFont = loadResourceFont(ARRAY_LIST_BOLD_FONT_RESOURCE)
+                .orElseGet(() -> preferredFont(APPLE_TEXT_FONTS).deriveFont(Font.BOLD));
+        }
+        return getRenderer(arrayListBoldFont, size);
+    }
+
+    public static synchronized FontRenderer getMaterialIconRenderer(float size) {
+        if (materialIconFont == null) {
+            materialIconFont = loadResourceFont(MATERIAL_ICON_FONT_RESOURCE)
+                .orElseGet(() -> preferredFont(APPLE_TEXT_FONTS));
+        }
+        return getRenderer(materialIconFont, size);
+    }
+
     public static synchronized void initDebugChatFonts() {
         if (debugChatFont == null) {
             debugChatFont = loadResourceFont(DEBUG_CHAT_FONT_RESOURCE)
@@ -143,6 +173,9 @@ public final class FontManager {
         appleDisplayFont = null;
         appleTextFont = null;
         clickGuiFont = null;
+        arrayListRegularFont = null;
+        arrayListBoldFont = null;
+        materialIconFont = null;
         debugChatFont = null;
         debugChatBoldFont = null;
         FontRenderer.closeSharedResources();

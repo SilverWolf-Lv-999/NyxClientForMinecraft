@@ -5,6 +5,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.ui.LuaScreen;
+import io.github.seraphina.nyx.client.ui.clickgui.ArrayListClickGui;
 import io.github.seraphina.nyx.client.ui.clickgui.ClickGuiUI;
 import io.github.seraphina.nyx.client.ui.clickgui.JelloClickGui;
 
@@ -30,6 +31,10 @@ public class ClickGui extends Module {
             case JELLO_FOR_SIGMA -> {
                 JelloClickGui.INSTANCE.beginOpenAnimation();
                 yield JelloClickGui.INSTANCE;
+            }
+            case ARRAY_LIST -> {
+                ArrayListClickGui.INSTANCE.beginOpenAnimation();
+                yield ArrayListClickGui.INSTANCE;
             }
         };
         mc.setScreen(screen);

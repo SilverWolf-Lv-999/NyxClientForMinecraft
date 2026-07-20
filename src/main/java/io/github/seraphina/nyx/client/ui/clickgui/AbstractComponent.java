@@ -25,14 +25,14 @@ public abstract class AbstractComponent {
     protected static final int BORDER = 0x1AFFFFFF;
     protected static final int BORDER_SOFT = 0x0AFFFFFF;
     protected static final int HOVER = 0x0AFFFFFF;
-    protected static final int ACCENT = 0xB33D81F7;
-    protected static final int ACCENT_SOLID = 0xFF3D81F7;
     protected static final int TOGGLE_OFF = 0xFF20222B;
 
     protected final AbstractValue<?> value;
     protected float x;
     protected float y;
     protected float width;
+    protected int accentColor = 0xB33D81F7;
+    private boolean compactLayout;
     private long lastRenderNanos;
     private float frameSeconds = DEFAULT_FRAME_SECONDS;
 
@@ -56,10 +56,18 @@ public abstract class AbstractComponent {
         this.width = width;
     }
 
+    public void setAccentColor(int accentColor) {
+        this.accentColor = accentColor;
+    }
+
+    public void setCompactLayout(boolean compactLayout) {
+        this.compactLayout = compactLayout;
+    }
+
     protected abstract void render(int mouseX, int mouseY, float partialTick);
 
     public float getHeight() {
-        return ROW_HEIGHT;
+        return rowHeight();
     }
 
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
@@ -93,9 +101,10 @@ public abstract class AbstractComponent {
     }
 
     protected void drawLabel(float reservedRightWidth) {
-        FontRenderer labelFont = font(10.0F);
+        FontRenderer labelFont = font(compactLayout ? 7.0F : 10.0F);
         float maxWidth = Math.max(20.0F, width - reservedRightWidth);
-        labelFont.drawString(trimToWidth(labelFont, value.getDisplayName(), maxWidth), x, y + centeredTextY(ROW_HEIGHT, labelFont), TEXT_MUTED);
+        labelFont.drawString(trimToWidth(labelFont, value.getDisplayName(), maxWidth), x,
+            y + centeredTextY(rowHeight(), labelFont), TEXT_MUTED);
     }
 
     protected void renderPill(float pillX, float pillY, float pillWidth, float pillHeight, String text, boolean accentText) {
@@ -106,12 +115,20 @@ public abstract class AbstractComponent {
             trimToWidth(pillFont, text, pillWidth - 10.0F),
             pillX + pillWidth * 0.5F,
             pillY + centeredTextY(pillHeight, pillFont),
-            accentText ? ACCENT : TEXT_SUBTLE
+            accentText ? accentColor : TEXT_SUBTLE
         );
     }
 
     protected FontRenderer font(float size) {
-        return FontManager.getClickGuiRenderer(size);
+        return compactLayout
+            ? FontManager.getArrayListRegularRenderer(size)
+            : FontManager.getClickGuiRenderer(size);
+    }
+
+    protected FontRenderer boldFont(float size) {
+        return compactLayout
+            ? FontManager.getArrayListBoldRenderer(size)
+            : FontManager.getClickGuiRenderer(size);
     }
 
     protected float animate(float current, float target, float speed) {
@@ -124,6 +141,14 @@ public abstract class AbstractComponent {
 
     protected float frameSeconds() {
         return frameSeconds;
+    }
+
+    protected final boolean compactLayout() {
+        return compactLayout;
+    }
+
+    protected final float rowHeight() {
+        return compactLayout ? 18.0F : ROW_HEIGHT;
     }
 
     protected static int colorToArgb(java.awt.Color color) {

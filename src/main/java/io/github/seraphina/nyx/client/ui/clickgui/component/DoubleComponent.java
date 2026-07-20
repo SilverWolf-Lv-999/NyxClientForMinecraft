@@ -26,6 +26,11 @@ public class DoubleComponent extends AbstractComponent {
 
     @Override
     protected void render(int mouseX, int mouseY, float partialTick) {
+        if (compactLayout()) {
+            renderCompact(mouseX, mouseY);
+            return;
+        }
+
         String valueText = displayValue();
         FontRenderer valueFont = font(9.0F);
         float valueBoxWidth = Math.max(42.0F, valueFont.getStringWidth(valueText) + 12.0F);
@@ -42,7 +47,7 @@ public class DoubleComponent extends AbstractComponent {
 
         int trackColor = Render2DUtility.mix(SLIDER_BACKGROUND, CONTROL_HOVER, hoverProgress * 0.7F);
         Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth, 3.0F, 2.0F, trackColor);
-        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth * progressVisual, 3.0F, 2.0F, ACCENT);
+        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth * progressVisual, 3.0F, 2.0F, accentColor);
         float knobRadius = 3.0F + hoverProgress * 0.45F + dragProgress * 1.0F;
         Render2DUtility.drawCircle(sliderX + sliderWidth * progressVisual, sliderY + 1.5F, knobRadius, TEXT);
         renderPill(x + width - valueBoxWidth, y + 5.0F, valueBoxWidth, 20.0F, valueText, false);
@@ -50,7 +55,7 @@ public class DoubleComponent extends AbstractComponent {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button != GLFW_MOUSE_BUTTON_LEFT || !isInside(mouseX, mouseY, sliderX - 4.0F, y, sliderWidth + 8.0F, ROW_HEIGHT)) {
+        if (button != GLFW_MOUSE_BUTTON_LEFT || !isSliderHit(mouseX, mouseY)) {
             return false;
         }
 
@@ -79,6 +84,49 @@ public class DoubleComponent extends AbstractComponent {
     @Override
     public void blur() {
         dragging = false;
+    }
+
+    @Override
+    public float getHeight() {
+        return compactLayout() ? 30.0F : super.getHeight();
+    }
+
+    private void renderCompact(int mouseX, int mouseY) {
+        String valueText = displayValue();
+        FontRenderer labelFont = font(7.0F);
+        FontRenderer valueFont = boldFont(6.5F);
+        float valueWidth = valueFont.getStringWidth(valueText);
+        float labelHeight = 15.0F;
+        labelFont.drawString(
+            trimToWidth(labelFont, value.getDisplayName(), Math.max(20.0F, width - valueWidth - 8.0F)),
+            x,
+            y + centeredTextY(labelHeight, labelFont),
+            0xCCFFFFFF
+        );
+        valueFont.drawString(valueText, x + width - valueWidth,
+            y + centeredTextY(labelHeight, valueFont), 0xEBFFFFFF);
+
+        sliderX = x;
+        sliderY = y + 20.0F;
+        sliderWidth = width;
+        float progress = percentage(doubleValue.getValue(), doubleValue.getMin(), doubleValue.getMax());
+        boolean hovered = isSliderHit(mouseX, mouseY);
+        hoverProgress = animate(hoverProgress, hovered ? 1.0F : 0.0F, 18.0F);
+        dragProgress = animate(dragProgress, dragging ? 1.0F : 0.0F, 20.0F);
+        progressVisual = animate(progressVisual, progress, dragging ? 30.0F : 14.0F);
+
+        int trackColor = Render2DUtility.mix(0xFF3C3C3C, 0xFF565656, hoverProgress * 0.7F);
+        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth, 5.0F, 2.0F, trackColor);
+        Render2DUtility.drawRoundedRect(sliderX, sliderY, sliderWidth * progressVisual, 5.0F, 2.0F, accentColor);
+        float knobRadius = 3.0F + hoverProgress * 0.2F + dragProgress * 0.45F;
+        Render2DUtility.drawCircle(sliderX + sliderWidth * progressVisual, sliderY + 2.5F, knobRadius, TEXT);
+    }
+
+    private boolean isSliderHit(double mouseX, double mouseY) {
+        if (compactLayout()) {
+            return isInside(mouseX, mouseY, sliderX - 2.0F, sliderY - 4.0F, sliderWidth + 4.0F, 13.0F);
+        }
+        return isInside(mouseX, mouseY, sliderX - 4.0F, y, sliderWidth + 8.0F, ROW_HEIGHT);
     }
 
     private void updateValue(double mouseX) {

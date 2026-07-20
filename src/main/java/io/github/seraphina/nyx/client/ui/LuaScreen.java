@@ -24,6 +24,8 @@ import org.luaj.vm2.lib.OneArgFunction;
 import org.luaj.vm2.lib.VarArgFunction;
 import org.slf4j.Logger;
 
+import java.awt.font.FontRenderContext;
+import java.awt.geom.Rectangle2D;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -52,6 +54,7 @@ public class LuaScreen extends Screen {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
+    private static final FontRenderContext FONT_RENDER_CONTEXT = new FontRenderContext(null, true, true);
 
     private final String scriptPath;
     private final List<Hitbox> hitboxes = new ArrayList<>();
@@ -434,12 +437,34 @@ public class LuaScreen extends Screen {
             );
             return LuaValue.NONE;
         }));
+        api.set("text_visual_centered", function(args -> {
+            FontRenderer font = font(opts(args, 1, "text"), f(args, 5));
+            String text = s(args, 2);
+            if (!text.isEmpty()) {
+                Rectangle2D bounds = font.getJavaFont()
+                    .createGlyphVector(FONT_RENDER_CONTEXT, text)
+                    .getVisualBounds();
+                font.drawString(
+                    text,
+                    f(args, 3) - (float)bounds.getCenterX(),
+                    f(args, 4) - font.getAscent() - (float)bounds.getCenterY(),
+                    color(args.arg(6), 0xFFFFFFFF)
+                );
+            }
+            return LuaValue.NONE;
+        }));
         api.set("font_width", function(args ->
             LuaValue.valueOf(font(opts(args, 1, "text"), f(args, 3)).getStringWidth(s(args, 2)))
         ));
         api.set("font_height", function(args ->
             LuaValue.valueOf(font(opts(args, 1, "text"), f(args, 2)).getLineHeight())
         ));
+        api.set("codepoint", function(args -> {
+            int codePoint = args.arg1().checkint();
+            return Character.isValidCodePoint(codePoint)
+                ? LuaValue.valueOf(new String(Character.toChars(codePoint)))
+                : LuaValue.NIL;
+        }));
         api.set("trim_text", function(args ->
             LuaValue.valueOf(trimToWidth(font(opts(args, 1, "text"), f(args, 3)), s(args, 2), f(args, 4)))
         ));
@@ -871,7 +896,11 @@ public class LuaScreen extends Screen {
     }
 
     private static FontRenderer font(String kind, float size) {
-        return "display".equalsIgnoreCase(kind) ? displayFont(size) : textFont(size);
+        return switch (kind.toLowerCase(java.util.Locale.ROOT)) {
+            case "display" -> displayFont(size);
+            case "material" -> FontManager.getMaterialIconRenderer(size);
+            default -> textFont(size);
+        };
     }
 
     private static FontRenderer displayFont(float size) {

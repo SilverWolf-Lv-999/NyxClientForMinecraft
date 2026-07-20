@@ -12,6 +12,8 @@ import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
 public class EnumComponent extends AbstractComponent {
     private static final float OPTION_HEIGHT = 24.0F;
+    private static final float COMPACT_BASE_HEIGHT = 36.0F;
+    private static final float COMPACT_OPTION_HEIGHT = 14.0F;
 
     private final EnumValue<?> enumValue;
     private final Map<Enum<?>, Float> optionHoverProgress = new IdentityHashMap<>();
@@ -26,6 +28,11 @@ public class EnumComponent extends AbstractComponent {
 
     @Override
     protected void render(int mouseX, int mouseY, float partialTick) {
+        if (compactLayout()) {
+            renderCompact(mouseX, mouseY);
+            return;
+        }
+
         FontRenderer labelFont = font(10.0F);
         FontRenderer valueFont = font(9.0F);
         float arrowWidth = 18.0F;
@@ -63,7 +70,7 @@ public class EnumComponent extends AbstractComponent {
                     Render2DUtility.drawRoundedRect(x, optionY + 2.0F, width, OPTION_HEIGHT - 4.0F, 4.0F, fill);
                 }
 
-                int color = selected ? ACCENT : Render2DUtility.mix(TEXT_SUBTLE, TEXT, optionHover);
+                int color = selected ? accentColor : Render2DUtility.mix(TEXT_SUBTLE, TEXT, optionHover);
                 valueFont.drawString(trimToWidth(valueFont, mode.toString(), width - 20.0F), x + 10.0F,
                     optionY + centeredTextY(OPTION_HEIGHT, valueFont), Render2DUtility.applyOpacity(color, expandProgress));
                 optionY += OPTION_HEIGHT;
@@ -73,12 +80,36 @@ public class EnumComponent extends AbstractComponent {
 
     @Override
     public float getHeight() {
+        if (compactLayout()) {
+            return COMPACT_BASE_HEIGHT + enumValue.getModes().length * COMPACT_OPTION_HEIGHT * expandProgress;
+        }
         return ROW_HEIGHT + enumValue.getModes().length * OPTION_HEIGHT * expandProgress;
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button != GLFW_MOUSE_BUTTON_LEFT) {
+            return false;
+        }
+
+        if (compactLayout()) {
+            float controlY = y + 18.0F;
+            if (isInside(mouseX, mouseY, x, controlY, width, COMPACT_OPTION_HEIGHT)) {
+                expanded = !expanded;
+                return true;
+            }
+            if (!expanded) {
+                return false;
+            }
+            float optionY = controlY + COMPACT_OPTION_HEIGHT;
+            for (Enum<?> mode : enumValue.getModes()) {
+                if (isInside(mouseX, mouseY, x, optionY, width, COMPACT_OPTION_HEIGHT)) {
+                    enumValue.setMode(mode.name());
+                    expanded = false;
+                    return true;
+                }
+                optionY += COMPACT_OPTION_HEIGHT;
+            }
             return false;
         }
 
@@ -103,13 +134,55 @@ public class EnumComponent extends AbstractComponent {
     }
 
     private void renderArrow(float centerX, float centerY) {
-        FontRenderer arrowFont = font(14.0F);
+        FontRenderer arrowFont = compactLayout() ? boldFont(8.0F) : font(14.0F);
         float textWidth = arrowFont.getStringWidth(">");
         float textHeight = arrowFont.getLineHeight();
         float activeProgress = Math.max(expandProgress, hoverProgress * 0.35F);
         Render2DUtility.withRotation(lerp(0.0F, 90.0F, expandProgress), centerX, centerY, () -> {
             arrowFont.drawString(">", centerX - textWidth * 0.5F, centerY - textHeight * 0.5F,
-                Render2DUtility.mix(TEXT_SUBTLE, ACCENT, activeProgress));
+                Render2DUtility.mix(TEXT_SUBTLE, accentColor, activeProgress));
+        });
+    }
+
+    private void renderCompact(int mouseX, int mouseY) {
+        FontRenderer labelFont = font(7.0F);
+        FontRenderer valueFont = boldFont(6.5F);
+        float controlY = y + 18.0F;
+        boolean hovered = isInside(mouseX, mouseY, x, controlY, width, COMPACT_OPTION_HEIGHT);
+        hoverProgress = animate(hoverProgress, hovered ? 1.0F : 0.0F, 18.0F);
+        expandProgress = animate(expandProgress, expanded ? 1.0F : 0.0F, 16.0F);
+
+        labelFont.drawString(trimToWidth(labelFont, value.getDisplayName(), width), x,
+            y + centeredTextY(18.0F, labelFont), 0xCCFFFFFF);
+        int controlColor = Render2DUtility.mix(0xFF3C3C3C, 0xFF565656, hoverProgress * 0.65F);
+        Render2DUtility.drawRoundedRect(x, controlY, width, COMPACT_OPTION_HEIGHT, 3.0F, controlColor);
+        String current = enumValue.getValue().toString();
+        valueFont.drawCenteredString(trimToWidth(valueFont, current, width - 24.0F),
+            x + width * 0.5F, controlY + centeredTextY(COMPACT_OPTION_HEIGHT, valueFont), 0xCCFFFFFF);
+        renderArrow(x + width - 8.0F, controlY + COMPACT_OPTION_HEIGHT * 0.5F);
+
+        float visibleOptionsHeight = enumValue.getModes().length * COMPACT_OPTION_HEIGHT * expandProgress;
+        if (visibleOptionsHeight <= 0.5F) {
+            return;
+        }
+
+        Render2DUtility.withClip(x, controlY + COMPACT_OPTION_HEIGHT, width, visibleOptionsHeight, () -> {
+            float optionY = controlY + COMPACT_OPTION_HEIGHT;
+            for (Enum<?> mode : enumValue.getModes()) {
+                boolean selected = mode == enumValue.getValue();
+                boolean optionHovered = isInside(mouseX, mouseY, x, optionY, width, COMPACT_OPTION_HEIGHT);
+                float optionHover = animate(optionHoverProgress.getOrDefault(mode, 0.0F), optionHovered ? 1.0F : 0.0F, 18.0F);
+                optionHoverProgress.put(mode, optionHover);
+                int fill = selected
+                    ? Render2DUtility.applyOpacity(accentColor, 0.14F)
+                    : Render2DUtility.mix(0xFF303030, 0xFF494949, optionHover);
+                Render2DUtility.drawRect(x, optionY, width, COMPACT_OPTION_HEIGHT, fill);
+                int textColor = selected ? accentColor : Render2DUtility.mix(0x99FFFFFF, TEXT, optionHover);
+                valueFont.drawCenteredString(trimToWidth(valueFont, mode.toString(), width - 12.0F),
+                    x + width * 0.5F, optionY + centeredTextY(COMPACT_OPTION_HEIGHT, valueFont),
+                    Render2DUtility.applyOpacity(textColor, expandProgress));
+                optionY += COMPACT_OPTION_HEIGHT;
+            }
         });
     }
 }

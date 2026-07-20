@@ -14,6 +14,24 @@ public class SimpleValueComponent extends AbstractComponent {
     @Override
     protected void render(int mouseX, int mouseY, float partialTick) {
         String text = String.valueOf(value.getValue());
+        if (compactLayout()) {
+            var labelFont = font(7.0F);
+            var valueFont = boldFont(6.5F);
+            float valueWidth = Math.min(width * 0.48F, valueFont.getStringWidth(text));
+            boolean hovered = isInside(mouseX, mouseY, x, y, width, getHeight());
+            hoverProgress = animate(hoverProgress, hovered ? 1.0F : 0.0F, 18.0F);
+            labelFont.drawString(
+                trimToWidth(labelFont, value.getDisplayName(), Math.max(20.0F, width - valueWidth - 8.0F)),
+                x,
+                y + centeredTextY(getHeight(), labelFont),
+                Render2DUtility.mix(0xCCFFFFFF, TEXT, hoverProgress * 0.25F)
+            );
+            String valueText = trimToWidth(valueFont, text, width * 0.48F);
+            valueFont.drawString(valueText, x + width - valueFont.getStringWidth(valueText),
+                y + centeredTextY(getHeight(), valueFont), accentColor);
+            return;
+        }
+
         float pillWidth = Math.min(Math.max(72.0F, font(9.0F).getStringWidth(text) + 18.0F), Math.max(42.0F, width * 0.52F));
         boolean hovered = isInside(mouseX, mouseY, x, y, width, ROW_HEIGHT);
         hoverProgress = animate(hoverProgress, hovered ? 1.0F : 0.0F, 18.0F);
