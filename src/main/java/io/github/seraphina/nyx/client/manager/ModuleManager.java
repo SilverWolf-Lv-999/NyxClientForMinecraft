@@ -54,6 +54,7 @@ public final class ModuleManager {
                 AnchorAura.INSTANCE,
                 SpearCooldown.INSTANCE,
                 TpAura.INSTANCE,
+                TPBowGod.INSTANCE,
                 Backtrack.INSTANCE
         );
         //Movement

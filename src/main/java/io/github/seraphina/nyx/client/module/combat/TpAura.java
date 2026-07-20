@@ -9,6 +9,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
+import io.github.seraphina.nyx.client.utility.player.TPUtility;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
@@ -36,6 +37,7 @@ public class TpAura extends Module {
 
     private static final int TICKS_PER_SECOND = 20;
 
+    public final EnumValue<Type> type = ValueBuild.enumSetting("type", Type.VANILLA, this);
     public final EnumValue<Targets> targetMode = ValueBuild.enumSetting("target mode", Targets.SINGLE, this);
     public final DoubleValue range = ValueBuild.doubleSetting("range", 16.0D, 1.0D, 128.0D, 0.5D, this);
     public final IntValue cps = ValueBuild.intSetting("cps", 20, 1, TICKS_PER_SECOND, 1, this);
@@ -107,6 +109,7 @@ public class TpAura extends Module {
 
     private void attackTargets(List<LivingEntity> targets) {
         Vec3 returnPos = mc.player.position();
+        Vec3 currentPos = returnPos;
         float returnYaw = mc.player.getYRot();
         float returnPitch = mc.player.getXRot();
         boolean returnOnGround = mc.player.onGround();
@@ -119,12 +122,13 @@ public class TpAura extends Module {
 
             Vec3 spoofPos = teleportPosition(target);
             Vector2f rotations = rotationsFrom(spoofPos, target);
-            sendPosition(spoofPos, rotations.x, rotations.y, returnOnGround, returnHorizontalCollision);
+            teleport(currentPos, spoofPos, rotations.x, rotations.y, returnOnGround, returnHorizontalCollision);
+            currentPos = spoofPos;
             attackWithRotations(target, rotations);
             markAttacked(target);
         }
 
-        sendPosition(returnPos, returnYaw, returnPitch, returnOnGround, returnHorizontalCollision);
+        teleport(currentPos, returnPos, returnYaw, returnPitch, returnOnGround, returnHorizontalCollision);
     }
 
     private void attackWithRotations(LivingEntity target, Vector2f rotations) {
@@ -154,6 +158,15 @@ public class TpAura extends Module {
                 onGround,
                 horizontalCollision
         ));
+    }
+
+    private void teleport(Vec3 from, Vec3 to, float yaw, float pitch, boolean onGround, boolean horizontalCollision) {
+        if (type.is(Type.VANILLA)) {
+            TPUtility.tp(from, to, yaw, pitch);
+            return;
+        }
+
+        sendPosition(to, yaw, pitch, onGround, horizontalCollision);
     }
 
     private Vec3 teleportPosition(LivingEntity target) {
@@ -232,5 +245,10 @@ public class TpAura extends Module {
     public enum Targets {
         SINGLE,
         MUTI
+    }
+
+    public enum Type {
+        VANILLA,
+        BLINK
     }
 }
