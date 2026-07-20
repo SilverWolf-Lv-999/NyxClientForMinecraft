@@ -74,6 +74,15 @@ import static org.lwjgl.glfw.GLFW.glfwGetKeyName;
 public final class JelloClickGui extends LuaScreen {
     public static final JelloClickGui INSTANCE = new JelloClickGui();
 
+    private static final List<Category> CATEGORY_ORDER = List.of(
+        Category.PLAYER,
+        Category.COMBAT,
+        Category.MOVEMENT,
+        Category.CLIENT,
+        Category.OTHER,
+        Category.VISUAL
+    );
+
     private static final ExecutorService MUSIC_IO = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "Nyx-Jello-Music");
         thread.setDaemon(true);
@@ -201,7 +210,7 @@ public final class JelloClickGui extends LuaScreen {
         state.put("detail_progress", this.detailProgress);
 
         List<Map<String, Object>> categoryStates = new ArrayList<>();
-        for (Category category : Category.values()) {
+        for (Category category : CATEGORY_ORDER) {
             Map<String, Object> categoryState = new LinkedHashMap<>();
             categoryState.put("id", category.name().toLowerCase(Locale.ROOT));
             categoryState.put("label", categoryLabel(category));

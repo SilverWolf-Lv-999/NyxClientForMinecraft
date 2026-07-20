@@ -6,29 +6,22 @@ local BORDER = 0xFFD8D9DD
 local TEXT = 0xFF26282E
 local TEXT_MUTED = 0xFF777B84
 local TEXT_SUBTLE = 0xFFA4A7AE
-local ACTIVE = 0xFF18A9F2
-local ACTIVE_SOFT = 0x2818A9F2
+local ACTIVE = 0xFF0FAFE9
 
 local MUSIC_BLACK = 0xF3090A0D
 local MUSIC_DARK = 0xF51A1C21
-local MUSIC_CARD = 0xFF24272E
-local MUSIC_HOVER = 0xFF30343D
 local MUSIC_TEXT = 0xFFF4F5F7
 local MUSIC_MUTED = 0xFFA8ACB5
 local MUSIC_DIM = 0xFF737985
 local MUSIC_ACCENT = 0xFFFF6680
 
 local MODULE_HEADER = 30
-local MODULE_ROW = 24
-local MUSIC_PLAYER_MIN = 82
+local MODULE_ROW = 15
+local MUSIC_PLAYER_MIN = 46
 local volume_popup = 0
 
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
-end
-
-local function lerp(from, to, progress)
-    return from + (to - from) * progress
 end
 
 local function ease_out_cubic(value)
@@ -61,23 +54,20 @@ local function card_motion(state, index)
 end
 
 local function render_background(state)
-    -- Radius zero gives a square full-screen Gaussian softening layer over the game.
-    ui.panel(0, 0, state.width, state.height, 0, 14, 0x72FFFFFF, 0x36080A0E, 0, 0)
-    ui.rect(0, 0, state.width * 0.5, state.height, 0x16FFFFFF)
-    ui.rect(state.width * 0.5, 0, state.width * 0.5, state.height, 0x22000000)
-
+    -- The original Jello screen uses one continuous, strongly softened world image.
+    ui.panel(0, 0, state.width, state.height, 0, 24, 0x36FFFFFF, 0x42070A10, 0, 0)
 end
 
 local function module_grid(state)
     local half = state.width * 0.5
-    local left = 18
-    local right = half - 18
-    local top = math.max(62, state.height * 0.115)
-    local bottom = state.height - 18
-    local gap_x = clamp(state.width * 0.010, 8, 14)
-    local gap_y = clamp(state.height * 0.026, 10, 18)
-    local width = math.max(30, (right - left - gap_x * 2) / 3)
-    local height = math.max(64, (bottom - top - gap_y) / 2)
+    local width = clamp(state.width * 0.1035, 86, 112)
+    local height = clamp(state.height * 0.297, 142, 194)
+    local gap_x = clamp(state.width * 0.0095, 8, 12)
+    local gap_y = clamp(state.height * 0.0195, 9, 14)
+    local grid_width = width * 3 + gap_x * 2
+    local grid_height = height * 2 + gap_y
+    local left = (half - grid_width) * 0.5
+    local top = (state.height - grid_height) * 0.5
     return left, top, width, height, gap_x, gap_y
 end
 
@@ -94,11 +84,9 @@ local function render_module_card(state, category, index, x, y, width, height)
     ui.scale(scale, scale, x + width * 0.5, y + height * 0.5, function()
         ui.rect(x, y, width, height, ui.opacity(WHITE, alpha))
         ui.rect(x, y, width, MODULE_HEADER, ui.opacity(HEADER, alpha))
-        border(x, y, width, height, ui.opacity(BORDER, alpha))
-        ui.text_font(ui.trim_text("text", category.label or "", 13, width - 42),
-            x + 11, y + 8, 13, ui.opacity(TEXT_MUTED, alpha))
-        ui.text_font(tostring(category.count or 0), x + width - 23, y + 10, 9,
-            ui.opacity(TEXT_SUBTLE, alpha))
+        border(x, y, width, height, ui.opacity(BORDER, alpha * 0.55))
+        ui.text_font(ui.trim_text("text", category.label or "", 12, width - 20),
+            x + 10, y + 8, 12, ui.opacity(TEXT_MUTED, alpha))
 
         local scroll = ui.scroll("jello:category:" .. (category.id or tostring(index)),
             x, content_y, width, content_h, content_height, MODULE_ROW * 1.5)
@@ -108,16 +96,14 @@ local function render_module_card(state, category, index, x, y, width, height)
                 if row_y + MODULE_ROW > content_y and row_y < content_y + content_h then
                     local enabled = clamp(module.enabled_progress or 0, 0, 1)
                     local hovered = interactive and ui.hovered(x, row_y, width, MODULE_ROW)
-                    if hovered then
-                        ui.rect(x, row_y, width, MODULE_ROW, ui.opacity(0x0D000000, alpha))
-                    end
                     if enabled > 0.001 then
-                        ui.rect(x, row_y, width, MODULE_ROW, ui.opacity(ACTIVE_SOFT, alpha * enabled))
-                        ui.rect(x, row_y, 3, MODULE_ROW, ui.opacity(ACTIVE, alpha * enabled))
+                        ui.rect(x, row_y, width, MODULE_ROW, ui.opacity(ACTIVE, alpha * enabled))
+                    elseif hovered then
+                        ui.rect(x, row_y, width, MODULE_ROW, ui.opacity(0x10000000, alpha))
                     end
-                    ui.text_font(ui.trim_text("text", module.name or "", 10, width - 20),
-                        x + 10 + enabled * 6, row_y + 7, 10,
-                        ui.opacity(ui.mix(TEXT, ACTIVE, enabled * 0.72), alpha))
+                    ui.text_font(ui.trim_text("text", module.name or "", 9, width - 18),
+                        x + 10 + enabled * 4, row_y + 3, 9,
+                        ui.opacity(ui.mix(TEXT, 0xFFFFFFFF, enabled), alpha))
                     ui.custom("module_bounds", module.index, x, row_y, width, MODULE_ROW,
                         content_y, interactive, content_h)
                 end
@@ -126,9 +112,9 @@ local function render_module_card(state, category, index, x, y, width, height)
 
         local maximum = math.max(0, content_height - content_h)
         if maximum > 0 then
-            local bar_h = clamp(content_h * content_h / content_height, 18, content_h)
+            local bar_h = clamp(content_h * content_h / content_height, 12, content_h)
             local bar_y = content_y + (content_h - bar_h) * (scroll / maximum)
-            ui.rect(x + width - 2, bar_y, 2, bar_h, ui.opacity(0x55000000, alpha))
+            ui.rect(x + width - 1, bar_y, 1, bar_h, ui.opacity(0x60000000, alpha))
         end
     end)
 end
@@ -137,36 +123,23 @@ local function music_bounds(state)
     local half = state.width * 0.5
     local region_x = half
     local region_w = state.width - half
-    local max_w = math.max(180, region_w - 36)
-    local max_h = math.max(150, state.height - 52)
-    local width = math.min(max_w, max_h * 4 / 3)
-    local height = math.min(max_h, width * 3 / 4)
-    if height > max_h then
-        height = max_h
-        width = height * 4 / 3
-    end
+    local width = math.min(math.max(180, region_w - 20), region_w * 0.84, state.height * 0.74)
+    local height = width * 3 / 4
     return {
-        x = region_x + (region_w - width) * 0.5,
-        y = (state.height - height) * 0.5,
+        x = region_x + (region_w - width) * 0.25,
+        y = (state.height - height) * 0.5 - clamp(height * 0.018, 3, 7),
         width = width,
         height = height
     }
 end
 
-local function sidebar_item(state, music, x, y, width, label, icon, action, payload, selected, alpha)
+local function sidebar_item(state, x, y, width, height, label, action, payload, selected, alpha)
     local interactive = state.interactive and not state.modal_blocking
-    local hovered = interactive and ui.hovered(x, y, width, 25)
-    if selected or hovered then
-        ui.rect(x, y, width, 25, ui.opacity(selected and 0x263D81F7 or 0x10FFFFFF, alpha))
-    end
-    if selected then
-        ui.rect(x, y, 2, 25, ui.opacity(0xFF57C7FF, alpha))
-    end
-    ui.custom("icon", icon, x + 10, y + 7, 10, 10,
-        ui.opacity(selected and 0xFF57C7FF or MUSIC_DIM, alpha))
-    ui.text_font(ui.trim_text("text", label, 9, width - 36), x + 28, y + 8, 9,
-        ui.opacity(selected and MUSIC_TEXT or MUSIC_MUTED, alpha))
-    ui.hitbox(x, y, width, 25, action, payload, interactive)
+    local hovered = interactive and ui.hovered(x, y, width, height)
+    local color = selected and MUSIC_TEXT or (hovered and MUSIC_MUTED or MUSIC_DIM)
+    ui.text_centered(ui.trim_text("text", label, 7.5, width - 18),
+        x + width * 0.5, y + 5, 7.5, ui.opacity(color, alpha))
+    ui.hitbox(x, y, width, height, action, payload, interactive)
 end
 
 local function render_music_sidebar(state, bounds, player_height, alpha)
@@ -174,63 +147,49 @@ local function render_music_sidebar(state, bounds, player_height, alpha)
     local width = bounds.width / 3
     local height = bounds.height - player_height
     ui.rect(bounds.x, bounds.y, width, height, ui.opacity(MUSIC_BLACK, alpha))
-    ui.rect(bounds.x + width - 1, bounds.y, 1, height, ui.opacity(0x20FFFFFF, alpha))
+    ui.rect(bounds.x + width - 1, bounds.y, 1, height, ui.opacity(0x18FFFFFF, alpha))
 
-    ui.text_font("music", bounds.x + 13, bounds.y + 18, 9, ui.opacity(MUSIC_DIM, alpha))
-    ui.display_text("Nyx", bounds.x + 45, bounds.y + 11, 21, ui.opacity(MUSIC_TEXT, alpha))
-    ui.rect(bounds.x + 12, bounds.y + 43, width - 24, 1, ui.opacity(0x18FFFFFF, alpha))
+    local title_x = bounds.x + 24
+    local title_size = 21
+    ui.display_text("Nyx", title_x, bounds.y + 13, title_size, ui.opacity(MUSIC_TEXT, alpha))
+    ui.text_font("music", title_x + ui.font_width("display", "Nyx", title_size) + 3,
+        bounds.y + 27, 7, ui.opacity(MUSIC_MUTED, alpha))
 
     local y = bounds.y + 51
-    sidebar_item(state, music, bounds.x, y, width, "推荐音乐", "home",
+    sidebar_item(state, bounds.x, y, width, 19, "推荐音乐",
         "music_page", "recommended", music.page == "recommended", alpha)
-    y = y + 27
-    sidebar_item(state, music, bounds.x, y, width, "喜欢的音乐", "music",
+    y = y + 20
+    sidebar_item(state, bounds.x, y, width, 19, "喜欢的音乐",
         "music_page", "favorites", music.page == "favorites", alpha)
-    y = y + 32
+    y = y + 25
 
     if music.logged_in then
-        ui.rect(bounds.x + 12, y, width - 24, 1, ui.opacity(0x18FFFFFF, alpha))
-        ui.text_font("我的歌单", bounds.x + 12, y + 8, 8, ui.opacity(MUSIC_DIM, alpha))
-        y = y + 23
-        local list_h = math.max(1, bounds.y + height - y - 7)
-        local content_h = #(music.playlists or {}) * 23
-        local scroll = ui.scroll("jello:music:playlists", bounds.x, y, width, list_h, content_h, 28)
+        ui.rect(bounds.x + 18, y, width - 36, 1, ui.opacity(0x24FFFFFF, alpha))
+        y = y + 7
+        local list_h = math.max(1, bounds.y + height - y - 19)
+        local item_h = 18
+        local content_h = #(music.playlists or {}) * item_h
+        local scroll = ui.scroll("jello:music:playlists", bounds.x, y, width, list_h, content_h, 25)
         ui.clip(bounds.x, y, width, list_h, function()
             for _, playlist in ipairs(music.playlists or {}) do
-                local item_y = y + (playlist.index - 1) * 23 - scroll
-                if item_y + 23 > y and item_y < y + list_h then
-                    sidebar_item(state, music, bounds.x, item_y, width,
-                        playlist.name or "", "list", "music_playlist", playlist.index,
+                local item_y = y + (playlist.index - 1) * item_h - scroll
+                if item_y + item_h > y and item_y < y + list_h then
+                    sidebar_item(state, bounds.x, item_y, width, item_h,
+                        playlist.name or "", "music_playlist", playlist.index,
                         playlist.selected == true, alpha)
                 end
             end
         end)
     else
-        ui.text_font("登录网易云后显示歌单", bounds.x + 12, y + 6, 8,
+        ui.rect(bounds.x + 18, y, width - 36, 1, ui.opacity(0x24FFFFFF, alpha))
+        ui.text_centered("登录网易云后显示歌单", bounds.x + width * 0.5, y + 10, 6.5,
             ui.opacity(MUSIC_DIM, alpha))
     end
-end
 
-local function render_recommended_playlists(state, music, x, y, width, alpha)
-    if music.page ~= "recommended" or #(music.recommended_playlists or {}) == 0 then
-        return 0
-    end
-    local shown = math.min(2, #(music.recommended_playlists or {}))
-    local gap = 7
-    local item_w = (width - gap * (shown - 1)) / shown
-    for index = 1, shown do
-        local playlist = music.recommended_playlists[index]
-        local item_x = x + (index - 1) * (item_w + gap)
-        local hovered = state.interactive and not state.modal_blocking and ui.hovered(item_x, y, item_w, 40)
-        ui.rect(item_x, y, item_w, 40, ui.opacity(hovered and MUSIC_HOVER or MUSIC_CARD, alpha))
-        ui.custom("cover", playlist.cover or "", item_x + 5, y + 5, 30, 30, alpha)
-        ui.text_font(ui.trim_text("text", playlist.name or "", 8, item_w - 44),
-            item_x + 40, y + 9, 8, ui.opacity(MUSIC_TEXT, alpha))
-        ui.text_font("推荐歌单", item_x + 40, y + 24, 7, ui.opacity(MUSIC_DIM, alpha))
-        ui.hitbox(item_x, y, item_w, 40, "music_recommended_playlist", playlist.index,
-            state.interactive and not state.modal_blocking)
-    end
-    return 47
+    local equalizer_y = bounds.y + height - 10
+    ui.rect(bounds.x + 12, equalizer_y - 4, 2, 4, ui.opacity(0x28FFFFFF, alpha))
+    ui.rect(bounds.x + 16, equalizer_y - 8, 2, 8, ui.opacity(0x28FFFFFF, alpha))
+    ui.rect(bounds.x + 20, equalizer_y - 6, 2, 6, ui.opacity(0x28FFFFFF, alpha))
 end
 
 local function render_music_content(state, bounds, player_height, alpha)
@@ -242,50 +201,61 @@ local function render_music_content(state, bounds, player_height, alpha)
     local height = bounds.height - player_height
     ui.rect(x, y, width, height, ui.opacity(MUSIC_DARK, alpha))
 
-    ui.text_font(ui.trim_text("text", music.page_title or "音乐", 13, width - 42),
-        x + 13, y + 13, 13, ui.opacity(MUSIC_TEXT, alpha))
-    ui.text_font(ui.trim_text("text", music.status or "", 8, width - 58),
-        x + 13, y + 31, 8, ui.opacity(MUSIC_DIM, alpha))
-    ui.custom("icon", "repeat", x + width - 25, y + 13, 11, 11,
-        ui.opacity(MUSIC_DIM, alpha))
-    ui.hitbox(x + width - 31, y + 7, 25, 25, "music_refresh", nil,
-        state.interactive and not state.modal_blocking)
+    ui.text_centered(ui.trim_text("text", music.page_title or "音乐", 12, width - 34),
+        x + width * 0.5, y + 14, 12, ui.opacity(MUSIC_TEXT, alpha))
+    if music.loading then
+        ui.text_centered(ui.trim_text("text", music.status or "正在加载...", 6.5, width - 28),
+            x + width * 0.5, y + 31, 6.5, ui.opacity(MUSIC_DIM, alpha))
+    end
 
-    local list_x = x + 12
-    local list_y = y + 47
-    local list_w = width - 24
-    local list_h = math.max(1, height - 54)
-    local playlist_h = render_recommended_playlists(state, music, list_x, list_y, list_w, alpha)
-    list_y = list_y + playlist_h
-    list_h = math.max(1, list_h - playlist_h)
-    local row_h = 36
-    local content_h = #(music.songs or {}) * row_h
-    local scroll = ui.scroll("jello:music:songs", list_x, list_y, list_w, list_h, content_h, 44)
+    local list_x = x
+    local list_y = y + 44
+    local list_w = width
+    local list_h = math.max(1, height - 47)
+    local gap_x = 10
+    local gap_y = 7
+    local side_padding = 18
+    local caption_h = 20
+    local cell_w = (list_w - side_padding * 2 - gap_x * 2) / 3
+    local cover_by_height = math.max(30, (list_h - gap_y) * 0.5 - caption_h)
+    local cover_size = math.min(cell_w, cover_by_height)
+    local grid_w = cover_size * 3 + gap_x * 2
+    local grid_x = list_x + (list_w - grid_w) * 0.5
+    local row_h = cover_size + caption_h + gap_y
+    local rows = math.ceil(#(music.songs or {}) / 3)
+    local content_h = math.max(0, rows * row_h - gap_y)
+    local scroll = ui.scroll("jello:music:songs", list_x, list_y, list_w, list_h, content_h, row_h)
 
     ui.clip(list_x, list_y, list_w, list_h, function()
         if #(music.songs or {}) == 0 then
-            ui.text_centered(ui.trim_text("text", music.status or "暂无音乐", 9, list_w - 20),
-                list_x + list_w * 0.5, list_y + list_h * 0.5 - 5, 9,
+            ui.text_centered(ui.trim_text("text", music.status or "暂无音乐", 8, list_w - 20),
+                list_x + list_w * 0.5, list_y + list_h * 0.5 - 5, 8,
                 ui.opacity(MUSIC_DIM, alpha))
             return
         end
-        for _, song in ipairs(music.songs or {}) do
-            local row_y = list_y + (song.index - 1) * row_h - scroll
-            if row_y + row_h > list_y and row_y < list_y + list_h then
+        for order, song in ipairs(music.songs or {}) do
+            local column = (order - 1) % 3
+            local row = math.floor((order - 1) / 3)
+            local item_x = grid_x + column * (cover_size + gap_x)
+            local item_y = list_y + row * row_h - scroll
+            if item_y + cover_size + caption_h > list_y and item_y < list_y + list_h then
                 local active = song.current == true
-                local hovered = state.interactive and not state.modal_blocking and ui.hovered(list_x, row_y, list_w, row_h)
-                if active or hovered then
-                    ui.rect(list_x, row_y, list_w, row_h,
-                        ui.opacity(active and 0x263D81F7 or 0x0FFFFFFF, alpha))
+                local hovered = state.interactive and not state.modal_blocking
+                    and ui.hovered(item_x, item_y, cover_size, cover_size + caption_h)
+                ui.custom("cover", song.cover or "", item_x, item_y, cover_size, cover_size,
+                    alpha * (hovered and 1 or 0.94))
+                if active then
+                    border(item_x, item_y, cover_size, cover_size, ui.opacity(MUSIC_ACCENT, alpha))
+                elseif hovered then
+                    border(item_x, item_y, cover_size, cover_size, ui.opacity(0x80FFFFFF, alpha))
                 end
-                ui.custom("cover", song.cover or "", list_x + 4, row_y + 4, 28, 28, alpha)
-                ui.text_font(ui.trim_text("text", song.name or "", 9, list_w - 82),
-                    list_x + 39, row_y + 7, 9, ui.opacity(active and 0xFF65CFFF or MUSIC_TEXT, alpha))
-                ui.text_font(ui.trim_text("text", song.artist or "", 7, list_w - 82),
-                    list_x + 39, row_y + 21, 7, ui.opacity(MUSIC_DIM, alpha))
-                ui.text_font(song.duration or "00:00", list_x + list_w - 38, row_y + 14, 7,
+                ui.text_centered(ui.trim_text("text", song.name or "", 6.5, cover_size + 8),
+                    item_x + cover_size * 0.5, item_y + cover_size + 5, 6.5,
+                    ui.opacity(active and MUSIC_TEXT or MUSIC_MUTED, alpha))
+                ui.text_centered(ui.trim_text("text", song.artist or "", 5.5, cover_size + 8),
+                    item_x + cover_size * 0.5, item_y + cover_size + 14, 5.5,
                     ui.opacity(MUSIC_DIM, alpha))
-                ui.hitbox(list_x, row_y, list_w, row_h, "music_song", song.index,
+                ui.hitbox(item_x, item_y, cover_size, cover_size + caption_h, "music_song", song.index,
                     state.interactive and not state.modal_blocking)
             end
         end
@@ -297,12 +267,11 @@ local function music_control(state, icon, x, y, size, action, scale, emphasized,
     local interactive = state.interactive and not state.modal_blocking and available
     local hovered = interactive and ui.hovered(x, y, size, size)
     ui.scale(scale or 1, scale or 1, x + size * 0.5, y + size * 0.5, function()
-        ui.rect(x, y, size, size, ui.opacity(hovered and 0x28FFFFFF or 0x12000000, alpha))
-        border(x, y, size, size, ui.opacity(hovered and 0x45FFFFFF or 0x16FFFFFF, alpha))
-        local icon_size = emphasized and size * 0.42 or size * 0.36
+        local icon_size = emphasized and size * 0.58 or size * 0.46
         local icon_color = emphasized and 0xFFFFFFFF or MUSIC_MUTED
         ui.custom("icon", icon, x + (size - icon_size) * 0.5, y + (size - icon_size) * 0.5,
-            icon_size, icon_size, ui.opacity(icon_color, alpha * (available and 1 or 0.38)))
+            icon_size, icon_size, ui.opacity(icon_color,
+                alpha * (available and (hovered and 1 or 0.86) or 0.30)))
     end)
     ui.hitbox(x, y, size, size, action, nil, interactive)
 end
@@ -314,12 +283,12 @@ local function render_music_player(state, bounds, player_height, alpha)
     local width = bounds.width
     local left_width = width / 3
     ui.custom("blurred_cover", music.cover or "", x, y, width, player_height, alpha)
-    ui.rect(x, y, width, player_height, ui.opacity(0xB90C0D12, alpha))
-    ui.rect(x, y, width, 1, ui.opacity(0x38FFFFFF, alpha))
+    ui.rect(x, y, width, player_height, ui.opacity(0x9E23131F, alpha))
+    ui.rect(x, y, width, 1, ui.opacity(0x22FFFFFF, alpha))
 
-    local cover_size = math.min(left_width * 0.5, player_height * 0.54)
+    local cover_size = math.min(left_width * 0.46, player_height * 1.18)
     local cover_x = x + (left_width - cover_size) * 0.5
-    local cover_target_y = y + player_height * 0.5 - cover_size
+    local cover_target_y = y + player_height * 0.52 - cover_size
     local cover_y = cover_target_y + (1 - (music.cover_progress or 0)) * (cover_size + 12)
     local cover_alpha = alpha * clamp((music.cover_progress or 0) * 1.4, 0, 1)
     if music.has_song then
@@ -332,62 +301,60 @@ local function render_music_player(state, bounds, player_height, alpha)
         ui.custom("cover", "", cover_x, cover_target_y, cover_size, cover_size, alpha)
     end
     ui.custom("song_title", music.song_name or "暂无音乐", x + 7,
-        y + player_height * 0.5 + 5, left_width - 14, 8, ui.opacity(MUSIC_TEXT, alpha))
+        y + player_height * 0.57, left_width - 14, 7, ui.opacity(MUSIC_TEXT, alpha))
 
     local controls_x = x + left_width
     local controls_w = width - left_width
-    local button = clamp(player_height * 0.31, 24, 31)
-    local gap = clamp(controls_w * 0.055, 9, 18)
+    local button = clamp(player_height * 0.43, 19, 23)
+    local gap = clamp(controls_w * 0.11, 25, 34)
     local group_w = button * 3 + gap * 2
-    local group_x = controls_x + (controls_w - group_w) * 0.5 - 5
-    local group_y = y + 13
+    local group_x = controls_x + (controls_w - group_w) * 0.5
+    local group_y = y + 5
     music_control(state, "previous", group_x, group_y, button, "music_previous",
         music.previous_scale or 1, false, alpha, music.has_song)
-    music_control(state, music.playing and "pause" or "play", group_x + button + gap, group_y - 2,
-        button + 4, "music_toggle", music.toggle_scale or 1, true, alpha, music.has_song)
-    music_control(state, "next", group_x + button * 2 + gap * 2 + 4, group_y, button,
+    music_control(state, music.playing and "pause" or "play", group_x + button + gap, group_y,
+        button, "music_toggle", music.toggle_scale or 1, true, alpha, music.has_song)
+    music_control(state, "next", group_x + button * 2 + gap * 2, group_y, button,
         "music_next", music.next_scale or 1, false, alpha, music.has_song)
 
-    local volume_button_x = x + width - 28
-    local volume_button_y = y + 15
-    local slider_x = volume_button_x + 8
-    local slider_y = y - 58
-    local slider_h = 50
-    local volume_hovered = ui.hovered(volume_button_x, volume_button_y, 22, 22)
-        or ui.hovered(slider_x - 7, slider_y - 5, 18,
-            volume_button_y + 22 - (slider_y - 5))
+    local volume_button_x = x + width - 25
+    local volume_button_y = y + 5
+    local slider_x = volume_button_x + 9
+    local slider_y = y - 53
+    local slider_h = 47
+    local volume_hovered = ui.hovered(volume_button_x, volume_button_y, 20, 20)
+        or ui.hovered(slider_x - 6, slider_y - 4, 16,
+            volume_button_y + 20 - (slider_y - 4))
     volume_popup = animate_exp(volume_popup, volume_hovered and 1 or 0, 18, state.frame_seconds)
     if volume_popup > 0.01 then
-        local rise = (1 - ease_out_cubic(volume_popup)) * 12
-        ui.rect(slider_x - 6, slider_y - 5 + rise, 16, slider_h + 10,
-            ui.opacity(0xE6191B21, alpha * volume_popup))
-        border(slider_x - 6, slider_y - 5 + rise, 16, slider_h + 10,
-            ui.opacity(0x34FFFFFF, alpha * volume_popup))
-        ui.rect(slider_x, slider_y + rise, 4, slider_h,
+        local rise = (1 - ease_out_cubic(volume_popup)) * 10
+        ui.rect(slider_x - 5, slider_y - 4 + rise, 14, slider_h + 8,
+            ui.opacity(0xB20A0B0F, alpha * volume_popup))
+        ui.rect(slider_x, slider_y + rise, 3, slider_h,
             ui.opacity(0xFF3A3D46, alpha * volume_popup))
         local fill_h = slider_h * clamp(music.volume or 0, 0, 1)
-        ui.rect(slider_x, slider_y + slider_h - fill_h + rise, 4, fill_h,
+        ui.rect(slider_x, slider_y + slider_h - fill_h + rise, 3, fill_h,
             ui.opacity(MUSIC_ACCENT, alpha * volume_popup))
-        ui.rect(slider_x - 2, slider_y + slider_h - fill_h - 1 + rise, 8, 3,
+        ui.rect(slider_x - 2, slider_y + slider_h - fill_h - 1 + rise, 7, 3,
             ui.opacity(0xFFFFFFFF, alpha * volume_popup))
-        ui.hitbox(slider_x - 7, slider_y - 5 + rise, 18, slider_h + 10,
+        ui.hitbox(slider_x - 6, slider_y - 4 + rise, 16, slider_h + 8,
             "music_volume", {y = slider_y + rise, height = slider_h},
             state.interactive and not state.modal_blocking, true)
     end
-    ui.custom("icon", "volume", volume_button_x + 5, volume_button_y + 5, 12, 12,
+    ui.custom("icon", "volume", volume_button_x + 5, volume_button_y + 5, 10, 10,
         ui.opacity(MUSIC_MUTED, alpha))
 
-    local bar_x = controls_x + 40
-    local bar_w = math.max(30, width - left_width - 80)
-    local bar_y = y + player_height - 10
-    ui.rect(bar_x, bar_y, bar_w, 3, ui.opacity(0xFF3C3F47, alpha))
-    ui.rect(bar_x, bar_y, bar_w * clamp(music.progress or 0, 0, 1), 3,
+    local bar_x = controls_x + 51
+    local bar_w = math.max(30, controls_w - 102)
+    local bar_y = y + player_height - 3
+    ui.rect(bar_x, bar_y, bar_w, 2, ui.opacity(0xFF423E47, alpha))
+    ui.rect(bar_x, bar_y, bar_w * clamp(music.progress or 0, 0, 1), 2,
         ui.opacity(0xFFFFFFFF, alpha))
-    ui.text_font(music.position_label or "00:00", controls_x + 5, bar_y - 3, 7,
+    ui.text_font(music.position_label or "00:00", controls_x + 8, bar_y - 10, 6,
         ui.opacity(MUSIC_MUTED, alpha))
-    ui.text_font(music.duration_label or "00:00", x + width - 36, bar_y - 3, 7,
+    ui.text_font(music.duration_label or "00:00", x + width - 35, bar_y - 10, 6,
         ui.opacity(MUSIC_MUTED, alpha))
-    ui.hitbox(bar_x, bar_y - 5, bar_w, 13, "music_progress",
+    ui.hitbox(bar_x, bar_y - 5, bar_w, 9, "music_progress",
         {x = bar_x, width = bar_w}, state.interactive and not state.modal_blocking
             and music.has_song, true)
 end
@@ -450,7 +417,7 @@ local function render_music_card(state)
     if alpha <= 0.001 then
         return
     end
-    local player_height = clamp(bounds.height * 0.29, MUSIC_PLAYER_MIN, 106)
+    local player_height = clamp(bounds.height * 0.16, MUSIC_PLAYER_MIN, 60)
     ui.scale(scale, scale, bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5, function()
         ui.rect(bounds.x, bounds.y, bounds.width, bounds.height, ui.opacity(MUSIC_DARK, alpha))
         render_music_sidebar(state, bounds, player_height, alpha)
