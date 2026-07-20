@@ -74,7 +74,8 @@ public class Spectrum extends Module {
         float maxValue = 0.0F;
         float sensitivityValue = sensitivity.getValue().floatValue();
         for (int i = 0; i < barCount; i++) {
-            float target = MathUtility.clamp(targets[i] * sensitivityValue, 0.0F, 1.0F);
+            float source = MathUtility.clamp(targets[i], 0.0F, 1.0F);
+            float target = 1.0F - (float)Math.pow(1.0F - source, sensitivityValue);
             target = (float)Math.pow(target, 0.72F);
             float speed = target > animatedBands[i] ? ATTACK_SPEED : RELEASE_SPEED;
             animatedBands[i] = MathUtility.animateExp(animatedBands[i], target, speed, frameSeconds);

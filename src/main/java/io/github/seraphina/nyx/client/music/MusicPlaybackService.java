@@ -14,6 +14,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -24,13 +25,14 @@ public final class MusicPlaybackService implements StreamPlayerListener {
     public static final MusicPlaybackService INSTANCE = new MusicPlaybackService();
 
     private static final int SPECTRUM_BANDS = 64;
-    private static final int FFT_SIZE = 1024;
+    private static final int FFT_SIZE = 8192;
     private static final float DEFAULT_SAMPLE_RATE = 44100.0F;
     private static final int DEFAULT_CHANNELS = 2;
     private static final int DEFAULT_SAMPLE_BITS = 16;
     private static final long SPECTRUM_STALE_NANOS = 300_000_000L;
     private static final float MIN_SPECTRUM_HZ = 40.0F;
     private static final float MAX_SPECTRUM_HZ = 16000.0F;
+    private static final float SPECTRUM_GAIN = 10.0F;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "Nyx-MusicPlayer");
@@ -40,6 +42,8 @@ public final class MusicPlaybackService implements StreamPlayerListener {
     private final StreamPlayer player = new StreamPlayer();
     private final List<Song> playlist = Collections.synchronizedList(new ArrayList<>());
     private final List<LyricLine> lyric = Collections.synchronizedList(new ArrayList<>());
+    private final Object spectrumSampleLock = new Object();
+    private final float[] spectrumSamples = new float[FFT_SIZE];
 
     private volatile Song currentSong;
     private volatile File currentFile;
@@ -53,6 +57,8 @@ public final class MusicPlaybackService implements StreamPlayerListener {
     private volatile PlaybackMode playbackMode = PlaybackMode.LIST;
     private volatile float[] spectrumBands = new float[SPECTRUM_BANDS];
     private volatile long spectrumUpdateNanos;
+    private int spectrumSampleCount;
+    private long spectrumGeneration;
 
     private MusicPlaybackService() {
         player.addStreamPlayerListener(this);
@@ -337,19 +343,42 @@ public final class MusicPlaybackService implements StreamPlayerListener {
             return;
         }
 
-        float[] real = new float[FFT_SIZE];
+        SpectrumWindow spectrumWindow = appendSpectrumSamples(samples);
+        if (spectrumWindow == null) {
+            return;
+        }
+
+        float[] real = spectrumWindow.samples();
         float[] imaginary = new float[FFT_SIZE];
-        int sampleOffset = Math.max(0, samples.length - FFT_SIZE);
         for (int i = 0; i < FFT_SIZE; i++) {
-            int sourceIndex = sampleOffset + i;
-            float sample = sourceIndex < samples.length ? samples[sourceIndex] : 0.0F;
             float window = 0.5F - 0.5F * (float)Math.cos(2.0D * Math.PI * i / (FFT_SIZE - 1));
-            real[i] = sample * window;
+            real[i] *= window;
         }
 
         fft(real, imaginary);
-        spectrumBands = buildBands(real, imaginary, sampleRate);
-        spectrumUpdateNanos = System.nanoTime();
+        float[] nextBands = buildBands(real, imaginary, sampleRate);
+        synchronized (spectrumSampleLock) {
+            if (spectrumWindow.generation() != spectrumGeneration) {
+                return;
+            }
+            spectrumBands = nextBands;
+            spectrumUpdateNanos = System.nanoTime();
+        }
+    }
+
+    private SpectrumWindow appendSpectrumSamples(float[] samples) {
+        synchronized (spectrumSampleLock) {
+            int copyCount = Math.min(samples.length, FFT_SIZE);
+            if (copyCount == FFT_SIZE) {
+                System.arraycopy(samples, samples.length - FFT_SIZE, spectrumSamples, 0, FFT_SIZE);
+            } else {
+                System.arraycopy(spectrumSamples, copyCount, spectrumSamples, 0, FFT_SIZE - copyCount);
+                System.arraycopy(samples, samples.length - copyCount, spectrumSamples, FFT_SIZE - copyCount, copyCount);
+            }
+
+            spectrumSampleCount = Math.min(FFT_SIZE, spectrumSampleCount + copyCount);
+            return spectrumSampleCount < FFT_SIZE ? null : new SpectrumWindow(spectrumSamples.clone(), spectrumGeneration);
+        }
     }
 
     private static float[] readMonoSamples(byte[] pcmData, int channels, int sampleBits, boolean bigEndian) {
@@ -454,20 +483,26 @@ public final class MusicPlaybackService implements StreamPlayerListener {
         float minHz = Math.min(MIN_SPECTRUM_HZ, maxHz * 0.5F);
         double logMin = Math.log(minHz);
         double logMax = Math.log(maxHz);
+        int firstBin = Math.max(1, Math.round(minHz * FFT_SIZE / sampleRate));
+        int lastBin = Math.min(FFT_SIZE / 2, Math.round(maxHz * FFT_SIZE / sampleRate));
+        int[] bandEdges = new int[bands.length + 1];
+        bandEdges[0] = firstBin;
+        bandEdges[bands.length] = lastBin;
+
+        for (int edge = 1; edge < bands.length; edge++) {
+            float progress = edge / (float)bands.length;
+            float frequency = (float)Math.exp(logMin + (logMax - logMin) * progress);
+            int idealBin = Math.round(frequency * FFT_SIZE / sampleRate);
+            int minimumBin = bandEdges[edge - 1] + 1;
+            int maximumBin = lastBin - (bands.length - edge);
+            bandEdges[edge] = Math.max(minimumBin, Math.min(maximumBin, idealBin));
+        }
 
         for (int band = 0; band < bands.length; band++) {
-            float startProgress = band / (float)bands.length;
-            float endProgress = (band + 1.0F) / bands.length;
-            float startHz = (float)Math.exp(logMin + (logMax - logMin) * startProgress);
-            float endHz = (float)Math.exp(logMin + (logMax - logMin) * endProgress);
-            int startBin = Math.max(1, Math.round(startHz * FFT_SIZE / sampleRate));
-            int endBin = Math.max(startBin + 1, Math.round(endHz * FFT_SIZE / sampleRate));
-            endBin = Math.min(endBin, FFT_SIZE / 2);
-
             float total = 0.0F;
             float peak = 0.0F;
             int count = 0;
-            for (int bin = startBin; bin < endBin; bin++) {
+            for (int bin = bandEdges[band]; bin < bandEdges[band + 1]; bin++) {
                 float magnitude = (float)Math.sqrt(real[bin] * real[bin] + imaginary[bin] * imaginary[bin]) / FFT_SIZE;
                 total += magnitude;
                 peak = Math.max(peak, magnitude);
@@ -475,18 +510,27 @@ public final class MusicPlaybackService implements StreamPlayerListener {
             }
 
             float average = count == 0 ? 0.0F : total / count;
-            bands[band] = clamp01((float)Math.log10(1.0F + (peak + average * 0.35F) * 38.0F));
+            float energy = peak + average * 0.35F;
+            bands[band] = clamp01(1.0F - (float)Math.exp(-energy * SPECTRUM_GAIN));
         }
         return bands;
     }
 
     private void clearSpectrum() {
-        spectrumBands = new float[SPECTRUM_BANDS];
-        spectrumUpdateNanos = 0L;
+        synchronized (spectrumSampleLock) {
+            Arrays.fill(spectrumSamples, 0.0F);
+            spectrumSampleCount = 0;
+            spectrumGeneration++;
+            spectrumBands = new float[SPECTRUM_BANDS];
+            spectrumUpdateNanos = 0L;
+        }
     }
 
     private static float clamp01(float value) {
         return Math.max(0.0F, Math.min(1.0F, value));
+    }
+
+    private record SpectrumWindow(float[] samples, long generation) {
     }
 
     private static Path cachePath(Song song) throws Exception {

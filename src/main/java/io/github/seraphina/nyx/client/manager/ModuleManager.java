@@ -46,6 +46,7 @@ public final class ModuleManager {
                 KillAura.INSTANCE,
                 Reach.INSTANCE,
                 SpearThrust.INSTANCE,
+                SuperSpearKill.INSTANCE,
                 UseClick.INSTANCE,
                 MaceKill.INSTANCE,
                 MaceAura.INSTANCE,
