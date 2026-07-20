@@ -59,7 +59,14 @@
     "PlayerTabOverlayMixin",
     "RecipeBookComponentMixin",
     "SubmitNodeCollectionMixin",
-    "TooltipRenderUtilMixin"
+    "TooltipRenderUtilMixin",
+    "via.MixinClientPacketListener",
+    "via.MixinDebugScreenEntries",
+    "via.MixinServerData",
+    "via.connect.MixinClientHandshakePacketListenerImpl",
+    "via.connect.MixinConnection",
+    "via.connect.MixinConnection_1",
+    "via.connect.MixinServerStatusPinger"
   ],
   "injectors": {
     "defaultRequire": 1

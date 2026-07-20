@@ -20,6 +20,8 @@ public class Client extends Module {
 
     public final BoolValue changeTitle = ValueBuild.boolSetting("change title",  true, this);
 
+    public final EnumValue<ClickGuiCategory> clickGuiCategory = ValueBuild.enumSetting("click gui style", ClickGuiCategory.SERAPHINA, this);
+
     public enum Language {
         EN_US,ZH_CN,MINECRAFT_LANGUAGE;
     }
@@ -34,5 +36,10 @@ public class Client extends Module {
     public void onTitle(WindowsTitleEvent event) {
         if (changeTitle.getValue())
             event.setTitle("Nyx Client");
+    }
+
+    public enum ClickGuiCategory {
+        SERAPHINA,
+        JELLO_FOR_SIGMA
     }
 }

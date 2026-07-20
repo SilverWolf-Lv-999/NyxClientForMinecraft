@@ -10,6 +10,7 @@ import io.github.seraphina.nyx.client.ui.mainui.MainUI;
 import io.github.seraphina.nyx.client.utility.SeraNative;
 import io.github.seraphina.nyx.client.utility.StringUtility;
 import io.github.seraphina.nyx.client.utility.render.Shaders;
+import io.github.seraphina.nyx.client.via.NyxViaForge;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import org.apache.logging.log4j.LogManager;
@@ -27,6 +28,7 @@ public class NyxClient {
         LOGGER.info("Sera native acceleration hints {}", SeraNative.loadStatus());
         LOGGER.info("Native high-performance GPU request status {}", SeraNative.requestNativeHighPerformanceGpu());
         LOGGER.info("Windows high-performance GPU preference status {}", SeraNative.ensureHighPerformanceGpuPreference());
+        NyxViaForge.init();
         logActiveOpenGlGpu();
         System.out.print(StringUtility.readStringInProject(NyxClient.class, "assets/nyxclient/nyx.txt"));
         System.out.println();

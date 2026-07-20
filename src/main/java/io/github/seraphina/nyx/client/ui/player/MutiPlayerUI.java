@@ -3,6 +3,9 @@ package io.github.seraphina.nyx.client.ui.player;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.logging.LogUtils;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import io.github.seraphina.nyx.client.via.common.ViaForgeCommon;
+import io.github.seraphina.nyx.client.via.common.extended.ExtendedServerData;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.ui.LuaScreen;
 import io.github.seraphina.nyx.client.ui.mainui.MainUI;
@@ -76,6 +79,7 @@ public final class MutiPlayerUI extends LuaScreen {
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
     private static final float TRANSITION_SECONDS = 0.92F;
+    private static final float CONTENT_SWITCH_SECONDS = 0.30F;
     private static final float HOVER_SPEED = 16.0F;
     private static final float SCROLL_STEP = 38.0F;
     private static final float FLIP_DEGREES = 180.0F;
@@ -140,6 +144,7 @@ public final class MutiPlayerUI extends LuaScreen {
     private final List<ServerEntry> onlineEntries = new ArrayList<>();
     private final List<LanServer> lanServers = new ArrayList<>();
     private final List<ServerEntry> entries = new ArrayList<>();
+    private final List<ProtocolVersion> protocolVersions = new ArrayList<>();
     private final List<ActionButton> actionButtons = new ArrayList<>();
 
     private @Nullable ServerList servers;
@@ -155,13 +160,17 @@ public final class MutiPlayerUI extends LuaScreen {
     private long lastFrameNanos;
     private float frameSeconds = DEFAULT_FRAME_SECONDS;
     private float transitionProgress;
+    private float contentSwitchProgress = 1.0F;
     private boolean exiting;
     private boolean switchingBack;
     private boolean serversLoaded;
+    private boolean versionPage;
+    private int selectedVersionIndex = -1;
 
     public MutiPlayerUI(Screen lastScreen) {
         super("nyxclient:ui/screen/multiplayer.lua", Component.translatable("multiplayer.title"));
         this.lastScreen = lastScreen;
+        initProtocolVersions();
         initActionButtons();
     }
 
@@ -199,6 +208,7 @@ public final class MutiPlayerUI extends LuaScreen {
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         updateFrameTime();
         updateTransition();
+        updateContentSwitch();
         super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
@@ -239,14 +249,39 @@ public final class MutiPlayerUI extends LuaScreen {
             servers.add(server);
         }
 
+        List<Map<String, Object>> versions = new ArrayList<>();
+        ProtocolVersion currentVersion = currentProtocolVersion();
+        ProtocolVersion nativeVersion = nativeProtocolVersion();
+        syncSelectedVersionIndex(currentVersion);
+        for (int index = 0; index < this.protocolVersions.size(); index++) {
+            ProtocolVersion version = this.protocolVersions.get(index);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("index", index + 1);
+            item.put("kind", "version");
+            item.put("title", version.getName());
+            item.put("detail", "Protocol " + version.getVersion());
+            item.put("status", version == nativeVersion ? "Native client version" : "ViaForge target");
+            item.put("selectable", true);
+            item.put("selected", version == currentVersion);
+            item.put("native", version == nativeVersion);
+            versions.add(item);
+        }
+
         state.put("servers", servers);
+        state.put("versions", versions);
         state.put("loaded", this.serversLoaded);
+        state.put("version_page", this.versionPage);
+        state.put("content_progress", this.contentSwitchProgress);
         state.put("interactive", isInteractive());
         state.put("transition_progress", this.transitionProgress);
         state.put("exiting", this.exiting);
         state.put("can_join", selectedEntry() != null);
         state.put("can_edit", selectedOnlineServer() != null);
         state.put("can_delete", selectedOnlineServer() != null);
+        state.put("can_apply_version", selectedProtocolVersion() != null);
+        state.put("selected_server_protocol", selectedServerProtocolName());
+        state.put("target_protocol", currentVersion == null ? "Unavailable" : currentVersion.getName());
+        state.put("native_protocol", nativeVersion == null ? "Native" : nativeVersion.getName());
     }
 
     @Override
@@ -289,6 +324,22 @@ public final class MutiPlayerUI extends LuaScreen {
                 refreshServers();
                 yield true;
             }
+            case "toggle_versions" -> {
+                toggleVersionPage();
+                yield true;
+            }
+            case "select_version" -> {
+                selectProtocolVersion(payload.checkint() - 1, true);
+                yield true;
+            }
+            case "apply_version" -> {
+                applySelectedProtocolVersion();
+                yield true;
+            }
+            case "native_version" -> {
+                selectNativeProtocolVersion();
+                yield true;
+            }
             case "back" -> {
                 beginBackTransition();
                 yield true;
@@ -303,6 +354,19 @@ public final class MutiPlayerUI extends LuaScreen {
             return;
         }
         int index = args[0].checkint() - 1;
+        if (this.versionPage) {
+            if (index < 0 || index >= this.protocolVersions.size()) {
+                return;
+            }
+            renderProtocolIcon(
+                this.protocolVersions.get(index),
+                (float)args[1].checkdouble(),
+                (float)args[2].checkdouble(),
+                (float)args[3].checkdouble(),
+                (float)args[4].checkdouble()
+            );
+            return;
+        }
         if (index < 0 || index >= this.entries.size()) {
             return;
         }
@@ -346,15 +410,32 @@ public final class MutiPlayerUI extends LuaScreen {
         this.actionButtons.clear();
         this.actionButtons.add(new ActionButton(
             () -> "Join",
-            () -> selectedEntry() != null,
+            () -> !this.versionPage && selectedEntry() != null,
             this::joinSelectedServer
         ));
-        this.actionButtons.add(new ActionButton("Direct", () -> true, this::openDirectJoin));
-        this.actionButtons.add(new ActionButton("Add", () -> true, this::openAddServer));
-        this.actionButtons.add(new ActionButton("Edit", () -> selectedOnlineServer() != null, this::openEditServer));
-        this.actionButtons.add(new ActionButton("Delete", () -> selectedOnlineServer() != null, this::openDeleteServer));
-        this.actionButtons.add(new ActionButton("Refresh", () -> true, this::refreshServers));
+        this.actionButtons.add(new ActionButton("Direct", () -> !this.versionPage, this::openDirectJoin));
+        this.actionButtons.add(new ActionButton("Add", () -> !this.versionPage, this::openAddServer));
+        this.actionButtons.add(new ActionButton(() -> this.versionPage ? "Servers" : "Versions", () -> true, this::toggleVersionPage));
+        this.actionButtons.add(new ActionButton("Edit", () -> !this.versionPage && selectedOnlineServer() != null, this::openEditServer));
+        this.actionButtons.add(new ActionButton("Delete", () -> !this.versionPage && selectedOnlineServer() != null, this::openDeleteServer));
+        this.actionButtons.add(new ActionButton(() -> this.versionPage ? "Native" : "Refresh", () -> true, () -> {
+            if (this.versionPage) {
+                selectNativeProtocolVersion();
+            } else {
+                refreshServers();
+            }
+        }));
         this.actionButtons.add(new ActionButton("Back", () -> true, this::beginBackTransition));
+    }
+
+    private void initProtocolVersions() {
+        this.protocolVersions.clear();
+        for (ProtocolVersion version : ProtocolVersion.getReversedProtocols()) {
+            if (version != ProtocolVersion.unknown) {
+                this.protocolVersions.add(version);
+            }
+        }
+        syncSelectedVersionIndex(currentProtocolVersion());
     }
 
     private void loadServers() {
@@ -489,6 +570,104 @@ public final class MutiPlayerUI extends LuaScreen {
         return entry != null && entry.kind == EntryKind.ONLINE ? entry.serverData : null;
     }
 
+    private void toggleVersionPage() {
+        this.versionPage = !this.versionPage;
+        this.contentSwitchProgress = 0.0F;
+        if (this.versionPage) {
+            syncSelectedVersionIndex(currentProtocolVersion());
+        }
+    }
+
+    private void syncSelectedVersionIndex(@Nullable ProtocolVersion version) {
+        if (version == null) {
+            this.selectedVersionIndex = -1;
+            return;
+        }
+        for (int i = 0; i < this.protocolVersions.size(); i++) {
+            if (this.protocolVersions.get(i) == version) {
+                this.selectedVersionIndex = i;
+                return;
+            }
+        }
+        this.selectedVersionIndex = -1;
+    }
+
+    private @Nullable ProtocolVersion selectedProtocolVersion() {
+        if (this.selectedVersionIndex < 0 || this.selectedVersionIndex >= this.protocolVersions.size()) {
+            return null;
+        }
+        return this.protocolVersions.get(this.selectedVersionIndex);
+    }
+
+    private @Nullable ProtocolVersion currentProtocolVersion() {
+        ServerData selectedServer = selectedOnlineServer();
+        if (selectedServer instanceof ExtendedServerData extendedServerData) {
+            ProtocolVersion serverVersion = extendedServerData.viaForge$getVersion();
+            if (serverVersion != null) {
+                return serverVersion;
+            }
+        }
+
+        ViaForgeCommon manager = ViaForgeCommon.getManager();
+        return manager == null ? nativeProtocolVersion() : manager.getTargetVersion();
+    }
+
+    private @Nullable ProtocolVersion nativeProtocolVersion() {
+        ViaForgeCommon manager = ViaForgeCommon.getManager();
+        if (manager != null) {
+            return manager.getNativeVersion();
+        }
+        return ProtocolVersion.getProtocol(SharedConstants.getProtocolVersion());
+    }
+
+    private String selectedServerProtocolName() {
+        ServerData selectedServer = selectedOnlineServer();
+        if (selectedServer instanceof ExtendedServerData extendedServerData) {
+            ProtocolVersion version = extendedServerData.viaForge$getVersion();
+            if (version != null) {
+                return version.getName();
+            }
+        }
+        return "Global";
+    }
+
+    private void selectProtocolVersion(int index, boolean apply) {
+        if (index < 0 || index >= this.protocolVersions.size()) {
+            return;
+        }
+        this.selectedVersionIndex = index;
+        if (apply) {
+            applySelectedProtocolVersion();
+        }
+    }
+
+    private void applySelectedProtocolVersion() {
+        ProtocolVersion version = selectedProtocolVersion();
+        if (version == null) {
+            return;
+        }
+
+        ViaForgeCommon manager = ViaForgeCommon.getManager();
+        if (manager != null) {
+            manager.setTargetVersion(version);
+        }
+
+        ServerData selectedServer = selectedOnlineServer();
+        if (selectedServer instanceof ExtendedServerData extendedServerData) {
+            extendedServerData.viaForge$setVersion(version);
+            saveServers();
+        }
+    }
+
+    private void selectNativeProtocolVersion() {
+        ProtocolVersion nativeVersion = nativeProtocolVersion();
+        if (nativeVersion == null) {
+            return;
+        }
+        syncSelectedVersionIndex(nativeVersion);
+        applySelectedProtocolVersion();
+    }
+
     private void joinSelectedServer() {
         ServerEntry entry = selectedEntry();
         if (entry == null) {
@@ -504,6 +683,13 @@ public final class MutiPlayerUI extends LuaScreen {
     private void join(ServerData serverData) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft != null) {
+            if (serverData instanceof ExtendedServerData extendedServerData) {
+                ProtocolVersion version = extendedServerData.viaForge$getVersion();
+                ViaForgeCommon manager = ViaForgeCommon.getManager();
+                if (version != null && manager != null) {
+                    manager.setTargetVersion(version);
+                }
+            }
             ConnectScreen.startConnecting(this, minecraft, ServerAddress.parseString(serverData.ip), serverData, false, null);
         }
     }
@@ -695,8 +881,15 @@ public final class MutiPlayerUI extends LuaScreen {
         }
     }
 
+    private void updateContentSwitch() {
+        if (this.contentSwitchProgress >= 1.0F) {
+            return;
+        }
+        this.contentSwitchProgress = clamp(this.contentSwitchProgress + this.frameSeconds / CONTENT_SWITCH_SECONDS, 0.0F, 1.0F);
+    }
+
     private boolean isInteractive() {
-        return !this.exiting && this.transitionProgress >= 0.985F;
+        return !this.exiting && this.transitionProgress >= 0.985F && this.contentSwitchProgress >= 0.985F;
     }
 
     private void renderFlippingPanel(PanelBounds panel, int mouseX, int mouseY) {
@@ -952,6 +1145,30 @@ public final class MutiPlayerUI extends LuaScreen {
                 Render2DUtility.applyOpacity(entry.selectable() ? TEXT_MUTED : TEXT_DIM, alpha));
         }
         Render2DUtility.drawOutlineRoundedRect(x, y, size, size, 6.0F, 1.0F, Render2DUtility.applyOpacity(0x44FFFFFF, alpha));
+    }
+
+    private void renderProtocolIcon(ProtocolVersion version, float x, float y, float size, float alpha) {
+        boolean nativeVersion = version == nativeProtocolVersion();
+        int fill = nativeVersion ? 0xFF20314A : 0xFF252A35;
+        Render2DUtility.drawRoundedRect(x, y, size, size, 6.0F, Render2DUtility.applyOpacity(fill, alpha));
+        Render2DUtility.drawOutlineRoundedRect(x, y, size, size, 6.0F, 1.0F,
+            Render2DUtility.applyOpacity(nativeVersion ? ACCENT : 0x44FFFFFF, alpha));
+
+        String label = version.getName();
+        if (label.startsWith("1.")) {
+            String[] parts = label.split("\\.");
+            if (parts.length >= 2) {
+                label = parts[0] + "." + parts[1];
+            }
+        }
+
+        FontRenderer font = textFont(10.0F);
+        font.drawCenteredString(
+            trimToWidth(font, label, size - 6.0F),
+            x + size * 0.5F,
+            y + (size - font.getLineHeight()) * 0.5F,
+            Render2DUtility.applyOpacity(TEXT_MUTED, alpha)
+        );
     }
 
     private void renderCenteredStatus(String message, float x, float y, float width, float height, float alpha) {

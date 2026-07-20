@@ -304,11 +304,13 @@ function common.render_collection_area(state, panel, face_alpha, config)
         return
     end
 
-    local alpha = common.ease_out_cubic(list_progress) * face_alpha
+    local content_progress = common.ease_out_cubic(state.content_progress or 1)
+    local alpha = common.ease_out_cubic(list_progress) * content_progress * face_alpha
     local items = config.items(state)
     local count = #items
     local header_x = panel.x + PANEL_PADDING
-    ui.display_text(config.heading, header_x, panel.y + 18, 17, ui.opacity(TEXT, alpha))
+    local heading = type(config.heading) == "function" and config.heading(state) or config.heading
+    ui.display_text(heading, header_x, panel.y + 18, 17, ui.opacity(TEXT, alpha))
     ui.text_font(ui.trim_text("text", config.subtitle(state, items), 10, panel.width - PANEL_PADDING * 2),
         header_x, panel.y + 39, 10, ui.opacity(TEXT_DIM, alpha))
 
@@ -317,7 +319,8 @@ function common.render_collection_area(state, panel, face_alpha, config)
     local list_width = panel.width - PANEL_PADDING * 2
     local list_height = math.max(0, panel.height - HEADER_HEIGHT - PANEL_PADDING)
     local content_height = math.max(0, count * (ROW_HEIGHT + ROW_GAP) - ROW_GAP)
-    local scroll = ui.scroll(config.scroll_id, list_x, list_y, list_width, list_height, content_height, 38)
+    local scroll_id = type(config.scroll_id) == "function" and config.scroll_id(state) or config.scroll_id
+    local scroll = ui.scroll(scroll_id, list_x, list_y, list_width, list_height, content_height, 38)
 
     ui.clip(list_x, list_y, list_width, list_height, function()
         local status = config.status(state, count)
@@ -329,7 +332,8 @@ function common.render_collection_area(state, panel, face_alpha, config)
         for index, item in ipairs(items) do
             local row_y = list_y + (index - 1) * (ROW_HEIGHT + ROW_GAP) - scroll
             if row_y + ROW_HEIGHT >= list_y and row_y <= list_y + list_height then
-                local row_progress = common.ease_out_cubic(common.clamp(list_progress * 1.18 - (index - 1) * 0.045, 0, 1))
+                local row_progress = common.ease_out_cubic(common.clamp(
+                    math.min(list_progress, state.content_progress or 1) * 1.18 - (index - 1) * 0.045, 0, 1))
                 if row_progress > 0.001 then
                     local active = config.active(item)
                     local selected = item.selected == true
@@ -360,8 +364,10 @@ function common.render_collection_area(state, panel, face_alpha, config)
                             text_x, row_y + 43, 9, ui.opacity(config.info_color(item), row_alpha))
                     end
 
-                    ui.hitbox(list_x, row_y, list_width, ROW_HEIGHT, config.select_action, item.index,
-                        state.interactive and active, false, config.double_action)
+                    local select_action = type(config.select_action) == "function" and config.select_action(state) or config.select_action
+                    local double_action = type(config.double_action) == "function" and config.double_action(state) or config.double_action
+                    ui.hitbox(list_x, row_y, list_width, ROW_HEIGHT, select_action, item.index,
+                        state.interactive and active, false, double_action)
                 end
             end
         end

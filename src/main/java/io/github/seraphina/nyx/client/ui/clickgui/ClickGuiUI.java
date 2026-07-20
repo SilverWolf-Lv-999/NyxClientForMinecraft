@@ -61,6 +61,7 @@ import static org.lwjgl.glfw.GLFW.GLFW_PRESS;
 import static org.lwjgl.glfw.GLFW.glfwGetKey;
 
 public class ClickGuiUI extends LuaScreen {
+    public static final ClickGuiUI INSTANCE = new ClickGuiUI();
     private static final float PANEL_WIDTH = 820.0F;
     private static final float PANEL_HEIGHT = 540.0F;
     private static final float UI_SCALE = 1.7F;

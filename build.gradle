@@ -24,6 +24,13 @@ repositories {
     maven { url = 'https://maven.parchmentmc.org' }
     maven { url = 'https://jitpack.io' }
     maven { url = 'https://api.modrinth.com/maven' }
+    maven {
+        url = 'https://repo.viaversion.com'
+        metadataSources {
+            mavenPom()
+            artifact()
+        }
+    }
 }
 
 base {
@@ -107,11 +114,43 @@ dependencies {
     compileOnly "io.github.llamalad7:mixinextras-common:0.5.3"
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
     compileOnly "org.projectlombok:lombok:1.18.42"
+    compileOnly("net.neoforged.fancymodloader:loader:2.0.20") { transitive = false }
+    compileOnly("net.neoforged:bus:8.0.5") { transitive = false }
 
     jarJar(implementation("org.luaj:luaj-jse:3.0.1")) {
         version {
             strictly "[3.0.1,4.0.0)"
             prefer "3.0.1"
+        }
+    }
+    jarJar(implementation("com.viaversion:viaversion-common:5.8.0")) {
+        version {
+            strictly "[5.8.0,6.0.0)"
+            prefer "5.8.0"
+        }
+    }
+    jarJar(implementation("com.viaversion:viabackwards-common:5.8.0")) {
+        version {
+            strictly "[5.8.0,6.0.0)"
+            prefer "5.8.0"
+        }
+    }
+    jarJar(implementation("com.viaversion:viarewind-common:4.0.15")) {
+        version {
+            strictly "[4.0.15,5.0.0)"
+            prefer "4.0.15"
+        }
+    }
+    jarJar(implementation("com.viaversion:viaaprilfools-common:4.1.0")) {
+        version {
+            strictly "[4.1.0,5.0.0)"
+            prefer "4.1.0"
+        }
+    }
+    jarJar(implementation("net.raphimc:ViaLegacy:3.0.14")) {
+        version {
+            strictly "[3.0.14,4.0.0)"
+            prefer "3.0.14"
         }
     }
 
