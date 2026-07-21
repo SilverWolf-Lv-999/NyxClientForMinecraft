@@ -522,7 +522,13 @@ public class LuaScreen extends Screen {
         api.set("scroll", function(args -> LuaValue.valueOf(registerScrollArea(args))));
         api.set("action", function(args -> LuaValue.valueOf(dispatchAction(s(args, 1), args.arg(2)))));
         api.set("shared_background", function(args -> {
-            MainUI.renderSharedBackground(LuaScreen.this.width, LuaScreen.this.height);
+            MainUI.renderSharedBackground(
+                LuaScreen.this.width,
+                LuaScreen.this.height,
+                LuaScreen.this.luaMouseX,
+                LuaScreen.this.luaMouseY,
+                LuaScreen.this.frameSeconds
+            );
             return LuaValue.NONE;
         }));
         api.set("shared_user_card", function(args -> {

@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.github.seraphina.nyx.client.utility.MathUtility.animateLinear;
+import static io.github.seraphina.nyx.client.utility.MathUtility.animateExp;
 import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
 import static io.github.seraphina.nyx.client.utility.MathUtility.easeOutCubic;
 import static io.github.seraphina.nyx.client.utility.MathUtility.isInside;
@@ -65,6 +66,9 @@ public final class MainUI extends LuaScreen {
     private static final float THUMBNAIL_HEIGHT = 52.0F;
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
+    private static final float BACKGROUND_PARALLAX_OVERSCAN = 0.035F;
+    private static final float BACKGROUND_PARALLAX_STRENGTH = 0.75F;
+    private static final float BACKGROUND_PARALLAX_SPEED = 8.0F;
     private static final float PANEL_ANIMATION_SPEED = 14.0F;
     private static final float SCROLL_STEP = 34.0F;
     private static final float CENTER_PANEL_MAX_WIDTH = 301.0F;
@@ -127,6 +131,8 @@ public final class MainUI extends LuaScreen {
     private static float sharedSettingsPanelProgress;
     private static float sharedPanelScroll;
     private static float sharedMaxPanelScroll;
+    private static float sharedBackgroundParallaxX;
+    private static float sharedBackgroundParallaxY;
     private static boolean welcomeAnimationPlayed;
 
     private final List<MainUIButton> mainButtons = new ArrayList<>();
@@ -304,9 +310,24 @@ public final class MainUI extends LuaScreen {
     }
 
     public static void renderSharedBackground(float width, float height) {
+        renderSharedBackground(width, height, width * 0.5F, height * 0.5F, DEFAULT_FRAME_SECONDS);
+    }
+
+    public static void renderSharedBackground(float width, float height, float mouseX, float mouseY, float frameSeconds) {
         ensureBackgroundCacheLoaded();
+        updateSharedBackgroundParallax(width, height, mouseX, mouseY, frameSeconds);
+
+        float overscanX = width * BACKGROUND_PARALLAX_OVERSCAN;
+        float overscanY = height * BACKGROUND_PARALLAX_OVERSCAN;
+        float offsetX = -sharedBackgroundParallaxX * overscanX * BACKGROUND_PARALLAX_STRENGTH;
+        float offsetY = -sharedBackgroundParallaxY * overscanY * BACKGROUND_PARALLAX_STRENGTH;
         BackgroundMedia selected = selectedSharedBackground();
-        if (selected == null || !selected.render(0.0F, 0.0F, width, height)) {
+        if (selected == null || !selected.render(
+            -overscanX + offsetX,
+            -overscanY + offsetY,
+            width + overscanX * 2.0F,
+            height + overscanY * 2.0F
+        )) {
             Render2DUtility.drawVerticalGradientRect(0.0F, 0.0F, width, height, 0xFF10131B, 0xFF05060A);
         }
     }
@@ -794,6 +815,20 @@ public final class MainUI extends LuaScreen {
 
     private static void updateSharedPanelAnimation(float frameSeconds) {
         sharedSettingsPanelProgress = animateLinear(sharedSettingsPanelProgress, sharedSettingsOpen ? 1.0F : 0.0F, PANEL_ANIMATION_SPEED, frameSeconds);
+    }
+
+    private static void updateSharedBackgroundParallax(float width, float height, float mouseX, float mouseY, float frameSeconds) {
+        float targetX = normalizedCursorPosition(mouseX, width);
+        float targetY = normalizedCursorPosition(mouseY, height);
+        sharedBackgroundParallaxX = animateExp(sharedBackgroundParallaxX, targetX, BACKGROUND_PARALLAX_SPEED, frameSeconds);
+        sharedBackgroundParallaxY = animateExp(sharedBackgroundParallaxY, targetY, BACKGROUND_PARALLAX_SPEED, frameSeconds);
+    }
+
+    private static float normalizedCursorPosition(float cursor, float size) {
+        if (size <= 0.0F) {
+            return 0.0F;
+        }
+        return clamp(cursor / size * 2.0F - 1.0F, -1.0F, 1.0F);
     }
 
     private static void updatePanelScrollLimit(float listHeight) {
