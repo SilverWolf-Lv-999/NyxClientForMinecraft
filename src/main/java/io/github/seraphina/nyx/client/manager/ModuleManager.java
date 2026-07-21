@@ -62,6 +62,7 @@ public final class ModuleManager {
                 Scaffold.INSTANCE,
                 BHop.INSTANCE,
                 AutoJump.INSTANCE,
+                HighJump.INSTANCE,
                 Sprint.INSTANCE,
                 Stuck.INSTANCE,
                 ElytraFly.INSTANCE,
