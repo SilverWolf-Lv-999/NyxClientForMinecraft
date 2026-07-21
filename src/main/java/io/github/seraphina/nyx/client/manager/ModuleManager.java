@@ -100,6 +100,7 @@ public final class ModuleManager {
                 PacketEat.INSTANCE,
                 Blink.INSTANCE,
                 LagBack.INSTANCE,
+                AntiLag.INSTANCE,
                 AntiEffects.INSTANCE,
                 NoFall.INSTANCE
         );

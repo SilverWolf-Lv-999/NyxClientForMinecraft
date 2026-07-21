@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.utility.player;
 
+import io.github.seraphina.nyx.client.module.player.AntiLag;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.phys.Vec3;
@@ -8,8 +9,6 @@ import net.minecraft.world.phys.Vec3;
  * Position-packet teleport helpers adapted from Mirror's TPUtils.
  */
 public final class TPUtility {
-    private static final double DEFAULT_MOVE_DISTANCE = 10.0D;
-
     private TPUtility() {
     }
 
@@ -18,7 +17,8 @@ public final class TPUtility {
     }
 
     public static double getMoveD() {
-        return DEFAULT_MOVE_DISTANCE;
+        double moveDistance = AntiLag.INSTANCE.moveDistance.getValue();
+        return moveDistance > 0.0D ? moveDistance : Double.MAX_VALUE;
     }
 
     public static void tp(Vec3 from, Vec3 to, float yaw, float pitch) {
