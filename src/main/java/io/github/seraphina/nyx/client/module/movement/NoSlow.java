@@ -52,6 +52,7 @@ public class NoSlow extends Module {
     public final BoolValue soulSand = ValueBuild.boolSetting("soul sand", true, this);
     public final BoolValue sneak = ValueBuild.boolSetting("sneak", false, this);
     public final BoolValue climb = ValueBuild.boolSetting("climb", false, this);
+    public final BoolValue keepSprint = ValueBuild.boolSetting("keep sprint", true, this);
     public final BoolValue guiMove = ValueBuild.boolSetting("gui move", true, this);
     public final BoolValue allowGuiSneak = ValueBuild.boolSetting("allow gui sneak", false, () -> guiMove.getValue(), this);
     public final EnumValue<ClickBypass> clickBypass = ValueBuild.enumSetting("gui move bypass", ClickBypass.NONE, this);
@@ -397,14 +398,10 @@ public class NoSlow extends Module {
     }
 
     private boolean shouldKeepSprintThisTick() {
-        if (!isEnabled() || isNull() || !mc.player.isUsingItem()) {
-            return false;
-        }
-
-        return switch (mode.getValue()) {
-            case GRIM_LAZY, GRIM_TICK, HEYPIXEL_2_3, GRIM_50, GRIM_1_3, JUMP, NEW_GRIM -> noSlow();
-            default -> false;
-        };
+        return keepSprint.getValue()
+                && !isNull()
+                && mc.player.isUsingItem()
+                && noSlow();
     }
 
     private void prepareNewGrimUse() {

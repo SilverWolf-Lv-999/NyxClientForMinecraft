@@ -65,12 +65,15 @@ public final class ModuleManager {
                 AutoJump.INSTANCE,
                 HighJump.INSTANCE,
                 Sprint.INSTANCE,
+                KeepSprint.INSTANCE,
+                Step.INSTANCE,
                 Stuck.INSTANCE,
                 ElytraFly.INSTANCE,
                 FastFall.INSTANCE,
                 SafeWalk.INSTANCE,
                 AntiVoid.INSTANCE,
                 NoSlow.INSTANCE,
+                NoWeb.INSTANCE,
                 AutoIceBoot.INSTANCE
         );
         //Other

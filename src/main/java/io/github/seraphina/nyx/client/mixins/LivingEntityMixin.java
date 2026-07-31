@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.events.impl.TravelEvent;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import io.github.seraphina.nyx.client.module.movement.ElytraFly;
 import io.github.seraphina.nyx.client.module.player.AntiEffects;
+import io.github.seraphina.nyx.client.module.visual.Animations;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Holder;
 import net.minecraft.world.effect.MobEffect;
@@ -117,6 +118,7 @@ public class LivingEntityMixin {
             return original;
         }
 
-        return SpearCooldown.INSTANCE.swingDuration(original, entity.getMainHandItem());
+        int animationDuration = Animations.INSTANCE.swingDuration(original);
+        return SpearCooldown.INSTANCE.swingDuration(animationDuration, entity.getMainHandItem());
     }
 }

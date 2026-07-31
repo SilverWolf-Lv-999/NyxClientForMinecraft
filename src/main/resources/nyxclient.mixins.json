@@ -60,6 +60,7 @@
     "RecipeBookComponentMixin",
     "SubmitNodeCollectionMixin",
     "TooltipRenderUtilMixin",
+    "WebBlockMixin",
     "via.MixinClientPacketListener",
     "via.MixinDebugScreenEntries",
     "via.MixinServerData",
