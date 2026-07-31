@@ -39,7 +39,8 @@ public final class ModuleManager {
                 NameProtection.INSTANCE,
                 EntityCulling.INSTANCE,
                 BlockCulling.INSTANCE,
-                ThreadRipper.INSTANCE
+                ThreadRipper.INSTANCE,
+                Disabler.INSTANCE
         );
         //Combat
         registerModule(
@@ -102,7 +103,8 @@ public final class ModuleManager {
                 LagBack.INSTANCE,
                 AntiLag.INSTANCE,
                 AntiEffects.INSTANCE,
-                NoFall.INSTANCE
+                NoFall.INSTANCE,
+                Regen.INSTANCE
         );
         //Visual
         registerModule(
