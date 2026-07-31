@@ -50,14 +50,15 @@ public class ElytraFly extends Module {
     private static final double GRIM_ARMOR_ROTATION_SPEED = 180.0D;
     private static final double GRIM_ARMOR_MIN_FIREWORK_SPEED = 1.0D;
     private static final double GRIM_ARMOR_BOOST_COLLISION_CHECK_DISTANCE = 0.25D;
-    private static final double NORMAL_ASCEND_ACCELERATION = 0.08D;
-    private static final double NORMAL_DESCEND_ACCELERATION = 0.04D;
-
     public final BoolValue onlyOnPreeSpace = ValueBuild.boolSetting("on space press", false, this);
 
     public final EnumValue<FlyType> flyType = ValueBuild.enumSetting("fly type", FlyType.NORMAL, this);
 
     public final DoubleValue flySpeed = ValueBuild.doubleSetting("fly speed", 1.0, 0.1, 10.0, 0.1, ()-> flyType.getValue() == FlyType.NORMAL, this);
+
+    public final DoubleValue verticalSpeed = ValueBuild.doubleSetting("vertical speed", 1.0, 0.1, 10.0, 0.1, ()-> flyType.getValue() == FlyType.NORMAL, this);
+
+    public final BoolValue hover = ValueBuild.boolSetting("hover", false, ()-> flyType.getValue() == FlyType.NORMAL, this);
 
     public final BoolValue shouldDown = ValueBuild.boolSetting("should down", false, ()-> flyType.getValue() == FlyType.NORMAL, this);
 
@@ -292,17 +293,39 @@ public class ElytraFly extends Module {
     }
 
     private double verticalVelocity(double currentVelocity) {
-        if (mc.options.keyJump.isDown()) {
-            double targetVelocity = flySpeed.getValue();
-            return currentVelocity < targetVelocity ? currentVelocity + NORMAL_ASCEND_ACCELERATION : currentVelocity;
+        int vertical = verticalInput();
+        if (vertical > 0) {
+            return verticalSpeed.getValue();
         }
 
-        if (mc.options.keyShift.isDown() || shouldDown.getValue()) {
-            double targetVelocity = -downFlySpeed.getValue();
-            return currentVelocity > targetVelocity ? currentVelocity - NORMAL_DESCEND_ACCELERATION : currentVelocity;
+        if (vertical < 0) {
+            return -verticalSpeed.getValue();
         }
 
-        return currentVelocity;
+        if (shouldDown.getValue()) {
+            return -downFlySpeed.getValue();
+        }
+
+        return shouldHover() ? 0.0D : currentVelocity;
+    }
+
+    public Vec3 applyNormalFallFlyingVelocity(Vec3 velocity) {
+        if (!isEnabled() || !flyType.is(FlyType.NORMAL) || !canRun()) {
+            return velocity;
+        }
+
+        return new Vec3(velocity.x, verticalVelocity(velocity.y), velocity.z);
+    }
+
+    public boolean shouldHover() {
+        return isEnabled()
+                && flyType.is(FlyType.NORMAL)
+                && hover.getValue()
+                && activeFallFlight
+                && !shouldDown.getValue()
+                && !mc.options.keyJump.isDown()
+                && !mc.options.keyShift.isDown()
+                && !onlyOnPreeSpace.getValue();
     }
 
     private void keepFallFlying() {

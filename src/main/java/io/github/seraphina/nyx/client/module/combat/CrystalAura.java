@@ -15,6 +15,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
+import io.github.seraphina.nyx.client.utility.player.PacketUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -76,6 +77,7 @@ public class CrystalAura extends Module {
     };
 
     public final EnumValue<Select> target = ValueBuild.enumSetting("target", Select.SINGLE, this);
+    public final EnumValue<Mode> mode = ValueBuild.enumSetting("mode", Mode.GRIM, this);
 
     public final IntValue switchTick = ValueBuild.intSetting(
             "switch tick",
@@ -148,6 +150,10 @@ public class CrystalAura extends Module {
     private int placeRotationVariant;
     private float lastPlacedYawDelta = Float.NaN;
     private BlockPos pendingSupportBasePos;
+
+    private boolean isVanilla() {
+        return mode.getValue() == Mode.VANILLA;
+    }
 
     @Override
     public void onEnable() {
@@ -588,7 +594,7 @@ public class CrystalAura extends Module {
     }
 
     private boolean canUseCrystalBase(BlockPos basePos) {
-        if (!RotationUtility.isGrimDirection(basePos, Direction.UP) || !RotationUtility.canSee(basePos, Direction.UP)) {
+        if (!isVanilla() && (!RotationUtility.isGrimDirection(basePos, Direction.UP) || !RotationUtility.canSee(basePos, Direction.UP))) {
             return false;
         }
 
@@ -886,7 +892,7 @@ public class CrystalAura extends Module {
                 continue;
             }
 
-            if (!RotationUtility.isGrimDirection(neighbor, direction) || !RotationUtility.canSee(neighbor, direction)) {
+            if (!isVanilla() && (!RotationUtility.isGrimDirection(neighbor, direction) || !RotationUtility.canSee(neighbor, direction))) {
                 continue;
             }
 
@@ -963,6 +969,15 @@ public class CrystalAura extends Module {
             return false;
         }
 
+        if (isVanilla()) {
+            if (!PacketUtility.attack(crystal, mc.player.isShiftKeyDown())) {
+                return false;
+            }
+
+            usedInteractionThisTick = true;
+            return true;
+        }
+
         attackWithRotations(action.rotations(), crystal);
         mc.player.swing(InteractionHand.MAIN_HAND);
         usedInteractionThisTick = true;
@@ -972,6 +987,16 @@ public class CrystalAura extends Module {
     private boolean runQueuedBlockUse(QueuedAction action) {
         if (!Inventory.isHotbarSlot(action.hotbarSlot())) {
             return false;
+        }
+
+        BlockHitResult hitResult = new BlockHitResult(action.hitVec(), action.direction(), action.blockPos(), false);
+        if (isVanilla()) {
+            if (!PacketUtility.useHotbarItemOnBlock(action.hotbarSlot(), hitResult)) {
+                return false;
+            }
+
+            usedInteractionThisTick = true;
+            return true;
         }
 
         int previousSlot = InventoryUtility.getSelectedHotbarSlot();
@@ -984,7 +1009,6 @@ public class CrystalAura extends Module {
             return false;
         }
 
-        BlockHitResult hitResult = new BlockHitResult(action.hitVec(), action.direction(), action.blockPos(), false);
         InteractionResult result;
         try {
             result = useItemOnWithRotations(action.rotations(), hitResult);
@@ -1012,6 +1036,10 @@ public class CrystalAura extends Module {
     }
 
     private Vector2f preparePlaceRotations(Vector2f rotations, Vector2f previousRotations) {
+        if (isVanilla()) {
+            return prepareActionRotations(legitimizeRotations(rotations));
+        }
+
         Vector2f baseRotations = legitimizeRotations(rotations);
         Vector2f placeRotations = variedPlaceRotations(baseRotations);
         Vector2f uniqueRotations = makeUniqueOutgoingRotations(placeRotations);
@@ -1519,5 +1547,10 @@ public class CrystalAura extends Module {
         SINGLE, // 锁定一个目标不切换
         SWITCH, // 在目标间切换
         MUTI // 多目标同时攻击
+    }
+
+    public enum Mode {
+        GRIM,
+        VANILLA
     }
 }

@@ -16,6 +16,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
+import io.github.seraphina.nyx.client.utility.player.PacketUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -75,6 +76,7 @@ public class AnchorAura extends Module {
     };
 
     public final EnumValue<Select> target = ValueBuild.enumSetting("target", Select.SINGLE, this);
+    public final EnumValue<Mode> mode = ValueBuild.enumSetting("mode", Mode.GRIM, this);
 
     public final IntValue switchTick = ValueBuild.intSetting(
             "switch tick",
@@ -123,6 +125,10 @@ public class AnchorAura extends Module {
     private int placeRotationVariant;
     private BlockPos activeAnchorPos;
     private Stage stage = Stage.PLACE_ANCHOR;
+
+    private boolean isVanilla() {
+        return mode.getValue() == Mode.VANILLA;
+    }
 
     @Override
     public void onEnable() {
@@ -741,7 +747,7 @@ public class AnchorAura extends Module {
                 continue;
             }
 
-            if (!RotationUtility.isGrimDirection(neighbor, direction) || !RotationUtility.canSee(neighbor, direction)) {
+            if (!isVanilla() && (!RotationUtility.isGrimDirection(neighbor, direction) || !RotationUtility.canSee(neighbor, direction))) {
                 continue;
             }
 
@@ -753,7 +759,7 @@ public class AnchorAura extends Module {
 
     private ClickFace findAnchorClickFace(BlockPos anchorPos) {
         for (Direction direction : PLACE_DIRECTIONS) {
-            if (!RotationUtility.isGrimDirection(anchorPos, direction) || !RotationUtility.canSee(anchorPos, direction)) {
+            if (!isVanilla() && (!RotationUtility.isGrimDirection(anchorPos, direction) || !RotationUtility.canSee(anchorPos, direction))) {
                 continue;
             }
 
@@ -808,7 +814,7 @@ public class AnchorAura extends Module {
             return;
         }
 
-        if (!isActionRotationSynced(action.rotations())) {
+        if (!isVanilla() && !isActionRotationSynced(action.rotations())) {
             releaseActionRotations();
             return;
         }
@@ -816,6 +822,11 @@ public class AnchorAura extends Module {
         if (runQueuedBlockUse(action)) {
             spendAction();
             completeAction(action);
+        }
+
+        if (isVanilla()) {
+            releaseActionRotations();
+            return;
         }
 
         if (usedInteractionThisTick) {
@@ -863,13 +874,24 @@ public class AnchorAura extends Module {
             return false;
         }
 
-        return RotationUtility.isGrimDirection(action.blockPos(), action.direction())
-                && RotationUtility.canSee(action.blockPos(), action.direction());
+        return isVanilla()
+                || (RotationUtility.isGrimDirection(action.blockPos(), action.direction())
+                && RotationUtility.canSee(action.blockPos(), action.direction()));
     }
 
     private boolean runQueuedBlockUse(QueuedAction action) {
         if (!Inventory.isHotbarSlot(action.hotbarSlot())) {
             return false;
+        }
+
+        BlockHitResult hitResult = new BlockHitResult(action.hitVec(), action.direction(), action.blockPos(), false);
+        if (isVanilla()) {
+            if (!PacketUtility.useHotbarItemOnBlock(action.hotbarSlot(), hitResult)) {
+                return false;
+            }
+
+            usedInteractionThisTick = true;
+            return true;
         }
 
         int previousSlot = InventoryUtility.getSelectedHotbarSlot();
@@ -882,7 +904,6 @@ public class AnchorAura extends Module {
             return false;
         }
 
-        BlockHitResult hitResult = new BlockHitResult(action.hitVec(), action.direction(), action.blockPos(), false);
         InteractionResult result;
         try {
             result = useItemOnWithRotations(action.rotations(), hitResult);
@@ -916,6 +937,10 @@ public class AnchorAura extends Module {
     }
 
     private Vector2f preparePlaceRotations(Vector2f rotations) {
+        if (isVanilla()) {
+            return prepareActionRotations(legitimizeRotations(rotations));
+        }
+
         Vector2f baseRotations = legitimizeRotations(rotations);
         Vector2f placeRotations = variedPlaceRotations(baseRotations);
         return prepareActionRotations(makeUniqueActionRotations(placeRotations, baseRotations));
@@ -1457,5 +1482,10 @@ public class AnchorAura extends Module {
         SINGLE,
         SWITCH,
         MUTI
+    }
+
+    public enum Mode {
+        GRIM,
+        VANILLA
     }
 }

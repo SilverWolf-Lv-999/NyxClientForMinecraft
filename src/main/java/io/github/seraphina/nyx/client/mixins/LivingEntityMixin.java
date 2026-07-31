@@ -10,6 +10,7 @@ import io.github.seraphina.nyx.client.events.impl.JumpEvent;
 import io.github.seraphina.nyx.client.events.impl.RotationAnimationEvent;
 import io.github.seraphina.nyx.client.events.impl.TravelEvent;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
+import io.github.seraphina.nyx.client.module.movement.ElytraFly;
 import io.github.seraphina.nyx.client.module.player.AntiEffects;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Holder;
@@ -53,6 +54,15 @@ public class LivingEntityMixin {
 
         FallFlyingEvent event = EventBus.INSTANCE.post(new FallFlyingEvent(original));
         return event.getPitch();
+    }
+
+    @ModifyReturnValue(method = "updateFallFlyingMovement", at = @At("RETURN"))
+    private Vec3 nyx$applyElytraFlyVerticalVelocity(Vec3 original) {
+        if ((LivingEntity) (Object) this != Minecraft.getInstance().player) {
+            return original;
+        }
+
+        return ElytraFly.INSTANCE.applyNormalFallFlyingVelocity(original);
     }
 
     @Inject(method = "travel", at = @At("HEAD"), cancellable = true)
