@@ -50,6 +50,7 @@ import org.joml.Vector2f;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 @ModuleInfo(name = "nyxclient.module.crystalaura.name", description = "nyxclient.module.crystalaura.description", category = Category.COMBAT)
 public class CrystalAura extends Module {
@@ -364,6 +365,7 @@ public class CrystalAura extends Module {
     private List<LivingEntity> findTargets() {
         double searchRange = Math.max(placeRange.getValue(), breakRange.getValue()) + TARGET_SEARCH_EXTRA_RANGE;
         AABB searchBox = mc.player.getBoundingBox().inflate(searchRange);
+        Vec3 playerPosition = mc.player.position();
         List<Entity> entities = mc.level.getEntities(
                 mc.player,
                 searchBox,
@@ -372,7 +374,9 @@ public class CrystalAura extends Module {
 
         return entities.stream()
                 .map(LivingEntity.class::cast)
-                .sorted(Comparator.comparingDouble(entity -> entity.distanceToSqr(mc.player)))
+                .map(entity -> Map.entry(entity, entity.position().distanceToSqr(playerPosition)))
+                .sorted(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
                 .toList();
     }
 
@@ -581,7 +585,8 @@ public class CrystalAura extends Module {
             }
         }
 
-        positions.sort(Comparator.comparingDouble(pos -> crystalPosition(pos).distanceToSqr(target.position())));
+        Vec3 targetPosition = target.position();
+        positions.sort(Comparator.comparingDouble(pos -> crystalPosition(pos).distanceToSqr(targetPosition)));
         return positions;
     }
 

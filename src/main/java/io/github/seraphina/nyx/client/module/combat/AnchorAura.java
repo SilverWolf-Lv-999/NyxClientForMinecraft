@@ -50,6 +50,7 @@ import org.joml.Vector2f;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 @ModuleInfo(name = "nyxclient.module.anchoraura.name", description = "nyxclient.module.anchoraura.description", category = Category.COMBAT)
 public class AnchorAura extends Module {
@@ -433,6 +434,7 @@ public class AnchorAura extends Module {
     private List<LivingEntity> findTargets() {
         double searchRange = placeRange.getValue() + TARGET_SEARCH_EXTRA_RANGE;
         AABB searchBox = mc.player.getBoundingBox().inflate(searchRange);
+        Vec3 playerPosition = mc.player.position();
         List<Entity> entities = mc.level.getEntities(
                 mc.player,
                 searchBox,
@@ -441,7 +443,9 @@ public class AnchorAura extends Module {
 
         return entities.stream()
                 .map(LivingEntity.class::cast)
-                .sorted(Comparator.comparingDouble(entity -> entity.distanceToSqr(mc.player)))
+                .map(entity -> Map.entry(entity, entity.position().distanceToSqr(playerPosition)))
+                .sorted(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
                 .toList();
     }
 
@@ -562,7 +566,8 @@ public class AnchorAura extends Module {
             }
         }
 
-        positions.sort(Comparator.comparingDouble(pos -> anchorExplosionPosition(pos).distanceToSqr(target.position())));
+        Vec3 targetPosition = target.position();
+        positions.sort(Comparator.comparingDouble(pos -> anchorExplosionPosition(pos).distanceToSqr(targetPosition)));
         return positions;
     }
 
