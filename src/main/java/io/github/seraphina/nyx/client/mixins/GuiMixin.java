@@ -74,6 +74,82 @@ public abstract class GuiMixin {
         }
     }
 
+    @WrapOperation(
+        method = "renderCameraOverlays",
+        at = @At(
+            value = "INVOKE",
+            target = "Lnet/minecraft/client/gui/Gui;renderTextureOverlay(Lnet/minecraft/client/gui/GuiGraphics;Lnet/minecraft/resources/Identifier;F)V",
+            ordinal = 1
+        )
+    )
+    private void renderPowderedSnowOverlay(
+        Gui instance,
+        GuiGraphics guiGraphics,
+        Identifier texture,
+        float alpha,
+        Operation<Void> original
+    ) {
+        if (!NoRenderer.INSTANCE.shouldDisablePowderedSnowOverlay()) {
+            original.call(instance, guiGraphics, texture, alpha);
+        }
+    }
+
+    @Inject(method = "renderBossOverlay", at = @At("HEAD"), cancellable = true)
+    private void onRenderBossOverlay(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableBossBar()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderTitle", at = @At("HEAD"), cancellable = true)
+    private void onRenderTitle(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableTitle()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderCrosshair", at = @At("HEAD"), cancellable = true)
+    private void onRenderCrosshair(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableCrosshair()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderSelectedItemName(Lnet/minecraft/client/gui/GuiGraphics;)V", at = @At("HEAD"), cancellable = true)
+    private void onRenderSelectedItemName(GuiGraphics guiGraphics, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableHeldItemName()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderSpyglassOverlay", at = @At("HEAD"), cancellable = true)
+    private void onRenderSpyglassOverlay(GuiGraphics guiGraphics, float scale, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableSpyglassOverlay()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderVignette", at = @At("HEAD"), cancellable = true)
+    private void onRenderVignette(GuiGraphics guiGraphics, net.minecraft.world.entity.Entity entity, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableVignette()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderPortalOverlay", at = @At("HEAD"), cancellable = true)
+    private void onRenderPortalOverlay(GuiGraphics guiGraphics, float alpha, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisablePortalOverlay()) {
+            info.cancel();
+        }
+    }
+
+    @Inject(method = "renderConfusionOverlay", at = @At("HEAD"), cancellable = true)
+    private void onRenderConfusionOverlay(GuiGraphics guiGraphics, float alpha, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableNauseaOverlay()) {
+            info.cancel();
+        }
+    }
+
     @Inject(method = "renderHearts", at = @At("HEAD"), cancellable = true)
     private void onRenderHearts(
         GuiGraphics guiGraphics,
@@ -249,6 +325,11 @@ public abstract class GuiMixin {
 
     @Inject(method = "renderEffects", at = @At("HEAD"), cancellable = true)
     private void onRenderEffects(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisablePotionIcons()) {
+            info.cancel();
+            return;
+        }
+
         if (!ModernGui.INSTANCE.shouldReplacePotionEffects()) {
             return;
         }
@@ -273,6 +354,11 @@ public abstract class GuiMixin {
 
     @Inject(method = "displayScoreboardSidebar", at = @At("HEAD"), cancellable = true)
     private void onDisplayScoreboardSidebar(GuiGraphics guiGraphics, Objective objective, CallbackInfo info) {
+        if (NoRenderer.INSTANCE.shouldDisableScoreboard()) {
+            info.cancel();
+            return;
+        }
+
         if (!ModernGui.INSTANCE.shouldReplaceScoreboard()) {
             return;
         }

@@ -21,8 +21,10 @@ import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.phys.HitResult;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -39,6 +41,15 @@ public class MinecraftMixin {
 
     @Shadow
     public Gui gui;
+
+    @Shadow
+    public HitResult hitResult;
+
+    @Unique
+    private HitResult nyx$previousUseItemHitResult;
+
+    @Unique
+    private boolean nyx$replacedUseItemHitResult;
 
     @Inject(method = "<init>", at = @At("TAIL"))
     public void init(CallbackInfo info) {
@@ -80,9 +91,30 @@ public class MinecraftMixin {
 
     @Inject(method = "startUseItem", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/InteractionHand;values()[Lnet/minecraft/world/InteractionHand;"), cancellable = true)
     private void onStartUseItemBeforeHands(CallbackInfo info) {
-        if (EventBus.INSTANCE.post(new StartUseItemEvent()).isCancelled()) {
+        nyx$previousUseItemHitResult = null;
+        nyx$replacedUseItemHitResult = false;
+
+        StartUseItemEvent event = EventBus.INSTANCE.post(new StartUseItemEvent(this.hitResult));
+        if (event.isCancelled()) {
             info.cancel();
+            return;
         }
+
+        if (event.getHitResult() != this.hitResult) {
+            nyx$previousUseItemHitResult = this.hitResult;
+            nyx$replacedUseItemHitResult = true;
+            this.hitResult = event.getHitResult();
+        }
+    }
+
+    @Inject(method = "startUseItem", at = @At("RETURN"))
+    private void onStartUseItemAfterHands(CallbackInfo info) {
+        if (nyx$replacedUseItemHitResult) {
+            this.hitResult = nyx$previousUseItemHitResult;
+        }
+
+        nyx$previousUseItemHitResult = null;
+        nyx$replacedUseItemHitResult = false;
     }
 
     @ModifyConstant(method = "startUseItem", constant = @Constant(intValue = 4))

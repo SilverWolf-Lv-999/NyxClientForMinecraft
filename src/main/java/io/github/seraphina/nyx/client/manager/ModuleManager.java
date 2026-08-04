@@ -107,6 +107,8 @@ public final class ModuleManager {
                 LagBack.INSTANCE,
                 AntiLag.INSTANCE,
                 AntiEffects.INSTANCE,
+                AirPlace.INSTANCE,
+                AntiHunger.INSTANCE,
                 NoFall.INSTANCE,
                 Regen.INSTANCE
         );

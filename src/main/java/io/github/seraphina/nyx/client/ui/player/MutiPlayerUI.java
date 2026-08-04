@@ -1077,14 +1077,13 @@ public final class MutiPlayerUI extends LuaScreen {
         FontRenderer nameFont = textFont(12.0F);
         FontRenderer metaFont = textFont(9.0F);
         FontRenderer infoFont = textFont(9.0F);
+        float rowProgress = easeOutCubic(listProgress);
         for (int i = 0; i < this.entries.size(); i++) {
             float rowY = stackedItemY(listY, i, ROW_HEIGHT, ROW_GAP, this.scroll);
             if (rowY > listY + listHeight || rowY + ROW_HEIGHT < listY) {
                 continue;
             }
 
-            float rowProgress = clamp(listProgress * 1.18F - i * 0.045F, 0.0F, 1.0F);
-            rowProgress = easeOutCubic(rowProgress);
             if (rowProgress <= 0.001F) {
                 continue;
             }
