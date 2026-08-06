@@ -56,7 +56,8 @@ public final class ModuleManager {
                 SpearCooldown.INSTANCE,
                 TpAura.INSTANCE,
                 TPBowGod.INSTANCE,
-                Backtrack.INSTANCE
+                Backtrack.INSTANCE,
+                KeyPearl.INSTANCE
         );
         //Movement
         registerModule(
