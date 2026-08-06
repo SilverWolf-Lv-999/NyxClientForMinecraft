@@ -153,6 +153,36 @@ dependencies {
             prefer "3.0.14"
         }
     }
+    jarJar(implementation("com.seedfinding:mc_biome:1.171.1")) {
+        version {
+            strictly "[1.171.1,2.0.0)"
+            prefer "1.171.1"
+        }
+    }
+    jarJar(implementation("com.seedfinding:mc_noise:1.171.1")) {
+        version {
+            strictly "[1.171.1,2.0.0)"
+            prefer "1.171.1"
+        }
+    }
+    jarJar(implementation("com.seedfinding:mc_seed:1.171.2")) {
+        version {
+            strictly "[1.171.2,2.0.0)"
+            prefer "1.171.2"
+        }
+    }
+    jarJar(implementation("com.seedfinding:mc_math:1.171.0")) {
+        version {
+            strictly "[1.171.0,2.0.0)"
+            prefer "1.171.0"
+        }
+    }
+    jarJar(implementation("com.seedfinding:mc_core:1.210.0")) {
+        version {
+            strictly "[1.210.0,2.0.0)"
+            prefer "1.210.0"
+        }
+    }
 
     implementation("org.bytedeco:javacv:1.5.13") {
         transitive = false
