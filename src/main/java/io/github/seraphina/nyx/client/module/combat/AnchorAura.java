@@ -16,6 +16,7 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.module.player.AutoHeal;
+import io.github.seraphina.nyx.client.utility.ItemSpoofVisual;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.PacketUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -79,6 +80,7 @@ public class AnchorAura extends Module {
 
     public final EnumValue<Select> target = ValueBuild.enumSetting("target", Select.SINGLE, this);
     public final EnumValue<Mode> mode = ValueBuild.enumSetting("mode", Mode.GRIM, this);
+    public final BoolValue spoofItem = ValueBuild.boolSetting("Spoof Item", false, this);
 
     public final IntValue switchTick = ValueBuild.intSetting(
             "switch tick",
@@ -132,19 +134,31 @@ public class AnchorAura extends Module {
         return mode.getValue() == Mode.VANILLA;
     }
 
+    private void updateSpoofItemVisual() {
+        int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (isEnabled() && spoofItem.getValue() && Inventory.isHotbarSlot(selectedSlot)) {
+            ItemSpoofVisual.enable(this, InventoryUtility.getSelectedStack());
+        } else {
+            ItemSpoofVisual.clear(this);
+        }
+    }
+
     @Override
     public void onEnable() {
         resetState();
+        updateSpoofItemVisual();
     }
 
     @Override
     public void onDisable() {
+        ItemSpoofVisual.clear(this);
         restoreOriginalHotbarSlot();
         resetState();
     }
 
     @EventTarget
     public void onPlayerTick(PlayerTickEvent event) {
+        updateSpoofItemVisual();
         usedInteractionThisTick = false;
         queuedAction = null;
 

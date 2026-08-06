@@ -5,6 +5,7 @@ import com.mojang.math.Axis;
 import io.github.seraphina.nyx.client.events.api.EventManager;
 import io.github.seraphina.nyx.client.events.impl.RenderItemInHandEvent;
 import io.github.seraphina.nyx.client.module.visual.Animations;
+import io.github.seraphina.nyx.client.utility.ItemSpoofVisual;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemInHandRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -71,13 +72,16 @@ public abstract class ItemInHandRendererMixin {
             return;
         }
 
+        boolean spoofItem = ItemSpoofVisual.isEnabled();
         boolean disableEquipProgress = Animations.INSTANCE.shouldDisableEquipProgress();
         boolean oldHit = Animations.INSTANCE.shouldUseOldHit() && !this.minecraft.player.isHandsBusy();
-        if (!disableEquipProgress && !oldHit) {
+        if (!spoofItem && !disableEquipProgress && !oldHit) {
             return;
         }
 
-        ItemStack mainStack = this.minecraft.player.getMainHandItem();
+        ItemStack mainStack = spoofItem
+                ? ItemSpoofVisual.getMainHandItem()
+                : this.minecraft.player.getMainHandItem();
         this.mainHandItem = mainStack;
         this.mainHandHeight = 1.0F;
         this.oMainHandHeight = 1.0F;
@@ -253,6 +257,10 @@ public abstract class ItemInHandRendererMixin {
      */
     @Overwrite
     public void renderItem(LivingEntity entity, ItemStack stack, ItemDisplayContext displayContext, PoseStack poseStack, SubmitNodeCollector nodeCollector, int packedLight) {
+        if (this.nyx$shouldRenderSpoofedMainHand(entity, displayContext)) {
+            stack = ItemSpoofVisual.getMainHandItem();
+        }
+
         if (!stack.isEmpty()) {
             RenderItemInHandEvent event = new RenderItemInHandEvent(entity, stack, displayContext, poseStack, nodeCollector, packedLight);
             EventManager.call(event);
@@ -279,5 +287,16 @@ public abstract class ItemInHandRendererMixin {
             poseStack.popPose();
         }
 
+    }
+
+    private boolean nyx$shouldRenderSpoofedMainHand(LivingEntity entity, ItemDisplayContext displayContext) {
+        if (!ItemSpoofVisual.isEnabled() || entity != this.minecraft.player || this.minecraft.player == null) {
+            return false;
+        }
+
+        ItemDisplayContext mainHandContext = this.minecraft.player.getMainArm() == HumanoidArm.RIGHT
+                ? ItemDisplayContext.FIRST_PERSON_RIGHT_HAND
+                : ItemDisplayContext.FIRST_PERSON_LEFT_HAND;
+        return displayContext == mainHandContext;
     }
 }

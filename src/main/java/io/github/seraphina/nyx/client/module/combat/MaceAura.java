@@ -11,11 +11,13 @@ import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
 import io.github.seraphina.nyx.client.utility.MsgUtility;
+import io.github.seraphina.nyx.client.utility.ItemSpoofVisual;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
+import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import io.github.seraphina.nyx.client.value.impl.DoubleValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
@@ -85,6 +87,7 @@ public class MaceAura extends Module {
     public final DoubleValue targetRange = ValueBuild.doubleSetting("target range", 24.0D, 4.0D, 64.0D, 0.5D, this);
     public final DoubleValue attackRange = ValueBuild.doubleSetting("attack range", 4.5D, 2.5D, 8.0D, 0.1D, this);
     public final IntValue blockheight = ValueBuild.intSetting("block height", 15, 10, 40, 1, () -> itemType.getValue() == ItemType.FIREWORK_ROCKET, this);
+    public final BoolValue spoofItem = ValueBuild.boolSetting("Spoof Item", false, this);
 
     private Stage stage = Stage.ACQUIRE_TARGET;
     private LivingEntity target;
@@ -121,11 +124,13 @@ public class MaceAura extends Module {
     public void onEnable() {
         resetRuntimeState();
         originalSelectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        updateSpoofItemVisual();
         MsgUtility.debug("MaceAura enabled");
     }
 
     @Override
     public void onDisable() {
+        ItemSpoofVisual.clear(this);
         restoreOriginalSelectedSlot();
         RotationManager.INSTANCE.setActive(false);
         resetRuntimeState();
@@ -169,6 +174,7 @@ public class MaceAura extends Module {
     }
 
     private void tickCombatCycle() {
+        updateSpoofItemVisual();
         fireworkPressJumpForGlide = false;
         tickActionDelays();
 
@@ -1760,6 +1766,15 @@ public class MaceAura extends Module {
     private void resetFireworkGlideJumpState() {
         fireworkReleasedJumpForGlide = false;
         fireworkPressJumpForGlide = false;
+    }
+
+    private void updateSpoofItemVisual() {
+        int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (isEnabled() && spoofItem.getValue() && Inventory.isHotbarSlot(selectedSlot)) {
+            ItemSpoofVisual.enable(this, InventoryUtility.getSelectedStack());
+        } else {
+            ItemSpoofVisual.clear(this);
+        }
     }
 
     private boolean isFireworkRouteInProgress() {
