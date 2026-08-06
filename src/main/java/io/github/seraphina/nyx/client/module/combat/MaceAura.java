@@ -1646,7 +1646,6 @@ public class MaceAura extends Module {
         return mc.player != null
                 && mc.level != null
                 && mc.gameMode != null
-                && mc.screen == null
                 && !mc.player.isSpectator();
     }
 

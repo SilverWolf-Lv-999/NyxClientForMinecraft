@@ -16,6 +16,7 @@ public class Animations extends Module {
     public static final Animations INSTANCE = new Animations();
 
     public final BoolValue noEatBobbing = ValueBuild.boolSetting("noeatbobbing", false, this);
+    public final BoolValue noEatCenter = ValueBuild.boolSetting("noeatcenter", false, this);
     public final BoolValue oldHit = ValueBuild.boolSetting("oldhit", false, this);
     public final IntValue swingSpeed = ValueBuild.intValue("swing speed", 0, -4, 20, 1, this);
     public final EnumValue<SwingMode> swingMode = ValueBuild.enumValue("swing mode", SwingMode.VANILLA, this);
@@ -31,6 +32,10 @@ public class Animations extends Module {
 
     public boolean shouldDisableEatBobbing() {
         return isEnabled() && noEatBobbing.getValue();
+    }
+
+    public boolean shouldDisableEatCenter() {
+        return isEnabled() && noEatCenter.getValue();
     }
 
     public boolean shouldUseOldHit() {

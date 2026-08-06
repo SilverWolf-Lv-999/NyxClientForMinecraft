@@ -392,7 +392,7 @@ public class ElytraFly extends Module {
     }
 
     private boolean canUseFireworkRocket() {
-        return mc.screen == null && mc.gameMode != null && mc.player.isFallFlying();
+        return mc.gameMode != null && mc.player.isFallFlying();
     }
 
     private void queueFireworkRocket() {
@@ -512,7 +512,6 @@ public class ElytraFly extends Module {
         return mc.player != null
                 && mc.level != null
                 && mc.gameMode != null
-                && mc.screen == null
                 && !mc.player.onGround()
                 && !mc.player.isPassenger()
                 && !mc.player.isSpectator()

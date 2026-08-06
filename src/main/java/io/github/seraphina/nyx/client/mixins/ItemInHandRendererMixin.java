@@ -251,6 +251,16 @@ public abstract class ItemInHandRendererMixin {
         }
     }
 
+    @Redirect(
+            method = "applyEatTransform",
+            at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V", ordinal = 1)
+    )
+    private void nyx$disableEatCenter(PoseStack poseStack, float x, float y, float z) {
+        if (!Animations.INSTANCE.shouldDisableEatCenter()) {
+            poseStack.translate(x, y, z);
+        }
+    }
+
     /**
      * @author
      * @reason

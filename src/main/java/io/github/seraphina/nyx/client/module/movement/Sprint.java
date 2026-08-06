@@ -10,10 +10,6 @@ import io.github.seraphina.nyx.client.module.ModuleInfo;
 public class Sprint extends Module {
     public static final Sprint INSTANCE = new Sprint();
 
-    public Sprint() {
-
-    }
-
     @EventTarget
     public void onInput(MoveInputEvent event) {
         event.setSprint(true);

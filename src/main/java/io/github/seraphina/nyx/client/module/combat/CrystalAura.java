@@ -18,7 +18,9 @@ import io.github.seraphina.nyx.client.module.player.AutoHeal;
 import io.github.seraphina.nyx.client.utility.ItemSpoofVisual;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.PacketUtility;
+import io.github.seraphina.nyx.client.utility.player.PlayerUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
+import io.github.seraphina.nyx.client.utility.rotation.RaytraceUtility;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
@@ -84,6 +86,7 @@ public class CrystalAura extends Module {
     public final BoolValue spoofItem = ValueBuild.boolSetting("Spoof Item", false, this);
     public final BoolValue keepItem = ValueBuild.boolSetting("Keep Item", false, this);
     public final BoolValue keepRotation = ValueBuild.boolSetting("Keep Rotation", false, this);
+    public final BoolValue wallSelect = ValueBuild.boolSetting("wall select", false, this);
 
     public final IntValue switchTick = ValueBuild.intSetting(
             "switch tick",
@@ -338,7 +341,6 @@ public class CrystalAura extends Module {
         return mc.player != null
                 && mc.level != null
                 && mc.gameMode != null
-                && mc.screen == null
                 && !mc.player.isSpectator();
     }
 
@@ -404,7 +406,12 @@ public class CrystalAura extends Module {
                 && !entity.isSpectator()
                 && entity.isPickable()
                 && !entity.isInvulnerable()
-                && (!(entity instanceof Player player) || !player.isCreative());
+                && (!(entity instanceof Player player) || !player.isCreative())
+                && (wallSelect.getValue() || canSee(entity));
+    }
+
+    private boolean canSee(LivingEntity entity) {
+        return RaytraceUtility.canSeePointFrom(mc.player.getEyePosition(), entity.getBoundingBox().getCenter());
     }
 
     private List<LivingEntity> selectTargets(List<LivingEntity> targets) {
@@ -616,7 +623,9 @@ public class CrystalAura extends Module {
     }
 
     private boolean canUseCrystalBase(BlockPos basePos) {
-        if (!isVanilla() && (!RotationUtility.isGrimDirection(basePos, Direction.UP) || !RotationUtility.canSee(basePos, Direction.UP))) {
+        if (!isVanilla()
+                && !wallSelect.getValue()
+                && (!RotationUtility.isGrimDirection(basePos, Direction.UP) || !RotationUtility.canSee(basePos, Direction.UP))) {
             return false;
         }
 
@@ -914,7 +923,9 @@ public class CrystalAura extends Module {
                 continue;
             }
 
-            if (!isVanilla() && (!RotationUtility.isGrimDirection(neighbor, direction) || !RotationUtility.canSee(neighbor, direction))) {
+            if (!isVanilla()
+                    && !wallSelect.getValue()
+                    && (!RotationUtility.isGrimDirection(neighbor, direction) || !RotationUtility.canSee(neighbor, direction))) {
                 continue;
             }
 
@@ -992,6 +1003,12 @@ public class CrystalAura extends Module {
             return false;
         }
 
+        if (wallSelect.getValue()) {
+            PlayerUtility.attackEntity(crystal);
+            usedInteractionThisTick = true;
+            return true;
+        }
+
         if (isVanilla()) {
             if (!PacketUtility.attack(crystal, mc.player.isShiftKeyDown())) {
                 return false;
@@ -1013,7 +1030,7 @@ public class CrystalAura extends Module {
         }
 
         BlockHitResult hitResult = new BlockHitResult(action.hitVec(), action.direction(), action.blockPos(), false);
-        if (isVanilla()) {
+        if (isVanilla() && !wallSelect.getValue()) {
             if (!PacketUtility.useHotbarItemOnBlock(action.hotbarSlot(), hitResult)) {
                 return false;
             }
@@ -1030,6 +1047,21 @@ public class CrystalAura extends Module {
         boolean changedSlot = previousSlot != action.hotbarSlot();
         if (changedSlot && !selectWorkHotbarSlot(action.hotbarSlot(), previousSlot)) {
             return false;
+        }
+
+        if (wallSelect.getValue()) {
+            boolean success;
+            try {
+                success = PlayerUtility.interactBlock(action.blockPos(), action.direction(), InteractionHand.MAIN_HAND);
+            } finally {
+                beginPostUseDelay();
+            }
+
+            if (success) {
+                updateLastPlacedYawDelta(action);
+                placeRotationVariant++;
+            }
+            return success;
         }
 
         InteractionResult result;
