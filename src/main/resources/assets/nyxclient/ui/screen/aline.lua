@@ -139,25 +139,36 @@ local function render_enum_value(state, module, value, x, y, width, viewport_y, 
     clipped_hitbox(state, x, y, width, VALUE_HEIGHT, viewport_y, viewport_height,
         "setting_click", setting_payload(module, value), state.interactive, false)
 
-    if not value.open then
+    local expand_progress = value.expand_progress or (value.open and 1 or 0)
+    local options_height = #(value.options or {}) * VALUE_HEIGHT * expand_progress
+    if options_height <= 0.5 then
         return
     end
 
-    local option_y = y + VALUE_HEIGHT
-    for _, option in ipairs(value.options or {}) do
-        local selected = option.selected == true
-        ui.rect(x + 1, option_y, width - 2, VALUE_HEIGHT - 1,
-            ui.opacity(selected and SETTING_SELECTED or SETTING_BACKGROUND, alpha))
-        ui.text_centered(ui.trim_text("text", option.label or "", 8.0, width - 10), x + width * 0.5,
-            option_y + TEXT_OFFSET_Y, 8.0, ui.opacity(selected and TEXT or TEXT_DISABLED, alpha))
-        clipped_hitbox(state, x, option_y, width, VALUE_HEIGHT, viewport_y, viewport_height,
-            "enum_select", {
-                module = module.index,
-                value = value.index,
-                mode = option.value
-            }, state.interactive, false)
-        option_y = option_y + VALUE_HEIGHT
-    end
+    local options_y = y + VALUE_HEIGHT
+    local options_viewport_y = math.max(viewport_y, options_y)
+    local options_viewport_bottom = math.min(viewport_y + viewport_height, options_y + options_height)
+    local options_viewport_height = math.max(0, options_viewport_bottom - options_viewport_y)
+
+    ui.clip(x, options_y, width, options_height, function()
+        local option_y = options_y
+        for _, option in ipairs(value.options or {}) do
+            local selected = option.selected == true
+            ui.rect(x + 1, option_y, width - 2, VALUE_HEIGHT - 1,
+                ui.opacity(selected and SETTING_SELECTED or SETTING_BACKGROUND, alpha * expand_progress))
+            ui.text_centered(ui.trim_text("text", option.label or "", 8.0, width - 10), x + width * 0.5,
+                option_y + TEXT_OFFSET_Y, 8.0,
+                ui.opacity(selected and TEXT or TEXT_DISABLED, alpha * expand_progress))
+            clipped_hitbox(state, x, option_y, width, VALUE_HEIGHT,
+                options_viewport_y, options_viewport_height,
+                "enum_select", {
+                    module = module.index,
+                    value = value.index,
+                    mode = option.value
+                }, state.interactive, false)
+            option_y = option_y + VALUE_HEIGHT
+        end
+    end)
 end
 
 local function render_color_picker(state, module, value, x, y, width, viewport_y, viewport_height, alpha)

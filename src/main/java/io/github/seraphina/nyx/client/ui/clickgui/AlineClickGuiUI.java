@@ -70,6 +70,7 @@ public final class AlineClickGuiUI extends LuaScreen {
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
     private static final float MODULE_EXPAND_ANIMATION_SPEED = 16.0F;
     private static final float MODULE_TOGGLE_ANIMATION_SPEED = 18.0F;
+    private static final float VALUE_EXPAND_ANIMATION_SPEED = 18.0F;
     private static final long OPEN_ANIMATION_NANOS = 260_000_000L;
     private static final long CLOSE_ANIMATION_NANOS = 190_000_000L;
     private static final Comparator<Module> MODULE_NAME_ORDER =
@@ -78,6 +79,7 @@ public final class AlineClickGuiUI extends LuaScreen {
     private final Map<Category, PanelState> panels = new EnumMap<>(Category.class);
     private final Map<Module, Boolean> expandedModules = new IdentityHashMap<>();
     private final Map<AbstractValue<?>, Boolean> expandedValues = new IdentityHashMap<>();
+    private final Map<AbstractValue<?>, Float> valueExpandProgress = new IdentityHashMap<>();
     private final Map<Module, ModuleAnimationState> moduleAnimations = new IdentityHashMap<>();
     private final List<ModuleRowLayout> renderedModuleRows = new ArrayList<>();
     private final List<SettingRowLayout> renderedSettingRows = new ArrayList<>();
@@ -141,6 +143,7 @@ public final class AlineClickGuiUI extends LuaScreen {
         }
 
         updateModuleAnimations();
+        updateValueAnimations();
         preparePanelGeometry();
         updateFocusedPanel(logicalMouseX(mouseX), logicalMouseY(mouseY));
         this.renderedModuleRows.clear();
@@ -397,6 +400,7 @@ public final class AlineClickGuiUI extends LuaScreen {
         } else if (value instanceof EnumValue<?> enumValue) {
             boolean open = isValueExpanded(value);
             state.put("open", open);
+            state.put("expand_progress", valueExpandProgress(value));
             List<Map<String, Object>> options = new ArrayList<>();
             for (Enum<?> mode : enumValue.getModes()) {
                 Map<String, Object> option = new LinkedHashMap<>();
@@ -643,8 +647,8 @@ public final class AlineClickGuiUI extends LuaScreen {
     }
 
     private float settingHeight(AbstractValue<?> value) {
-        if (value instanceof EnumValue<?> enumValue && isValueExpanded(value)) {
-            return VALUE_ROW_HEIGHT + enumValue.getModes().length * VALUE_ROW_HEIGHT;
+        if (value instanceof EnumValue<?> enumValue) {
+            return VALUE_ROW_HEIGHT + enumValue.getModes().length * VALUE_ROW_HEIGHT * valueExpandProgress(value);
         }
         if (value instanceof ColorValue && isValueExpanded(value)) {
             return VALUE_ROW_HEIGHT + COLOR_PICKER_HEIGHT;
@@ -674,6 +678,10 @@ public final class AlineClickGuiUI extends LuaScreen {
 
     private boolean isValueExpanded(AbstractValue<?> value) {
         return this.expandedValues.getOrDefault(value, false);
+    }
+
+    private float valueExpandProgress(AbstractValue<?> value) {
+        return this.valueExpandProgress.getOrDefault(value, 0.0F);
     }
 
     private void setValueExpanded(AbstractValue<?> value, boolean expanded) {
@@ -707,6 +715,21 @@ public final class AlineClickGuiUI extends LuaScreen {
                 MODULE_TOGGLE_ANIMATION_SPEED,
                 this.animationFrameSeconds
             );
+        }
+    }
+
+    private void updateValueAnimations() {
+        for (Module module : ModuleManager.getModules()) {
+            for (AbstractValue<?> value : module.getValues()) {
+                if (value instanceof EnumValue<?>) {
+                    this.valueExpandProgress.put(value, animateExp(
+                        valueExpandProgress(value),
+                        isValueExpanded(value) ? 1.0F : 0.0F,
+                        VALUE_EXPAND_ANIMATION_SPEED,
+                        this.animationFrameSeconds
+                    ));
+                }
+            }
         }
     }
 
