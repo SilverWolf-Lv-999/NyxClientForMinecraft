@@ -7,6 +7,7 @@ import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.player.AutoElytra;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import net.minecraft.network.protocol.Packet;
@@ -132,7 +133,7 @@ public class Disabler extends Module {
         event.setCancelled(true);
 
         boolean wasSprinting = sprinting.getValue() && mc.player.isSprinting();
-        if (input.getValue()) {
+        if (input.getValue() && !AutoElytra.INSTANCE.isHandlingTakeoff()) {
             spoofInput();
         }
 

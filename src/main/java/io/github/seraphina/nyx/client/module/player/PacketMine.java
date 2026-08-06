@@ -126,6 +126,7 @@ public class PacketMine extends Module {
     private boolean hasSwitch;
     private GrimAction grimQueuedAction;
     private GrimAction grimSyncedAction;
+    private GrimAction grimReadyAction;
     private GrimAction grimAbortAction;
     private Direction grimDirection;
     private int grimMiningTicks;
@@ -135,6 +136,10 @@ public class PacketMine extends Module {
     private boolean grimStarted;
     private boolean grimStopPending;
     private boolean grimStopSent;
+    private float grimLastOutgoingYaw;
+    private float grimPendingOutgoingYaw;
+    private boolean grimHasLastOutgoingYaw;
+    private boolean grimHasPendingOutgoingYaw;
     private Mode activeMode = Mode.NCP;
 
     @Override
@@ -181,14 +186,17 @@ public class PacketMine extends Module {
             return;
         }
 
+        runReadyGrimAction();
         tickGrimMining();
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onSendPosition(SendPositionEvent event) {
-        if (!mode.is(Mode.GRIM) || grimQueuedAction == null) {
+        if (!mode.is(Mode.GRIM)) {
             return;
         }
+
+        normalizeGrimYaw(event);
 
         GrimAction action = grimQueuedAction;
         grimQueuedAction = null;
@@ -196,20 +204,34 @@ public class PacketMine extends Module {
             return;
         }
 
-        event.setYaw(action.rotations().x);
-        event.setPitch(action.rotations().y);
+        setGrimRotations(event, action.rotations());
         grimSyncedAction = action;
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onPostSendPosition(PostSendPositionEvent event) {
-        if (!mode.is(Mode.GRIM) || grimSyncedAction == null) {
+        if (!mode.is(Mode.GRIM)) {
             return;
         }
+
+        commitGrimOutgoingYaw();
 
         GrimAction action = grimSyncedAction;
         grimSyncedAction = null;
         if (!isRunnableGrimAction(action)) {
+            return;
+        }
+
+        grimReadyAction = action;
+    }
+
+    private void runReadyGrimAction() {
+        GrimAction action = grimReadyAction;
+        grimReadyAction = null;
+        if (!isRunnableGrimAction(action)) {
+            if (action != null && action.action() != ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK) {
+                cancelGrimMining();
+            }
             return;
         }
 
@@ -623,6 +645,39 @@ public class PacketMine extends Module {
                     case STOP_DESTROY_BLOCK -> grimStopPending && grimStarted && !grimStopSent;
                     default -> false;
                 };
+    }
+
+    private void normalizeGrimYaw(SendPositionEvent event) {
+        float yaw = event.getYaw();
+        if (grimHasLastOutgoingYaw) {
+            yaw = unwrapYaw(yaw, grimLastOutgoingYaw);
+            event.setYaw(yaw);
+        }
+
+        grimPendingOutgoingYaw = yaw;
+        grimHasPendingOutgoingYaw = true;
+    }
+
+    private void setGrimRotations(SendPositionEvent event, Vector2f rotations) {
+        float yaw = unwrapYaw(rotations.x, event.getYaw());
+        event.setYaw(yaw);
+        event.setPitch(Mth.clamp(rotations.y, -90.0F, 90.0F));
+        grimPendingOutgoingYaw = yaw;
+        grimHasPendingOutgoingYaw = true;
+    }
+
+    private void commitGrimOutgoingYaw() {
+        if (!grimHasPendingOutgoingYaw) {
+            return;
+        }
+
+        grimLastOutgoingYaw = grimPendingOutgoingYaw;
+        grimHasLastOutgoingYaw = true;
+        grimHasPendingOutgoingYaw = false;
+    }
+
+    private float unwrapYaw(float yaw, float referenceYaw) {
+        return referenceYaw + Mth.wrapDegrees(yaw - referenceYaw);
     }
 
     private void tickCompletedRetryCounter() {
@@ -1137,6 +1192,7 @@ public class PacketMine extends Module {
     private void clearCurrentGrimMiningState() {
         grimQueuedAction = null;
         grimSyncedAction = null;
+        grimReadyAction = null;
         grimDirection = null;
         grimMiningTicks = 0;
         grimStopResponseTicks = 0;
@@ -1164,6 +1220,10 @@ public class PacketMine extends Module {
     private void resetGrimState() {
         clearCurrentGrimMiningState();
         grimAbortAction = null;
+        grimLastOutgoingYaw = 0.0F;
+        grimPendingOutgoingYaw = 0.0F;
+        grimHasLastOutgoingYaw = false;
+        grimHasPendingOutgoingYaw = false;
     }
 
 

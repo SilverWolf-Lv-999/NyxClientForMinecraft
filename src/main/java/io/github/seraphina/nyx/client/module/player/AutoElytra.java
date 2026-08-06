@@ -37,6 +37,20 @@ public class AutoElytra extends Module {
         activeElytra = null;
     }
 
+    public boolean isHandlingTakeoff() {
+        return activeElytra != null && switch (activeElytra.stage) {
+            case USE_ELYTRA,
+                 WAIT_EQUIP,
+                 GROUND_JUMP_RELEASE,
+                 GROUND_JUMP_PRESS,
+                 WAIT_AIRBORNE,
+                 GLIDE_RELEASE,
+                 GLIDE_PRESS,
+                 WAIT_GLIDE -> true;
+            case FLIGHT, RESTORE_CHEST -> false;
+        };
+    }
+
     @EventTarget
     public void onKeyPress(KeyPressEvent event) {
         if (event.getAction() != GLFW_PRESS || !canRun() || !mc.options.keyJump.matches(event.getKeyEvent())) {
