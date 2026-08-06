@@ -16,6 +16,7 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
@@ -251,14 +252,27 @@ public abstract class ItemInHandRendererMixin {
         }
     }
 
-    @Redirect(
-            method = "applyEatTransform",
-            at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V", ordinal = 1)
-    )
-    private void nyx$disableEatCenter(PoseStack poseStack, float x, float y, float z) {
+    @Inject(method = "applyEatTransform", at = @At("HEAD"), cancellable = true)
+    private void nyx$disableEatCenter(
+            PoseStack poseStack,
+            float partialTick,
+            HumanoidArm arm,
+            ItemStack stack,
+            Player player,
+            CallbackInfo info
+    ) {
         if (!Animations.INSTANCE.shouldDisableEatCenter()) {
-            poseStack.translate(x, y, z);
+            return;
         }
+
+        float remainingTicks = player.getUseItemRemainingTicks() - partialTick + 1.0F;
+        float progress = remainingTicks / stack.getUseDuration(player);
+        if (!Animations.INSTANCE.shouldDisableEatBobbing() && progress < 0.8F) {
+            float bobbingOffset = Mth.abs(Mth.cos(remainingTicks / 4.0F * (float) Math.PI) * 0.1F);
+            poseStack.translate(0.0F, bobbingOffset, 0.0F);
+        }
+
+        info.cancel();
     }
 
     /**
