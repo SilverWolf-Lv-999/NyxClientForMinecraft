@@ -69,6 +69,8 @@ public class ArrayListClickGui extends LuaScreen {
     private static final float MODULE_TOGGLE_ANIMATION_SPEED = 17.0F;
     private static final long OPEN_ANIMATION_NANOS = 320_000_000L;
     private static final long CLOSE_ANIMATION_NANOS = 220_000_000L;
+    private static final Comparator<Module> MODULE_NAME_ORDER =
+        Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER);
 
     private final Map<Category, PanelState> panels = new EnumMap<>(Category.class);
     private final Map<Module, Boolean> expandedModules = new IdentityHashMap<>();
@@ -158,7 +160,7 @@ public class ArrayListClickGui extends LuaScreen {
 
         List<Map<String, Object>> panelStates = new ArrayList<>();
         for (PanelState panel : panelsInRenderOrder()) {
-            List<Module> modules = ModuleManager.getModules(panel.category);
+            List<Module> modules = modulesByName(panel.category);
             if (modules.isEmpty()) {
                 continue;
             }
@@ -721,7 +723,7 @@ public class ArrayListClickGui extends LuaScreen {
         for (Category category : visibleCategories()) {
             PanelState panel = this.panels.get(category);
             float contentHeight = 0.0F;
-            for (Module module : ModuleManager.getModules(category)) {
+            for (Module module : modulesByName(category)) {
                 float valuesHeight = 0.0F;
                 List<AbstractValue<?>> values = visibleValues(module);
                 if (!values.isEmpty()) {
@@ -787,6 +789,12 @@ public class ArrayListClickGui extends LuaScreen {
             }
         }
         return categories;
+    }
+
+    private static List<Module> modulesByName(Category category) {
+        List<Module> modules = new ArrayList<>(ModuleManager.getModules(category));
+        modules.sort(MODULE_NAME_ORDER);
+        return modules;
     }
 
     private List<PanelState> panelsInRenderOrder() {

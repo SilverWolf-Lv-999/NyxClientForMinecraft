@@ -43,6 +43,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -92,6 +93,8 @@ public final class JelloClickGui extends LuaScreen {
     private static final long CLOSE_DURATION_NANOS = 190_000_000L;
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
     private static final float MAX_FRAME_SECONDS = 1.0F / 20.0F;
+    private static final Comparator<Module> MODULE_NAME_ORDER =
+        Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER);
 
     private static final int WHITE_TEXT = 0xFF202228;
     private static final int MUTED_TEXT = 0xFF777B85;
@@ -215,7 +218,7 @@ public final class JelloClickGui extends LuaScreen {
             categoryState.put("id", category.name().toLowerCase(Locale.ROOT));
             categoryState.put("label", categoryLabel(category));
             List<Map<String, Object>> modules = new ArrayList<>();
-            for (Module module : ModuleManager.getModules(category)) {
+            for (Module module : modulesByName(category)) {
                 Map<String, Object> moduleState = new LinkedHashMap<>();
                 moduleState.put("index", moduleIndex(module));
                 moduleState.put("name", module.getName());
@@ -1376,6 +1379,12 @@ public final class JelloClickGui extends LuaScreen {
             return 42.0F;
         }
         return 34.0F;
+    }
+
+    private static List<Module> modulesByName(Category category) {
+        List<Module> modules = new ArrayList<>(ModuleManager.getModules(category));
+        modules.sort(MODULE_NAME_ORDER);
+        return modules;
     }
 
     private static int moduleIndex(Module target) {

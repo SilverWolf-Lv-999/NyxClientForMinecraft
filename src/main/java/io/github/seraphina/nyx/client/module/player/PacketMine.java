@@ -2,8 +2,13 @@ package io.github.seraphina.nyx.client.module.player;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.bus.EventHandler;
+import io.github.seraphina.nyx.client.events.bus.EventPriority;
 import io.github.seraphina.nyx.client.events.impl.AttackBlockEvent;
+import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
+import io.github.seraphina.nyx.client.events.impl.PostSendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.Render3DEvent;
+import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
@@ -44,6 +49,7 @@ import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import org.joml.Vector2f;
 
 @ModuleInfo(name = "nyxclient.module.packetmine.name", description = "nyxclient.module.packetmine.description", category = Category.PLAYER)
 public class PacketMine extends Module {
@@ -51,6 +57,10 @@ public class PacketMine extends Module {
 
     private static final int TICKS_PER_SECOND = 20;
     private static final long TIMER_PRIMED_MS = 917813L;
+    private static final int GRIM_STOP_SAFETY_TICKS = 2;
+    private static final int GRIM_STOP_RESPONSE_TIMEOUT_TICKS = 20;
+
+    public final EnumValue<Mode> mode = ValueBuild.enumSetting("Mode", Mode.NCP, this);
 
     public final BoolValue usingPause = ValueBuild.boolSetting("pause on use", true, this);
     public final BoolValue onlyMain = ValueBuild.boolSetting("only main", true, () -> usingPause.getValue(), this);
@@ -114,10 +124,23 @@ public class PacketMine extends Module {
     private double secondRenderProgress;
     private int oldSlot = InventoryUtility.NOT_FOUND;
     private boolean hasSwitch;
+    private GrimAction grimQueuedAction;
+    private GrimAction grimSyncedAction;
+    private GrimAction grimAbortAction;
+    private Direction grimDirection;
+    private int grimMiningTicks;
+    private int grimStopResponseTicks;
+    private int grimHeldSlot = InventoryUtility.NOT_FOUND;
+    private boolean grimStartPending;
+    private boolean grimStarted;
+    private boolean grimStopPending;
+    private boolean grimStopSent;
+    private Mode activeMode = Mode.NCP;
 
     @Override
     public void onEnable() {
         resetState();
+        activeMode = mode.getValue();
         switchTimer.setElapsed(TIMER_PRIMED_MS);
         mineTimer.setElapsed(TIMER_PRIMED_MS);
         instantTimer.setElapsed(TIMER_PRIMED_MS);
@@ -131,6 +154,7 @@ public class PacketMine extends Module {
 
     @EventTarget
     public void onStartBreakingBlock(AttackBlockEvent event) {
+        syncMode();
         if (!canRun() || !canBreak(event.getBlockPos())) {
             return;
         }
@@ -145,7 +169,80 @@ public class PacketMine extends Module {
     }
 
     @EventTarget
+    public void onPlayerTick(PlayerTickEvent event) {
+        syncMode();
+        if (!mode.is(Mode.GRIM)) {
+            return;
+        }
+
+        grimQueuedAction = null;
+        if (!canRun()) {
+            clearMiningTargets();
+            return;
+        }
+
+        tickGrimMining();
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onSendPosition(SendPositionEvent event) {
+        if (!mode.is(Mode.GRIM) || grimQueuedAction == null) {
+            return;
+        }
+
+        GrimAction action = grimQueuedAction;
+        grimQueuedAction = null;
+        if (!isRunnableGrimAction(action)) {
+            return;
+        }
+
+        event.setYaw(action.rotations().x);
+        event.setPitch(action.rotations().y);
+        grimSyncedAction = action;
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPostSendPosition(PostSendPositionEvent event) {
+        if (!mode.is(Mode.GRIM) || grimSyncedAction == null) {
+            return;
+        }
+
+        GrimAction action = grimSyncedAction;
+        grimSyncedAction = null;
+        if (!isRunnableGrimAction(action)) {
+            return;
+        }
+
+        sendActionPacket(action.action(), action.pos(), action.direction());
+        if (swing.getValue() && action.action() != ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK) {
+            mc.player.swing(InteractionHand.MAIN_HAND);
+        }
+
+        switch (action.action()) {
+            case START_DESTROY_BLOCK -> {
+                grimStartPending = false;
+                grimStarted = true;
+                grimMiningTicks = 0;
+                grimStopResponseTicks = 0;
+                grimHeldSlot = InventoryUtility.getSelectedHotbarSlot();
+                progress = 0.0F;
+                mainProgressPercent = 0;
+            }
+            case STOP_DESTROY_BLOCK -> {
+                grimStopPending = false;
+                grimStopSent = true;
+                grimStopResponseTicks = 0;
+                completed = true;
+            }
+            case ABORT_DESTROY_BLOCK -> grimAbortAction = null;
+            default -> {
+            }
+        }
+    }
+
+    @EventTarget
     public void onRender(Render3DEvent event) {
+        syncMode();
         if (!canRun()) {
             restoreSwitchedSlot();
             clearMiningTargets();
@@ -155,6 +252,15 @@ public class PacketMine extends Module {
         long now = System.currentTimeMillis();
         double fadeDelta = (now - fadeLastTime) / 1000.0D;
         fadeLastTime = now;
+
+        if (mode.is(Mode.GRIM)) {
+            tickGrimTargetLiveness();
+            updateRenderPositions();
+            updateFadeProgress(fadeDelta);
+            renderFadeBoxes(event.getPoseStack());
+            mainBlockRender(event.getPoseStack());
+            return;
+        }
 
         tickDelayedStops(now);
         tickSlotRestore();
@@ -169,7 +275,7 @@ public class PacketMine extends Module {
     }
 
     public boolean isInstantMining(BlockPos pos) {
-        if (!isEnabled() || !instantMine.getValue() || pos == null) {
+        if (!isEnabled() || mode.is(Mode.GRIM) || !instantMine.getValue() || pos == null) {
             return false;
         }
         if (!completed || targetPos == null || !targetPos.equals(pos)) {
@@ -188,6 +294,11 @@ public class PacketMine extends Module {
         mineTimer.reset();
         maxBreaksCount = 0;
 
+        if (mode.is(Mode.GRIM)) {
+            mineGrim(pos);
+            return;
+        }
+
         if (doubleBreak.getValue()) {
             mineDouble(pos);
             return;
@@ -200,6 +311,21 @@ public class PacketMine extends Module {
             progress = 0.0F;
             completed = false;
         }
+    }
+
+    private void mineGrim(BlockPos pos) {
+        if (pos.equals(targetPos)) {
+            return;
+        }
+
+        queueGrimAbort();
+        clearCurrentGrimMiningState();
+        mainProgressPercent = 0;
+        targetPos = pos.immutable();
+        selfClickPos = targetPos;
+        progress = 0.0F;
+        completed = false;
+        grimStartPending = true;
     }
 
     private void mineDouble(BlockPos pos) {
@@ -243,6 +369,19 @@ public class PacketMine extends Module {
         if (maxBreaks.getValue() >= 0 && maxBreaksCount >= maxBreaks.getValue() * 10) {
             maxBreaksCount = 0;
             targetPos = null;
+        }
+    }
+
+    private void tickGrimTargetLiveness() {
+        if (targetPos == null) {
+            selfClickPos = null;
+            return;
+        }
+
+        if (isAir(targetPos) || mc.level.getBlockState(targetPos).canBeReplaced()) {
+            clearCurrentGrimMiningState();
+            targetPos = null;
+            selfClickPos = null;
         }
     }
 
@@ -345,6 +484,145 @@ public class PacketMine extends Module {
                 targetPos = null;
             }
         }
+    }
+
+    private void tickGrimMining() {
+        if (grimAbortAction != null) {
+            grimQueuedAction = grimAbortAction;
+            return;
+        }
+
+        if (targetPos == null) {
+            return;
+        }
+
+        if (shouldCancelForDistance(targetPos)
+                || usingPause.getValue() && checkPause(onlyMain.getValue())
+                || isAir(targetPos)
+                || mc.level.getBlockState(targetPos).canBeReplaced()) {
+            cancelGrimMining();
+            return;
+        }
+
+        GrimAction startAction = createGrimAction(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, targetPos);
+        if (startAction == null) {
+            cancelGrimMining();
+            return;
+        }
+
+        grimDirection = startAction.direction();
+        if (grimStartPending) {
+            grimQueuedAction = startAction;
+            return;
+        }
+
+        if (!grimStarted) {
+            return;
+        }
+
+        if (grimStopSent) {
+            if (++grimStopResponseTicks > GRIM_STOP_RESPONSE_TIMEOUT_TICKS) {
+                startNewGrimCycle();
+            }
+            return;
+        }
+
+        if (grimHeldSlot != InventoryUtility.getSelectedHotbarSlot()) {
+            cancelGrimMining();
+            return;
+        }
+
+        double requiredTicks = grimMineTicks(targetPos);
+        if (!Double.isFinite(requiredTicks)) {
+            cancelGrimMining();
+            return;
+        }
+
+        grimMiningTicks++;
+        progress = grimMiningTicks;
+        mainProgressPercent = (int) Math.min(100.0D, progress / requiredTicks * 100.0D);
+        if (grimMiningTicks < Math.ceil(requiredTicks) + GRIM_STOP_SAFETY_TICKS) {
+            return;
+        }
+
+        grimStopPending = true;
+        GrimAction stopAction = createGrimAction(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, targetPos);
+        if (stopAction == null) {
+            cancelGrimMining();
+            return;
+        }
+
+        grimQueuedAction = stopAction;
+    }
+
+    private void startNewGrimCycle() {
+        grimStarted = false;
+        grimStartPending = true;
+        grimStopPending = false;
+        grimStopSent = false;
+        grimMiningTicks = 0;
+        grimStopResponseTicks = 0;
+        progress = 0.0F;
+        mainProgressPercent = 0;
+        completed = false;
+    }
+
+    private void cancelGrimMining() {
+        queueGrimAbort();
+        clearCurrentGrimMiningState();
+        targetPos = null;
+        selfClickPos = null;
+    }
+
+    private void queueGrimAbort() {
+        if (!grimStarted || targetPos == null || grimStopSent) {
+            return;
+        }
+
+        Direction direction = grimDirection != null ? grimDirection : RotationUtility.getClickSide(targetPos);
+        if (direction == null) {
+            return;
+        }
+
+        grimAbortAction = new GrimAction(
+                ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
+                targetPos.immutable(),
+                direction,
+                RotationUtility.calculate(targetPos, direction)
+        );
+    }
+
+    private GrimAction createGrimAction(ServerboundPlayerActionPacket.Action action, BlockPos pos) {
+        if (pos == null) {
+            return null;
+        }
+
+        Direction direction = RotationUtility.getClickSide(pos);
+        if (!RotationUtility.isGrimDirection(pos, direction) || !RotationUtility.canSee(pos, direction)) {
+            return null;
+        }
+
+        Vector2f rotations = RotationUtility.calculate(pos, direction);
+        return new GrimAction(action, pos.immutable(), direction, rotations);
+    }
+
+    private boolean isRunnableGrimAction(GrimAction action) {
+        if (action == null || !canRun()) {
+            return false;
+        }
+
+        if (action.action() == ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK) {
+            return true;
+        }
+
+        return action.pos().equals(targetPos)
+                && !isAir(action.pos())
+                && !mc.level.getBlockState(action.pos()).canBeReplaced()
+                && switch (action.action()) {
+                    case START_DESTROY_BLOCK -> grimStartPending;
+                    case STOP_DESTROY_BLOCK -> grimStopPending && grimStarted && !grimStopSent;
+                    default -> false;
+                };
     }
 
     private void tickCompletedRetryCounter() {
@@ -733,7 +1011,7 @@ public class PacketMine extends Module {
             return;
         }
 
-        double max = mineTicks(targetPos, getTool(targetPos));
+        double max = mode.is(Mode.GRIM) ? grimMineTicks(targetPos) : mineTicks(targetPos, getTool(targetPos));
         double rawProgress = rawRenderProgress(progress, max);
         Color sideColor = rawProgress >= 0.95D ? sideEndColor.getValue() : sideStartColor.getValue();
         Color lineColor = rawProgress >= 0.95D ? lineEndColor.getValue() : lineStartColor.getValue();
@@ -753,7 +1031,7 @@ public class PacketMine extends Module {
     }
 
     private double rawRenderProgress(float currentProgress, double maxTicks) {
-        double denominator = maxTicks * mineDamage.getValue();
+        double denominator = maxTicks * (mode.is(Mode.GRIM) ? 1.0D : mineDamage.getValue());
         if (denominator <= 0.0D || Double.isNaN(denominator) || Double.isInfinite(denominator)) {
             return 0.0D;
         }
@@ -799,6 +1077,15 @@ public class PacketMine extends Module {
                 && !mc.player.isSpectator();
     }
 
+    private double grimMineTicks(BlockPos pos) {
+        if (pos == null || mc.level == null || mc.player == null) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        float destroyProgress = mc.level.getBlockState(pos).getDestroyProgress(mc.player, mc.level, pos);
+        return destroyProgress > 0.0F ? 1.0D / destroyProgress : Double.POSITIVE_INFINITY;
+    }
+
     private void clearMiningTargets() {
         targetPos = null;
         secondPos = null;
@@ -811,6 +1098,7 @@ public class PacketMine extends Module {
         secondProgressPercent = 0;
         completed = false;
         delayedStops.clear();
+        resetGrimState();
     }
 
     private void resetState() {
@@ -843,6 +1131,45 @@ public class PacketMine extends Module {
         oldSlot = InventoryUtility.NOT_FOUND;
         hasSwitch = false;
         delayedStops.clear();
+        resetGrimState();
+    }
+
+    private void clearCurrentGrimMiningState() {
+        grimQueuedAction = null;
+        grimSyncedAction = null;
+        grimDirection = null;
+        grimMiningTicks = 0;
+        grimStopResponseTicks = 0;
+        grimHeldSlot = InventoryUtility.NOT_FOUND;
+        grimStartPending = false;
+        grimStarted = false;
+        grimStopPending = false;
+        grimStopSent = false;
+        progress = 0.0F;
+        mainProgressPercent = 0;
+        completed = false;
+    }
+
+    private void syncMode() {
+        Mode selectedMode = mode.getValue();
+        if (activeMode == selectedMode) {
+            return;
+        }
+
+        restoreSwitchedSlot();
+        clearMiningTargets();
+        activeMode = selectedMode;
+    }
+
+    private void resetGrimState() {
+        clearCurrentGrimMiningState();
+        grimAbortAction = null;
+    }
+
+
+    public enum Mode {
+        NCP,
+        GRIM
     }
 
     public enum SwitchMode {
@@ -881,6 +1208,14 @@ public class PacketMine extends Module {
     }
 
     private record DelayedStop(BlockPos pos, long deadlineMs) {
+    }
+
+    private record GrimAction(
+            ServerboundPlayerActionPacket.Action action,
+            BlockPos pos,
+            Direction direction,
+            Vector2f rotations
+    ) {
     }
 
     public static final class SimpleTimer {
