@@ -1,6 +1,7 @@
 package io.github.seraphina.nyx.client.module.player;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
+import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.TickEvent;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
@@ -9,6 +10,8 @@ import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import io.github.seraphina.nyx.client.value.impl.EnumValue;
+import io.github.seraphina.nyx.client.value.impl.IntValue;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -26,6 +29,9 @@ public class AutoHeal extends Module {
     public final BoolValue noStartOnUse = ValueBuild.boolSetting("No start on use", false, ()-> mode.getValue() == Mode.VANILLA, this);
 
     public final BoolValue onUseStopModule = ValueBuild.boolSetting("On use stop module", false, ()-> mode.getValue() == Mode.VANILLA, this);
+    public final BoolValue openInv = ValueBuild.boolSetting("Open Inv", false, ()-> mode.getValue() == Mode.VANILLA, this);
+    public final BoolValue noMove = ValueBuild.boolSetting("No move", false, ()-> mode.getValue() == Mode.VANILLA, this);
+    public final IntValue noMoveDelay = ValueBuild.intSetting("No move delay", 2, 1, 20, 1, noMove::getValue, this);
 
     public final BoolValue goldHead = ValueBuild.boolSetting("goldhead", true,()-> mode.getValue() == Mode.NORMAL, this);
     public final BoolValue goldApple = ValueBuild.boolSetting("goldapple", true, ()-> mode.getValue() == Mode.NORMAL,this);
@@ -34,6 +40,7 @@ public class AutoHeal extends Module {
     private ActiveUse activeUse;
     private VanillaUse vanillaUse;
     private boolean waitForUseRelease;
+    private int noMoveTicks;
 
     public AutoHeal() {
     }
@@ -42,6 +49,7 @@ public class AutoHeal extends Module {
     public void onDisable() {
         restoreVanillaUse();
         restoreActiveSlot();
+        noMoveTicks = 0;
     }
 
     @EventTarget
@@ -49,6 +57,7 @@ public class AutoHeal extends Module {
         if (!canRun()) {
             restoreVanillaUse();
             restoreActiveSlot();
+            noMoveTicks = 0;
             return;
         }
 
@@ -128,6 +137,20 @@ public class AutoHeal extends Module {
         }
     }
 
+    @EventTarget(4)
+    public void onMoveInput(MoveInputEvent event) {
+        if (noMoveTicks <= 0 || mode.getValue() != Mode.VANILLA || !noMove.getValue()) {
+            noMoveTicks = 0;
+            return;
+        }
+
+        event.setForward(0.0F);
+        event.setStrafe(0.0F);
+        event.setJump(false);
+        event.setSprint(false);
+        noMoveTicks--;
+    }
+
     private boolean canRun() {
         return mc.player != null
                 && mc.level != null
@@ -174,8 +197,9 @@ public class AutoHeal extends Module {
             return;
         }
 
-        if (InventoryUtility.swapInventorySlotWithHotbar(appleSlot, selectedSlot)) {
-            vanillaUse = new VanillaUse(appleSlot, selectedSlot);
+        boolean useOpenInventoryPackets = openInv.getValue();
+        if (swapVanillaUseSlot(appleSlot, selectedSlot, useOpenInventoryPackets)) {
+            vanillaUse = new VanillaUse(appleSlot, selectedSlot, useOpenInventoryPackets);
         }
     }
 
@@ -186,7 +210,35 @@ public class AutoHeal extends Module {
 
         VanillaUse activeVanillaUse = vanillaUse;
         vanillaUse = null;
-        InventoryUtility.swapInventorySlotWithHotbar(activeVanillaUse.appleSlot, activeVanillaUse.hotbarSlot);
+        swapVanillaUseSlot(
+                activeVanillaUse.appleSlot,
+                activeVanillaUse.hotbarSlot,
+                activeVanillaUse.useOpenInventoryPackets
+        );
+    }
+
+    private boolean swapVanillaUseSlot(int inventorySlot, int hotbarSlot, boolean useOpenInventoryPackets) {
+        boolean swapped;
+        if (!useOpenInventoryPackets) {
+            swapped = InventoryUtility.swapInventorySlotWithHotbar(inventorySlot, hotbarSlot);
+        } else {
+            if (mc.player == null || mc.player.connection == null) {
+                return false;
+            }
+
+            int containerId = mc.player.containerMenu.containerId;
+            mc.player.sendOpenInventory();
+            try {
+                swapped = InventoryUtility.swapInventorySlotWithHotbar(inventorySlot, hotbarSlot);
+            } finally {
+                mc.player.connection.send(new ServerboundContainerClosePacket(containerId));
+            }
+        }
+
+        if (swapped && noMove.getValue()) {
+            noMoveTicks = noMoveDelay.getValue();
+        }
+        return swapped;
     }
 
     private void beginUse(UseType type, int hotbarSlot) {
@@ -266,7 +318,7 @@ public class AutoHeal extends Module {
     private record ActiveUse(UseType type, int previousSlot, int hotbarSlot, int initialCount, ItemStack initialStack) {
     }
 
-    private record VanillaUse(int appleSlot, int hotbarSlot) {
+    private record VanillaUse(int appleSlot, int hotbarSlot, boolean useOpenInventoryPackets) {
     }
 
     public enum Mode {

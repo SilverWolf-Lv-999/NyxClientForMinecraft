@@ -75,6 +75,8 @@ public final class ModuleManager {
                 AntiVoid.INSTANCE,
                 NoSlow.INSTANCE,
                 NoWeb.INSTANCE,
+                NoPush.INSTANCE,
+                NoInertia.INSTANCE,
                 AutoIceBoot.INSTANCE
         );
         //Other

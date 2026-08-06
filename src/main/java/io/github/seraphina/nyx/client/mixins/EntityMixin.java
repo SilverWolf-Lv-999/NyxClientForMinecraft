@@ -5,12 +5,15 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.RaytraceEvent;
 import io.github.seraphina.nyx.client.events.impl.StrafeEvent;
+import io.github.seraphina.nyx.client.module.movement.NoPush;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Entity.class)
 public class EntityMixin {
@@ -42,5 +45,13 @@ public class EntityMixin {
         }
 
         return original.call(instance);
+    }
+
+    @Inject(method = "push(Lnet/minecraft/world/entity/Entity;)V", at = @At("HEAD"), cancellable = true)
+    private void nyx$disableEntityPush(Entity entity, CallbackInfo info) {
+        Entity player = Minecraft.getInstance().player;
+        if (NoPush.INSTANCE.isEnabled() && player != null && ((Entity) (Object) this == player || entity == player)) {
+            info.cancel();
+        }
     }
 }
