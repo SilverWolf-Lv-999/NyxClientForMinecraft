@@ -14,6 +14,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
+import io.github.seraphina.nyx.client.module.player.AutoHeal;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.PacketUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -928,7 +929,8 @@ public class CrystalAura extends Module {
     }
 
     private boolean shouldPauseForItemUse() {
-        return mc.player != null && mc.player.isUsingItem();
+        return AutoHeal.INSTANCE.shouldPauseModulesForGoldenAppleUse()
+                || (mc.player != null && mc.player.isUsingItem());
     }
 
     private void pauseForItemUse() {

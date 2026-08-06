@@ -7,6 +7,7 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.module.other.Target;
+import io.github.seraphina.nyx.client.module.player.AutoHeal;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RaytraceUtility;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
@@ -98,6 +99,11 @@ public class KillAura extends Module {
 
     @EventTarget
     public void onPreTick(TickEvent.Pre event) {
+        if (AutoHeal.INSTANCE.shouldPauseModulesForGoldenAppleUse()) {
+            pauseForGoldenAppleUse();
+            return;
+        }
+
         if (!canRun()) {
             clearTarget();
             stopBlocking();
@@ -117,6 +123,10 @@ public class KillAura extends Module {
 
     @EventTarget
     public void onPostTick(TickEvent.Post event) {
+        if (AutoHeal.INSTANCE.shouldPauseModulesForGoldenAppleUse()) {
+            return;
+        }
+
         if (!canRun() || target == null || targetRotations == null || !canAttack(target)) {
             return;
         }
@@ -249,6 +259,16 @@ public class KillAura extends Module {
             mc.options.keyUse.setDown(false);
             forcedUseKey = false;
         }
+
+        if (blocking && autoBlockMode.is(AutoBlockMode.VANILLA) && mc.player != null && mc.player.isUsingItem()) {
+            mc.player.stopUsingItem();
+        }
+
+        blocking = false;
+    }
+
+    private void pauseForGoldenAppleUse() {
+        clearTarget();
 
         if (blocking && autoBlockMode.is(AutoBlockMode.VANILLA) && mc.player != null && mc.player.isUsingItem()) {
             mc.player.stopUsingItem();

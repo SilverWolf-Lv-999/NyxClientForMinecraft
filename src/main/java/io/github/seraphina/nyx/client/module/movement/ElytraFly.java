@@ -11,6 +11,7 @@ import io.github.seraphina.nyx.client.manager.RotationManager;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
+import io.github.seraphina.nyx.client.module.player.AutoHeal;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.MovingUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
@@ -124,6 +125,10 @@ public class ElytraFly extends Module {
         }
 
         if (flyType.is(FlyType.GRIM_ARMOR_FLY)) {
+            if (shouldPauseForGoldenAppleUse()) {
+                return;
+            }
+
             resetFireworkUseState(true);
             runGrimArmorFly(System.nanoTime());
         }
@@ -131,7 +136,9 @@ public class ElytraFly extends Module {
 
     @EventTarget(4)
     public void onMoveInput(MoveInputEvent event) {
-        if (!flyType.is(FlyType.GRIM_ARMOR_FLY) || grimArmorFlyStage == GrimArmorFlyStage.IDLE) {
+        if (!flyType.is(FlyType.GRIM_ARMOR_FLY)
+                || shouldPauseForGoldenAppleUse()
+                || grimArmorFlyStage == GrimArmorFlyStage.IDLE) {
             return;
         }
 
@@ -184,6 +191,12 @@ public class ElytraFly extends Module {
             resetGrimArmorFlyState(true);
             keepFallFlying();
         } else if (flyType.is(FlyType.GRIM)) {
+            if (shouldPauseForGoldenAppleUse()) {
+                resetFireworkUseState(false);
+                resetGrimArmorFlyState(false);
+                return;
+            }
+
             if (!canRun()) {
                 resetFireworkUseState(true);
                 resetGrimArmorFlyState(true);
@@ -193,6 +206,11 @@ public class ElytraFly extends Module {
             resetGrimArmorFlyState(true);
             useFireworkRocket();
         } else {
+            if (shouldPauseForGoldenAppleUse()) {
+                resetFireworkUseState(false);
+                return;
+            }
+
             resetFireworkUseState(true);
         }
     }
@@ -200,6 +218,11 @@ public class ElytraFly extends Module {
     @EventTarget
     public void onClick(ClickEvent event) {
         if (!flyType.is(FlyType.GRIM) || fireworkUseStage != FireworkUseStage.USE) {
+            return;
+        }
+
+        if (shouldPauseForGoldenAppleUse()) {
+            resetFireworkUseState(false);
             return;
         }
 
@@ -728,8 +751,13 @@ public class ElytraFly extends Module {
 
     private boolean shouldLockGrimArmorFlyMovementYaw() {
         return flyType.is(FlyType.GRIM_ARMOR_FLY)
+                && !shouldPauseForGoldenAppleUse()
                 && grimArmorFlyStage != GrimArmorFlyStage.IDLE
                 && grimArmorFlyRotations != null;
+    }
+
+    private boolean shouldPauseForGoldenAppleUse() {
+        return AutoHeal.INSTANCE.shouldPauseModulesForGoldenAppleUse();
     }
 
     private int verticalInput() {

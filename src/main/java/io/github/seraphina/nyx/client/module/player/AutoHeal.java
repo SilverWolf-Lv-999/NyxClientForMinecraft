@@ -8,6 +8,7 @@ import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
+import io.github.seraphina.nyx.client.value.impl.EnumValue;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -20,11 +21,18 @@ import java.util.Locale;
 public class AutoHeal extends Module {
     public static final AutoHeal INSTANCE = new AutoHeal();
 
-    public final BoolValue goldHead = ValueBuild.boolSetting("goldhead", true, this);
-    public final BoolValue goldApple = ValueBuild.boolSetting("goldapple", true, this);
-    public final BoolValue triggerWithBlocks = ValueBuild.boolSetting("triggerwithblocks", true, this);
+    public final EnumValue<Mode> mode = ValueBuild.enumSetting("Mode", Mode.NORMAL, this);
+
+    public final BoolValue noStartOnUse = ValueBuild.boolSetting("No start on use", false, ()-> mode.getValue() == Mode.VANILLA, this);
+
+    public final BoolValue onUseStopModule = ValueBuild.boolSetting("On use stop module", false, ()-> mode.getValue() == Mode.VANILLA, this);
+
+    public final BoolValue goldHead = ValueBuild.boolSetting("goldhead", true,()-> mode.getValue() == Mode.NORMAL, this);
+    public final BoolValue goldApple = ValueBuild.boolSetting("goldapple", true, ()-> mode.getValue() == Mode.NORMAL,this);
+    public final BoolValue triggerWithBlocks = ValueBuild.boolSetting("triggerwithblocks", true, ()-> mode.getValue() == Mode.NORMAL,this);
 
     private ActiveUse activeUse;
+    private VanillaUse vanillaUse;
     private boolean waitForUseRelease;
 
     public AutoHeal() {
@@ -32,15 +40,25 @@ public class AutoHeal extends Module {
 
     @Override
     public void onDisable() {
+        restoreVanillaUse();
         restoreActiveSlot();
     }
 
     @EventTarget
     public void onPreTick(TickEvent.Pre event) {
         if (!canRun()) {
+            restoreVanillaUse();
             restoreActiveSlot();
             return;
         }
+
+        if (mode.getValue() == Mode.VANILLA) {
+            restoreActiveSlot();
+            handleVanillaUse();
+            return;
+        }
+
+        restoreVanillaUse();
 
         boolean comboDown = isUseComboDown();
         if (!mc.options.keyUse.isDown()) {
@@ -73,6 +91,16 @@ public class AutoHeal extends Module {
 
     @EventTarget
     public void onPostTick(TickEvent.Post event) {
+        if (mode.getValue() == Mode.VANILLA) {
+            restoreActiveSlot();
+            if (!canRun() || (vanillaUse != null && !mc.options.keyUse.isDown())) {
+                restoreVanillaUse();
+            }
+            return;
+        }
+
+        restoreVanillaUse();
+
         if (activeUse == null) {
             return;
         }
@@ -108,12 +136,57 @@ public class AutoHeal extends Module {
                 && !mc.player.isSpectator();
     }
 
+    public boolean shouldPauseModulesForGoldenAppleUse() {
+        return isEnabled()
+                && mode.getValue() == Mode.VANILLA
+                && onUseStopModule.getValue()
+                && vanillaUse != null
+                && mc.options.keyUse.isDown()
+                && isGoldApple(InventoryUtility.getStack(vanillaUse.hotbarSlot));
+    }
+
     private boolean isUseComboDown() {
         return mc.options.keyShift.isDown() && mc.options.keyUse.isDown();
     }
 
     private boolean isHoldingBlock() {
         return InventoryUtility.getSelectedStack().getItem() instanceof BlockItem;
+    }
+
+    private void handleVanillaUse() {
+        if (vanillaUse != null || !mc.options.keyUse.isDown()) {
+            return;
+        }
+
+        int selectedSlot = InventoryUtility.getSelectedHotbarSlot();
+        if (!Inventory.isHotbarSlot(selectedSlot)) {
+            return;
+        }
+
+        ItemStack selectedStack = InventoryUtility.getStack(selectedSlot);
+        if (isGoldApple(selectedStack)
+                || (noStartOnUse.getValue() && selectedStack.getUseDuration(mc.player) > 0)) {
+            return;
+        }
+
+        int appleSlot = InventoryUtility.findInventorySlot(this::isGoldApple);
+        if (appleSlot == InventoryUtility.NOT_FOUND || appleSlot == selectedSlot) {
+            return;
+        }
+
+        if (InventoryUtility.swapInventorySlotWithHotbar(appleSlot, selectedSlot)) {
+            vanillaUse = new VanillaUse(appleSlot, selectedSlot);
+        }
+    }
+
+    private void restoreVanillaUse() {
+        if (vanillaUse == null) {
+            return;
+        }
+
+        VanillaUse activeVanillaUse = vanillaUse;
+        vanillaUse = null;
+        InventoryUtility.swapInventorySlotWithHotbar(activeVanillaUse.appleSlot, activeVanillaUse.hotbarSlot);
     }
 
     private void beginUse(UseType type, int hotbarSlot) {
@@ -191,6 +264,13 @@ public class AutoHeal extends Module {
     }
 
     private record ActiveUse(UseType type, int previousSlot, int hotbarSlot, int initialCount, ItemStack initialStack) {
+    }
+
+    private record VanillaUse(int appleSlot, int hotbarSlot) {
+    }
+
+    public enum Mode {
+        NORMAL, VANILLA
     }
 
     private enum UseType {
