@@ -82,6 +82,8 @@ public class CrystalAura extends Module {
     public final EnumValue<Select> target = ValueBuild.enumSetting("target", Select.SINGLE, this);
     public final EnumValue<Mode> mode = ValueBuild.enumSetting("mode", Mode.GRIM, this);
     public final BoolValue spoofItem = ValueBuild.boolSetting("Spoof Item", false, this);
+    public final BoolValue keepItem = ValueBuild.boolSetting("Keep Item", false, this);
+    public final BoolValue keepRotation = ValueBuild.boolSetting("Keep Rotation", false, this);
 
     public final IntValue switchTick = ValueBuild.intSetting(
             "switch tick",
@@ -1243,6 +1245,16 @@ public class CrystalAura extends Module {
     }
 
     private void releaseActionRotations() {
+        releaseActionRotations(false);
+    }
+
+    private void releaseActionRotations(boolean force) {
+        if (!force && keepRotation.getValue() && controllingRotations) {
+            queuedAction = null;
+            syncedAction = null;
+            return;
+        }
+
         if (controllingRotations && shouldReleaseRotationManager()) {
             Vector2f playerRotations = currentPlayerRotations();
             RotationManager.INSTANCE.setSmoothed(false);
@@ -1445,7 +1457,8 @@ public class CrystalAura extends Module {
     private void restoreOriginalHotbarSlotIfIdle() {
         if (usedInteractionThisTick
                 || queuedAction != null
-                || postUseSlotDelayTicks > 0) {
+                || postUseSlotDelayTicks > 0
+                || (keepItem.getValue() && InventoryUtility.getSelectedStack().is(Items.END_CRYSTAL))) {
             return;
         }
 
@@ -1479,7 +1492,7 @@ public class CrystalAura extends Module {
     }
 
     private void resetState() {
-        releaseActionRotations();
+        releaseActionRotations(true);
         placeProgress = TICKS_PER_SECOND;
         breakProgress = TICKS_PER_SECOND;
         switchProgress = 0;
@@ -1565,9 +1578,9 @@ public class CrystalAura extends Module {
     }
 
     public enum Select {
-        SINGLE, // 锁定一个目标不切换
-        SWITCH, // 在目标间切换
-        MUTI // 多目标同时攻击
+        SINGLE,
+        SWITCH,
+        MUTI
     }
 
     public enum Mode {
