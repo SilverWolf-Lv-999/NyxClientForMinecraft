@@ -27,8 +27,6 @@ public class ThreadRipper extends Module {
     private static final ThreadLocal<Boolean> WORKER_THREAD = ThreadLocal.withInitial(() -> false);
 
     public final IntValue threads = ValueBuild.intSetting("threads", DEFAULT_THREADS, 1, MAX_THREADS, 1, this);
-    public final BoolValue entityTicks = ValueBuild.boolSetting("entity ticks", true, this);
-    public final BoolValue blockEntityTicks = ValueBuild.boolSetting("block entity ticks", true, this);
     public final BoolValue particleTicks = ValueBuild.boolSetting("particle ticks", true, this);
 
     private final Object executorLock = new Object();
@@ -50,11 +48,13 @@ public class ThreadRipper extends Module {
     }
 
     public boolean shouldParallelEntityTicks() {
-        return isEnabled() && entityTicks.getValue() && configuredThreads() > 1;
+        // Entity ticks invoke arbitrary client and mod callbacks that share render-thread state.
+        return false;
     }
 
     public boolean shouldParallelBlockEntityTicks() {
-        return isEnabled() && blockEntityTicks.getValue() && configuredThreads() > 1;
+        // Block entity ticks can update model data, redstone, and other render-thread-only state.
+        return false;
     }
 
     public boolean shouldParallelParticleTicks() {
