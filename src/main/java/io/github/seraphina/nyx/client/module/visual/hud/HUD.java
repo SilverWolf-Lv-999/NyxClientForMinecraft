@@ -10,6 +10,7 @@ import io.github.seraphina.nyx.client.module.visual.hud.component.*;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.BiomeView;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.LevelTypeView;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.PlayerPosView;
+import io.github.seraphina.nyx.client.module.visual.hud.component.text.SpeedComponent;
 import io.github.seraphina.nyx.client.module.visual.hud.component.text.TPSView;
 import io.github.seraphina.nyx.client.ui.UIComponent;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -30,6 +31,7 @@ public class HUD extends Module {
     public final BoolValue levelType = ValueBuild.boolSetting("level type", true, this);
     public final BoolValue playerPos = ValueBuild.boolSetting("player pos", true, this);
     public final BoolValue biome = ValueBuild.boolSetting("biome", true, this);
+    public final BoolValue speed = ValueBuild.boolSetting("speed", true, this);
     public final BoolValue inventory = ValueBuild.boolSetting("inventory", false, this);
     public final BoolValue lyric = ValueBuild.boolSetting("lyric", false, this);
 
@@ -39,6 +41,7 @@ public class HUD extends Module {
         components.add(new LevelTypeView());
         components.add(new PlayerPosView());
         components.add(new BiomeView());
+        components.add(new SpeedComponent());
         components.add(new InventoryComponent());
         components.add(new MapComponent());
         components.add(new NotificationComponent());

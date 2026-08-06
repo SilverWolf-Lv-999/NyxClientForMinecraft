@@ -97,6 +97,7 @@ public final class ModuleManager {
                 AutoHeal.INSTANCE,
                 FastPlace.INSTANCE,
                 NoJumpDelay.INSTANCE,
+                NoLimit.INSTANCE,
                 AutoElytra.INSTANCE,
                 AutoTotem.INSTANCE,
                 AutoWindCharge.INSTANCE,

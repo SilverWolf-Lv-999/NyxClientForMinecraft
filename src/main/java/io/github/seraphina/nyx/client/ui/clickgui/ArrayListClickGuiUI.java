@@ -50,8 +50,8 @@ import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_RIGHT;
 import static org.lwjgl.glfw.GLFW.GLFW_PRESS;
 import static org.lwjgl.glfw.GLFW.glfwGetKey;
 
-public class ArrayListClickGui extends LuaScreen {
-    public static final ArrayListClickGui INSTANCE = new ArrayListClickGui();
+public class ArrayListClickGuiUI extends LuaScreen {
+    public static final ArrayListClickGuiUI INSTANCE = new ArrayListClickGuiUI();
 
     private static final float PANEL_WIDTH = 120.0F;
     private static final float PANEL_GAP = 8.0F;
@@ -97,8 +97,12 @@ public class ArrayListClickGui extends LuaScreen {
     @Nullable
     private AbstractComponent capturedComponent;
 
-    private ArrayListClickGui() {
-        super("nyxclient:ui/screen/arraylist.lua", Component.empty());
+    private ArrayListClickGuiUI() {
+        this("nyxclient:ui/screen/arraylist.lua");
+    }
+
+    protected ArrayListClickGuiUI(String scriptPath) {
+        super(scriptPath, Component.empty());
         for (Category category : Category.values()) {
             this.panels.put(category, new PanelState(category));
         }

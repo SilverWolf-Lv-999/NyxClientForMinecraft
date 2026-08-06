@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
@@ -8,6 +9,7 @@ import io.github.seraphina.nyx.client.events.impl.PostSendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.SlowdownEvent;
 import io.github.seraphina.nyx.client.events.impl.SwingHandEvent;
+import io.github.seraphina.nyx.client.module.player.NoLimit;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec3;
@@ -96,5 +98,16 @@ public class LocalPlayerMixin {
     private boolean onSlowdown(LocalPlayer player, Operation<Boolean> original) {
         SlowdownEvent event = EventBus.INSTANCE.post(new SlowdownEvent(original.call(player)));
         return event.isSlowdown();
+    }
+
+    @ModifyExpressionValue(
+            method = "handlePortalTransitionEffect",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/gui/screens/Screen;isAllowedInPortal()Z"
+            )
+    )
+    private boolean nyx$allowScreensInPortal(boolean original) {
+        return original || NoLimit.INSTANCE.allowsPortalScreens();
     }
 }

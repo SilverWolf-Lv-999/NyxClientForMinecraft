@@ -5,9 +5,10 @@ import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.ui.LuaScreen;
-import io.github.seraphina.nyx.client.ui.clickgui.ArrayListClickGui;
+import io.github.seraphina.nyx.client.ui.clickgui.AlineClickGuiUI;
+import io.github.seraphina.nyx.client.ui.clickgui.ArrayListClickGuiUI;
 import io.github.seraphina.nyx.client.ui.clickgui.ClickGuiUI;
-import io.github.seraphina.nyx.client.ui.clickgui.JelloClickGui;
+import io.github.seraphina.nyx.client.ui.clickgui.JelloClickGuiUI;
 
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT;
 
@@ -29,12 +30,16 @@ public class ClickGui extends Module {
                 yield ClickGuiUI.INSTANCE;
             }
             case JELLO_FOR_SIGMA -> {
-                JelloClickGui.INSTANCE.beginOpenAnimation();
-                yield JelloClickGui.INSTANCE;
+                JelloClickGuiUI.INSTANCE.beginOpenAnimation();
+                yield JelloClickGuiUI.INSTANCE;
             }
             case ARRAY_LIST -> {
-                ArrayListClickGui.INSTANCE.beginOpenAnimation();
-                yield ArrayListClickGui.INSTANCE;
+                ArrayListClickGuiUI.INSTANCE.beginOpenAnimation();
+                yield ArrayListClickGuiUI.INSTANCE;
+            }
+            case ALINE -> {
+                AlineClickGuiUI.INSTANCE.beginOpenAnimation();
+                yield AlineClickGuiUI.INSTANCE;
             }
         };
         mc.setScreen(screen);

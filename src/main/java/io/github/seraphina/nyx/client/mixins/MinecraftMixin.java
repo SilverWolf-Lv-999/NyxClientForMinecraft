@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
@@ -11,6 +12,7 @@ import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.module.client.NoChattingAllowed;
 import io.github.seraphina.nyx.client.module.combat.SpearCooldown;
 import io.github.seraphina.nyx.client.module.combat.UseClick;
+import io.github.seraphina.nyx.client.module.player.NoLimit;
 import io.github.seraphina.nyx.client.music.NeteaseMusicLocalService;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import net.minecraft.client.Minecraft;
@@ -77,6 +79,18 @@ public class MinecraftMixin {
     @WrapOperation(method = "handleKeybinds", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isUsingItem()Z", ordinal = 0))
     private boolean allowClicksWhileUsingInKeybinds(LocalPlayer player, Operation<Boolean> original) {
         return original.call(player) && !UseClick.INSTANCE.shouldProcessClicksWhileUsing(player, options.keyUse.isDown());
+    }
+
+    @ModifyExpressionValue(
+            method = "handleKeybinds",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;isServerControlledInventory()Z"
+            )
+    )
+    private boolean nyx$openPlayerInventoryWhileMounted(boolean original) {
+        Minecraft minecraft = (Minecraft) (Object) this;
+        return original && !NoLimit.INSTANCE.shouldOpenPlayerInventoryWhileMounted(minecraft.player);
     }
 
     @WrapOperation(method = "startAttack", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isHandsBusy()Z"))

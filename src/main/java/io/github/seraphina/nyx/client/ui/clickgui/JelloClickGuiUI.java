@@ -72,8 +72,8 @@ import static org.lwjgl.glfw.GLFW.glfwGetKeyName;
  * Lua owns the responsive layout and card animation; this controller owns game state,
  * right-click module selection, value editing and asynchronous NetEase music data.
  */
-public final class JelloClickGui extends LuaScreen {
-    public static final JelloClickGui INSTANCE = new JelloClickGui();
+public final class JelloClickGuiUI extends LuaScreen {
+    public static final JelloClickGuiUI INSTANCE = new JelloClickGuiUI();
 
     private static final List<Category> CATEGORY_ORDER = List.of(
         Category.PLAYER,
@@ -147,7 +147,7 @@ public final class JelloClickGui extends LuaScreen {
     private long lastSongId = Long.MIN_VALUE;
     private float coverProgress;
 
-    private JelloClickGui() {
+    private JelloClickGuiUI() {
         super("nyxclient:ui/screen/jello.lua", Component.empty());
     }
 
