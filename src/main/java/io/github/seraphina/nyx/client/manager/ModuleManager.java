@@ -58,7 +58,8 @@ public final class ModuleManager {
                 TPBowGod.INSTANCE,
                 Backtrack.INSTANCE,
                 KeyPearl.INSTANCE,
-                Burrow.INSTANCE
+                Burrow.INSTANCE,
+                Surround.INSTANCE
         );
         //Movement
         registerModule(
@@ -78,7 +79,9 @@ public final class ModuleManager {
                 NoWeb.INSTANCE,
                 NoPush.INSTANCE,
                 NoInertia.INSTANCE,
-                AutoIceBoot.INSTANCE
+                AutoIceBoot.INSTANCE,
+                EntityControl.INSTANCE,
+                Strafe.INSTANCE
         );
         //Other
         registerModule(
@@ -91,7 +94,8 @@ public final class ModuleManager {
                 FakePlayer.INSTANCE,
                 MusicPlayer.INSTANCE,
                 Auto2048.INSTANCE,
-                AutoNoWhite.INSTANCE
+                AutoNoWhite.INSTANCE,
+                Nuker.INSTANCE
         );
         //Player
         registerModule(
@@ -100,6 +104,7 @@ public final class ModuleManager {
                 NoJumpDelay.INSTANCE,
                 NoLimit.INSTANCE,
                 AutoElytra.INSTANCE,
+                AutoArmor.INSTANCE,
                 AutoTotem.INSTANCE,
                 AutoWindCharge.INSTANCE,
                 InstantSwitch.INSTANCE,
@@ -124,10 +129,13 @@ public final class ModuleManager {
                 HUD.INSTANCE,
                 Animations.INSTANCE,
                 FullBright.INSTANCE,
+                XRay.INSTANCE,
                 ModernGui.INSTANCE,
                 Chams.INSTANCE,
+                Shader.INSTANCE,
                 ContainerESP.INSTANCE,
                 ESP.INSTANCE,
+                Tracers.INSTANCE,
                 ViewClip.INSTANCE,
                 HurtMaker.INSTANCE,
                 ModuleList.INSTANCE,

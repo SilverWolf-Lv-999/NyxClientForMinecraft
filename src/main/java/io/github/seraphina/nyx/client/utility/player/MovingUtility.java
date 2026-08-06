@@ -32,6 +32,34 @@ public class MovingUtility implements IMinecraft {
         return new double[]{0.0, 0.0};
     }
 
+    public static Vec3 horizontalVelocity(double speed, float yaw) {
+        if (mc.player == null || mc.level == null || speed <= 0.0D) {
+            return Vec3.ZERO;
+        }
+
+        int forward = forwardVal();
+        int strafe = strafeVal();
+        if (forward == 0 && strafe == 0) {
+            return Vec3.ZERO;
+        }
+
+        float movementYaw = yaw;
+        if (forward < 0) {
+            movementYaw += 180.0F;
+        }
+
+        if (strafe != 0) {
+            if (forward == 0) {
+                movementYaw -= strafe * 90.0F;
+            } else {
+                movementYaw -= strafe * (forward > 0 ? 45.0F : -45.0F);
+            }
+        }
+
+        double radians = Math.toRadians(movementYaw);
+        return new Vec3(-Math.sin(radians) * speed, 0.0D, Math.cos(radians) * speed);
+    }
+
     public static float horizontalClamp() {
         float slipperiness = mc.level.getBlockState(new BlockPos(Mth.floor(mc.player.getX()), Mth.floor(mc.player.getY()) - 1, Mth.floor(mc.player.getZ()))).getBlock().getFriction() * 0.91f;
         return mc.player.getSpeed() * (0.16277136f / (slipperiness * slipperiness * slipperiness));

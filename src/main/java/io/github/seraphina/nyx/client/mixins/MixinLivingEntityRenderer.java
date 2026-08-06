@@ -7,6 +7,7 @@ import io.github.seraphina.nyx.client.module.client.EntityCulling;
 import io.github.seraphina.nyx.client.module.visual.Chams;
 import io.github.seraphina.nyx.client.module.visual.ESP;
 import io.github.seraphina.nyx.client.module.visual.NoRenderer;
+import io.github.seraphina.nyx.client.module.visual.Shader;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -55,7 +56,8 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
         renderType = Chams.INSTANCE.getRenderType(state, texture, renderType);
         renderType = EntityCulling.INSTANCE.cullHiddenFaces(state, texture, renderType);
         args.set(3, renderType);
-        args.set(6, Chams.INSTANCE.getModelTint(state, args.get(6)));
+        int tint = Chams.INSTANCE.getModelTint(state, args.get(6));
+        args.set(6, Shader.INSTANCE.getModelTint(state, tint));
     }
 
     @Inject(
@@ -74,6 +76,7 @@ public abstract class MixinLivingEntityRenderer<T extends LivingEntity, S extend
     private void modifyRotationAnimation(LivingEntity entity, S state, float partialTicks, CallbackInfo info) {
         EntityCulling.INSTANCE.rememberEntity(entity, state);
         Chams.INSTANCE.rememberEntity(entity, state);
+        Shader.INSTANCE.rememberEntity(entity, state);
         ESP.INSTANCE.rememberModelBoneEntity(entity, state);
         ESP.INSTANCE.applyGlowOutline(entity, state);
 
