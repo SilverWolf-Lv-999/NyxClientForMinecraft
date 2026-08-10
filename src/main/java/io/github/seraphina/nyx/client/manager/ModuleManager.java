@@ -71,6 +71,8 @@ public final class ModuleManager {
                 KeepSprint.INSTANCE,
                 Step.INSTANCE,
                 Stuck.INSTANCE,
+                Fly.INSTANCE,
+                PacketFly.INSTANCE,
                 ElytraFly.INSTANCE,
                 FastFall.INSTANCE,
                 SafeWalk.INSTANCE,
