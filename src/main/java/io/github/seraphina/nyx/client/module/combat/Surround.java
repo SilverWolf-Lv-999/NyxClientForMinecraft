@@ -10,6 +10,7 @@ import io.github.seraphina.nyx.client.module.player.PacketMine;
 import io.github.seraphina.nyx.client.utility.player.InventoryUtility;
 import io.github.seraphina.nyx.client.utility.player.MovingUtility;
 import io.github.seraphina.nyx.client.utility.player.PacketUtility;
+import io.github.seraphina.nyx.client.utility.player.TPUtility;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
@@ -115,6 +116,12 @@ public final class Surround extends Module {
             this
     );
 
+    public final BoolValue autoCenter = ValueBuild.boolSetting(
+            "auto center",
+            true,
+            this
+    );
+
     public final BoolValue rotate = ValueBuild.boolSetting(
             "rotate",
             true,
@@ -182,6 +189,7 @@ public final class Surround extends Module {
     private double startY;
     private double startZ;
     private boolean shouldCenter;
+    private boolean wasMovingInput;
 
     private Surround() {
     }
@@ -197,12 +205,15 @@ public final class Surround extends Module {
         startZ = mc.player.getZ();
         lastPlaceTime = 0L;
         shouldCenter = true;
+        wasMovingInput = MovingUtility.isMoving();
+        autoCenterPlayer();
     }
 
     @Override
     public void onDisable() {
         lastPlaceTime = 0L;
         shouldCenter = false;
+        wasMovingInput = false;
     }
 
     @EventTarget
@@ -211,6 +222,7 @@ public final class Surround extends Module {
             return;
         }
 
+        updateAutoCenter();
         centerPlayer();
         updateStartPosition();
         if (shouldDisableForMovement() || !inAir.getValue() && !mc.player.onGround()) {
@@ -297,6 +309,37 @@ public final class Surround extends Module {
         double speed = Math.min(0.2873D, distance);
         Vec3 velocity = mc.player.getDeltaMovement();
         mc.player.setDeltaMovement(deltaX / distance * speed, velocity.y, deltaZ / distance * speed);
+    }
+
+    private void updateAutoCenter() {
+        boolean isMovingInput = MovingUtility.isMoving();
+        if (wasMovingInput && !isMovingInput) {
+            autoCenterPlayer();
+        }
+        wasMovingInput = isMovingInput;
+    }
+
+    private void autoCenterPlayer() {
+        if (!autoCenter.getValue() || !TPUtility.allowSendP()) {
+            return;
+        }
+
+        Vec3 currentPosition = mc.player.position();
+        BlockPos playerPos = mc.player.blockPosition();
+        Vec3 centerPosition = new Vec3(
+                playerPos.getX() + 0.5D,
+                currentPosition.y,
+                playerPos.getZ() + 0.5D
+        );
+        if (currentPosition.x == centerPosition.x && currentPosition.z == centerPosition.z) {
+            return;
+        }
+
+        TPUtility.tp(currentPosition, centerPosition, mc.player.getYRot(), mc.player.getXRot());
+        mc.player.setPos(centerPosition);
+
+        Vec3 velocity = mc.player.getDeltaMovement();
+        mc.player.setDeltaMovement(0.0D, velocity.y, 0.0D);
     }
 
     private void updateStartPosition() {

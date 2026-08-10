@@ -38,6 +38,12 @@ public class BlockHighlight extends Module {
             this
     );
 
+    public final BoolValue noEntity = ValueBuild.boolSetting(
+            "noEntity",
+            true,
+            this
+    );
+
     public final EnumValue<Mode> mode = ValueBuild.enumSetting(
             "mode",
             Mode.ALL,
@@ -78,12 +84,34 @@ public class BlockHighlight extends Module {
     }
 
     private BlockPos targetBlockPos() {
-        if (isNull() || !(mc.hitResult instanceof BlockHitResult hitResult) || hitResult.getType() != HitResult.Type.BLOCK) {
+        if (isNull()) {
+            return null;
+        }
+
+        BlockHitResult hitResult = targetBlockHitResult();
+        if (hitResult == null) {
             return null;
         }
 
         BlockPos blockPos = hitResult.getBlockPos();
         return mc.level.getBlockState(blockPos).isAir() ? null : blockPos;
+    }
+
+    private BlockHitResult targetBlockHitResult() {
+        if (!noEntity.getValue()) {
+            return mc.hitResult instanceof BlockHitResult hitResult && hitResult.getType() == HitResult.Type.BLOCK
+                    ? hitResult
+                    : null;
+        }
+
+        if (mc.getCameraEntity() == null) {
+            return null;
+        }
+
+        HitResult hitResult = mc.getCameraEntity().pick(mc.player.blockInteractionRange(), 0.0F, false);
+        return hitResult instanceof BlockHitResult blockHitResult && blockHitResult.getType() == HitResult.Type.BLOCK
+                ? blockHitResult
+                : null;
     }
 
     private double animationProgress() {
