@@ -695,8 +695,7 @@ public class PacketMine extends Module {
     private void renderInstantTarget(PoseStack poseStack) {
         Color sideColor = progress >= 0.95F ? sideEndColor.getValue() : sideStartColor.getValue();
         Color lineColor = progress >= 0.95F ? lineEndColor.getValue() : lineStartColor.getValue();
-        Render3DUtility.renderBlockBox(poseStack, targetPos, sideColor);
-        Render3DUtility.renderBlockOutline(poseStack, targetPos, lineColor);
+        renderMineBox(poseStack, new AABB(targetPos), sideColor, lineColor);
     }
 
     private void advanceProgress(boolean second, double delta) {
@@ -1057,8 +1056,12 @@ public class PacketMine extends Module {
 
         double fadeSeconds = fadeTime.getValue();
         double alphaFactor = fadeSeconds <= 0.0D ? 1.0D : Mth.clamp(currentProgress / fadeSeconds, 0.0D, 1.0D);
-        Render3DUtility.renderBlockBox(poseStack, pos, withAlpha(fadeSideColor.getValue(), alphaFactor));
-        Render3DUtility.renderBlockOutline(poseStack, pos, withAlpha(fadeLineColor.getValue(), alphaFactor));
+        renderMineBox(
+                poseStack,
+                new AABB(pos),
+                withAlpha(fadeSideColor.getValue(), alphaFactor),
+                withAlpha(fadeLineColor.getValue(), alphaFactor)
+        );
     }
 
     private void mainBlockRender(PoseStack poseStack) {
@@ -1097,26 +1100,27 @@ public class PacketMine extends Module {
     private void renderMineBox(PoseStack poseStack, BlockPos pos, double rawProgress, Color sideColor, Color lineColor) {
         switch (renderMode.getValue()) {
             case BOX -> {
-                Render3DUtility.renderBlockBox(poseStack, pos, sideColor);
-                Render3DUtility.renderBlockOutline(poseStack, pos, lineColor);
+                renderMineBox(poseStack, new AABB(pos), sideColor, lineColor);
             }
             case NORMAL -> {
                 AABB box = AABB.ofSize(pos.getCenter(), rawProgress, rawProgress, rawProgress);
-                Render3DUtility.renderFilledBox(poseStack, box, sideColor);
-                Render3DUtility.renderOutlineBox(poseStack, box, lineColor);
+                renderMineBox(poseStack, box, sideColor, lineColor);
             }
             case GROW -> {
                 AABB box = new AABB(pos).setMaxY(pos.getY() + rawProgress);
-                Render3DUtility.renderFilledBox(poseStack, box, sideColor);
-                Render3DUtility.renderOutlineBox(poseStack, box, lineColor);
+                renderMineBox(poseStack, box, sideColor, lineColor);
             }
             case SHRINK -> {
                 double size = Math.round(rawProgress * 100.0D) / 100.0D;
                 AABB box = AABB.ofSize(pos.getCenter(), size, size, size);
-                Render3DUtility.renderFilledBox(poseStack, box, sideColor);
-                Render3DUtility.renderOutlineBox(poseStack, box, lineColor);
+                renderMineBox(poseStack, box, sideColor, lineColor);
             }
         }
+    }
+
+    private void renderMineBox(PoseStack poseStack, AABB box, Color sideColor, Color lineColor) {
+        Render3DUtility.renderFilledBoxNoDepth(poseStack, box, sideColor);
+        Render3DUtility.renderOutlineBoxNoDepth(poseStack, box, lineColor);
     }
 
     private Color withAlpha(Color color, double factor) {

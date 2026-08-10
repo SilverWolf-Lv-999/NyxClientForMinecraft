@@ -120,6 +120,9 @@ public class NameTag extends Module {
             if (screen == null) {
                 continue;
             }
+            if (shouldHideFirstPersonSelfTag(player, tagPosition)) {
+                continue;
+            }
 
             RenderEntry entry = buildEntry(player, font, screen, screenWidth, screenHeight);
             if (entry != null) {
@@ -131,12 +134,24 @@ public class NameTag extends Module {
     }
 
     private boolean isValidPlayer(AbstractClientPlayer player) {
-        return player != null
-                && player.isAlive()
-                && !player.isRemoved()
-                && !player.isSpectator()
-                && !player.isInvisible()
-                && (allowSelf.getValue() || player != mc.player);
+        if (player == null
+                || !player.isAlive()
+                || player.isRemoved()
+                || player.isSpectator()
+                || player.isInvisible()) {
+            return false;
+        }
+
+        return allowSelf.getValue() || player != mc.player;
+    }
+
+    private boolean shouldHideFirstPersonSelfTag(AbstractClientPlayer player, Vec3 tagPosition) {
+        if (player != mc.player || !mc.options.getCameraType().isFirstPerson()) {
+            return false;
+        }
+
+        Vec3 cameraPosition = mc.gameRenderer.getMainCamera().position();
+        return tagPosition.y > cameraPosition.y && player.getViewVector(lastPartialTick).y > 0.0D;
     }
 
     private RenderEntry buildEntry(
@@ -213,7 +228,10 @@ public class NameTag extends Module {
             float slotX = startX + index * (ITEM_SLOT_SIZE + ITEM_GAP);
             renderSlotBackground(slotX, entry.y);
             if (!stack.isEmpty()) {
-                gui.nyx$renderSlot(graphics, Math.round(slotX + 1.0F), Math.round(entry.y + 1.0F), deltaTracker, entry.player, stack, index);
+                graphics.pose().pushMatrix();
+                graphics.pose().translate(slotX + 1.0F, entry.y + 1.0F);
+                gui.nyx$renderSlot(graphics, 0, 0, deltaTracker, entry.player, stack, index);
+                graphics.pose().popMatrix();
             }
         }
     }

@@ -14,10 +14,11 @@ public final class NoInertia extends Module {
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     public void onMoveInput(MoveInputEvent event) {
-        if (!canStopWalking(event)) {
+        if (!canStopWalking(event) || isNull()) {
             return;
         }
 
+        assert mc.player != null;
         Vec3 velocity = mc.player.getDeltaMovement();
         mc.player.setDeltaMovement(0.0D, velocity.y, 0.0D);
     }

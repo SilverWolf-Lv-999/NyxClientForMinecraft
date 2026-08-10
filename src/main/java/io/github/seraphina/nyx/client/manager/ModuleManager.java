@@ -59,7 +59,11 @@ public final class ModuleManager {
                 Backtrack.INSTANCE,
                 KeyPearl.INSTANCE,
                 Burrow.INSTANCE,
-                Surround.INSTANCE
+                Surround.INSTANCE,
+                AutoWeb.INSTANCE,
+                Blocker.INSTANCE,
+                AutoPush.INSTANCE,
+                MaceSpoof.INSTANCE
         );
         //Movement
         registerModule(
