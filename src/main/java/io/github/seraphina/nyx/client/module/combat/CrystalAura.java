@@ -159,6 +159,7 @@ public class CrystalAura extends Module {
     private int placeRotationVariant;
     private float lastPlacedYawDelta = Float.NaN;
     private BlockPos pendingSupportBasePos;
+    private List<LivingEntity> activeTargets = List.of();
 
     private boolean isVanilla() {
         return mode.getValue() == Mode.VANILLA;
@@ -191,6 +192,7 @@ public class CrystalAura extends Module {
         updateSpoofItemVisual();
         usedInteractionThisTick = false;
         queuedAction = null;
+        activeTargets = List.of();
 
         if (!canRun()) {
             restoreOriginalHotbarSlot();
@@ -217,7 +219,7 @@ public class CrystalAura extends Module {
             return;
         }
 
-        List<LivingEntity> activeTargets = selectTargets(targets);
+        activeTargets = List.copyOf(selectTargets(targets));
 
         if (canBreak()) {
             CrystalTarget crystalTarget = findBestCrystal(activeTargets);
@@ -634,12 +636,8 @@ public class CrystalAura extends Module {
             return false;
         }
 
-        BlockPos crystalBlockPos = basePos.above();
-        if (!mc.level.isEmptyBlock(crystalBlockPos)) {
-            return false;
-        }
-
-        return mc.level.getEntities(null, crystalSpawnBox(basePos)).isEmpty();
+        return mc.level.isEmptyBlock(basePos.above())
+                && mc.level.getEntities(null, crystalSpawnBox(basePos)).isEmpty();
     }
 
     private AABB crystalSpawnBox(BlockPos basePos) {
@@ -908,6 +906,130 @@ public class CrystalAura extends Module {
 
         AABB blockBox = new AABB(pos);
         return mc.level.noCollision(mc.player, blockBox)
+                && mc.level.getEntities(null, blockBox).isEmpty();
+    }
+
+    public BlockPos findAutoDestroyPosition() {
+        if (!isEnabled()
+                || !canRun()
+                || !canPlace()
+                || postAttackPlaceDelayTicks > 0
+                || usedInteractionThisTick
+                || queuedAction != null
+                || syncedAction != null
+                || pendingSupportBasePos != null
+                || activeTargets.isEmpty()
+                || !Inventory.isHotbarSlot(findCrystalSlot())) {
+            return null;
+        }
+
+        if (hasAvailableCrystalPosition() || hasAvailableSupportPosition()) {
+            return null;
+        }
+
+        BlockPos crystalSpaceBlock = findCrystalSpaceBlock();
+        return crystalSpaceBlock != null ? crystalSpaceBlock : findSupportBlock();
+    }
+
+    private boolean hasAvailableCrystalPosition() {
+        for (LivingEntity target : activeTargets) {
+            for (BlockPos basePos : scanBasePositions(target)) {
+                if (canPlaceCrystalAt(basePos)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasAvailableSupportPosition() {
+        if (!autoPlaceBlock.getValue() || !canPlanSupportBlock()) {
+            return false;
+        }
+
+        for (LivingEntity target : activeTargets) {
+            for (BlockPos basePos : scanBasePositions(target)) {
+                if (canPlaceSupportBlockAt(basePos)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private BlockPos findCrystalSpaceBlock() {
+        for (LivingEntity target : activeTargets) {
+            for (BlockPos basePos : scanBasePositions(target)) {
+                BlockPos crystalBlockPos = basePos.above();
+                if (!isCrystalBase(basePos)
+                        || mc.level.isEmptyBlock(crystalBlockPos)
+                        || !canUseCrystalBaseAfterBreaking(basePos)
+                        || !isSafeAutoDestroyBlock(crystalBlockPos)) {
+                    continue;
+                }
+
+                return crystalBlockPos;
+            }
+        }
+
+        return null;
+    }
+
+    private BlockPos findSupportBlock() {
+        if (!autoPlaceBlock.getValue() || !canPlanSupportBlock()) {
+            return null;
+        }
+
+        for (LivingEntity target : activeTargets) {
+            for (BlockPos basePos : scanBasePositions(target)) {
+                if (!canPlaceSupportBlockAfterBreaking(basePos) || !isSafeAutoDestroyBlock(basePos)) {
+                    continue;
+                }
+
+                return basePos;
+            }
+        }
+
+        return null;
+    }
+
+    private boolean canUseCrystalBaseAfterBreaking(BlockPos basePos) {
+        if (!isCrystalBase(basePos)
+                || !mc.level.getEntities(null, crystalSpawnBox(basePos)).isEmpty()) {
+            return false;
+        }
+
+        if (!isVanilla()
+                && !wallSelect.getValue()
+                && (!RotationUtility.isGrimDirection(basePos, Direction.UP) || !RotationUtility.canSee(basePos, Direction.UP))) {
+            return false;
+        }
+
+        return mc.player.getEyePosition().distanceToSqr(crystalPosition(basePos))
+                <= placeRange.getValue() * placeRange.getValue();
+    }
+
+    private boolean canPlaceSupportBlockAfterBreaking(BlockPos pos) {
+        if (!canUseCrystalBase(pos) || findClickFace(pos) == null) {
+            return false;
+        }
+
+        AABB blockBox = new AABB(pos);
+        return mc.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) <= placeRange.getValue() * placeRange.getValue()
+                && !mc.player.getBoundingBox().intersects(blockBox)
+                && mc.level.getEntities(null, blockBox).isEmpty();
+    }
+
+    private boolean isSafeAutoDestroyBlock(BlockPos pos) {
+        BlockState state = mc.level.getBlockState(pos);
+        if (state.isAir() || state.canBeReplaced() || state.getDestroySpeed(mc.level, pos) < 0.0F) {
+            return false;
+        }
+
+        AABB blockBox = new AABB(pos);
+        return !mc.player.getBoundingBox().intersects(blockBox)
                 && mc.level.getEntities(null, blockBox).isEmpty();
     }
 
@@ -1541,6 +1663,7 @@ public class CrystalAura extends Module {
         placeRotationVariant = 0;
         lastPlacedYawDelta = Float.NaN;
         pendingSupportBasePos = null;
+        activeTargets = List.of();
     }
 
     private record CrystalTarget(EndCrystal crystal, LivingEntity target, double score) {

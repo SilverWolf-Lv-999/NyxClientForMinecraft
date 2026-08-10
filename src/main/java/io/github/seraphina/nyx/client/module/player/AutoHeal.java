@@ -31,6 +31,7 @@ public class AutoHeal extends Module {
     public final BoolValue onUseStopModule = ValueBuild.boolSetting("On use stop module", false, ()-> mode.getValue() == Mode.VANILLA, this);
     public final BoolValue openInv = ValueBuild.boolSetting("Open Inv", false, ()-> mode.getValue() == Mode.VANILLA, this);
     public final BoolValue noMove = ValueBuild.boolSetting("No move", false, ()-> mode.getValue() == Mode.VANILLA, this);
+    public final BoolValue afterOffHand = ValueBuild.boolSetting("afterOffHand", false, ()-> mode.getValue() == Mode.VANILLA, this);
     public final IntValue noMoveDelay = ValueBuild.intSetting("No move delay", 2, 1, 20, 1, noMove::getValue, this);
 
     public final BoolValue goldHead = ValueBuild.boolSetting("goldhead", true,()-> mode.getValue() == Mode.NORMAL, this);
@@ -47,7 +48,7 @@ public class AutoHeal extends Module {
 
     @Override
     public void onDisable() {
-        restoreVanillaUse();
+        restoreVanillaUseImmediately();
         restoreActiveSlot();
         noMoveTicks = 0;
     }
@@ -55,7 +56,7 @@ public class AutoHeal extends Module {
     @EventTarget
     public void onPreTick(TickEvent.Pre event) {
         if (!canRun()) {
-            restoreVanillaUse();
+            restoreVanillaUseImmediately();
             restoreActiveSlot();
             noMoveTicks = 0;
             return;
@@ -67,7 +68,7 @@ public class AutoHeal extends Module {
             return;
         }
 
-        restoreVanillaUse();
+        restoreVanillaUseImmediately();
 
         boolean comboDown = isUseComboDown();
         if (!mc.options.keyUse.isDown()) {
@@ -102,13 +103,17 @@ public class AutoHeal extends Module {
     public void onPostTick(TickEvent.Post event) {
         if (mode.getValue() == Mode.VANILLA) {
             restoreActiveSlot();
-            if (!canRun() || (vanillaUse != null && !mc.options.keyUse.isDown())) {
-                restoreVanillaUse();
+            if (!canRun()) {
+                restoreVanillaUseImmediately();
+            } else if (vanillaUse != null
+                    && vanillaUse.phase == VanillaUsePhase.ACTIVE
+                    && !mc.options.keyUse.isDown()) {
+                beginVanillaUseRestore();
             }
             return;
         }
 
-        restoreVanillaUse();
+        restoreVanillaUseImmediately();
 
         if (activeUse == null) {
             return;
@@ -177,7 +182,12 @@ public class AutoHeal extends Module {
     }
 
     private void handleVanillaUse() {
-        if (vanillaUse != null || !mc.options.keyUse.isDown()) {
+        if (vanillaUse != null) {
+            continueVanillaUse();
+            return;
+        }
+
+        if (!mc.options.keyUse.isDown()) {
             return;
         }
 
@@ -198,29 +208,137 @@ public class AutoHeal extends Module {
         }
 
         boolean useOpenInventoryPackets = openInv.getValue();
-        if (swapVanillaUseSlot(appleSlot, selectedSlot, useOpenInventoryPackets)) {
-            vanillaUse = new VanillaUse(appleSlot, selectedSlot, useOpenInventoryPackets);
+        boolean useOffhandIntermediate = afterOffHand.getValue();
+        if (!useOffhandIntermediate) {
+            if (swapVanillaUseSlotWithHotbar(appleSlot, selectedSlot, useOpenInventoryPackets)) {
+                vanillaUse = new VanillaUse(
+                        appleSlot,
+                        selectedSlot,
+                        useOpenInventoryPackets,
+                        false,
+                        VanillaUsePhase.ACTIVE
+                );
+            }
+            return;
+        }
+
+        if (swapVanillaUseSlotWithOffhand(appleSlot, useOpenInventoryPackets)) {
+            vanillaUse = new VanillaUse(
+                    appleSlot,
+                    selectedSlot,
+                    useOpenInventoryPackets,
+                    true,
+                    VanillaUsePhase.MOVING_TO_MAINHAND
+            );
         }
     }
 
-    private void restoreVanillaUse() {
+    private void continueVanillaUse() {
+        VanillaUse activeVanillaUse = vanillaUse;
+        if (activeVanillaUse.phase == VanillaUsePhase.MOVING_TO_MAINHAND) {
+            if (!mc.options.keyUse.isDown()) {
+                if (swapVanillaUseSlotWithOffhand(
+                        activeVanillaUse.appleSlot,
+                        activeVanillaUse.useOpenInventoryPackets
+                )) {
+                    vanillaUse = null;
+                }
+                return;
+            }
+
+            if (swapVanillaUseSlotWithOffhand(
+                    activeVanillaUse.hotbarSlot,
+                    activeVanillaUse.useOpenInventoryPackets
+            )) {
+                vanillaUse = activeVanillaUse.withPhase(VanillaUsePhase.ACTIVE);
+            }
+            return;
+        }
+
+        if (activeVanillaUse.phase == VanillaUsePhase.RESTORING_TO_INVENTORY
+                && swapVanillaUseSlotWithOffhand(
+                        activeVanillaUse.appleSlot,
+                        activeVanillaUse.useOpenInventoryPackets
+                )) {
+            vanillaUse = null;
+        }
+    }
+
+    private void beginVanillaUseRestore() {
+        if (vanillaUse == null) {
+            return;
+        }
+
+        VanillaUse activeVanillaUse = vanillaUse;
+        if (!activeVanillaUse.useOffhandIntermediate) {
+            if (swapVanillaUseSlotWithHotbar(
+                    activeVanillaUse.appleSlot,
+                    activeVanillaUse.hotbarSlot,
+                    activeVanillaUse.useOpenInventoryPackets
+            )) {
+                vanillaUse = null;
+            }
+            return;
+        }
+
+        if (swapVanillaUseSlotWithOffhand(
+                activeVanillaUse.hotbarSlot,
+                activeVanillaUse.useOpenInventoryPackets
+        )) {
+            vanillaUse = activeVanillaUse.withPhase(VanillaUsePhase.RESTORING_TO_INVENTORY);
+        }
+    }
+
+    private void restoreVanillaUseImmediately() {
         if (vanillaUse == null) {
             return;
         }
 
         VanillaUse activeVanillaUse = vanillaUse;
         vanillaUse = null;
-        swapVanillaUseSlot(
+        if (!activeVanillaUse.useOffhandIntermediate) {
+            swapVanillaUseSlotWithHotbar(
+                    activeVanillaUse.appleSlot,
+                    activeVanillaUse.hotbarSlot,
+                    activeVanillaUse.useOpenInventoryPackets
+            );
+            return;
+        }
+
+        if (activeVanillaUse.phase != VanillaUsePhase.MOVING_TO_MAINHAND) {
+            swapVanillaUseSlotWithOffhand(
+                    activeVanillaUse.hotbarSlot,
+                    activeVanillaUse.useOpenInventoryPackets
+            );
+        }
+        swapVanillaUseSlotWithOffhand(
                 activeVanillaUse.appleSlot,
-                activeVanillaUse.hotbarSlot,
                 activeVanillaUse.useOpenInventoryPackets
         );
     }
 
-    private boolean swapVanillaUseSlot(int inventorySlot, int hotbarSlot, boolean useOpenInventoryPackets) {
+    private boolean swapVanillaUseSlotWithHotbar(
+            int inventorySlot,
+            int hotbarSlot,
+            boolean useOpenInventoryPackets
+    ) {
+        return performVanillaUseSwap(
+                useOpenInventoryPackets,
+                () -> InventoryUtility.swapInventorySlotWithHotbar(inventorySlot, hotbarSlot)
+        );
+    }
+
+    private boolean swapVanillaUseSlotWithOffhand(int inventorySlot, boolean useOpenInventoryPackets) {
+        return performVanillaUseSwap(
+                useOpenInventoryPackets,
+                () -> InventoryUtility.swapInventorySlotWithOffhand(inventorySlot)
+        );
+    }
+
+    private boolean performVanillaUseSwap(boolean useOpenInventoryPackets, VanillaUseSwap swap) {
         boolean swapped;
         if (!useOpenInventoryPackets) {
-            swapped = InventoryUtility.swapInventorySlotWithHotbar(inventorySlot, hotbarSlot);
+            swapped = swap.swap();
         } else {
             if (mc.player == null || mc.player.connection == null) {
                 return false;
@@ -229,7 +347,7 @@ public class AutoHeal extends Module {
             int containerId = mc.player.containerMenu.containerId;
             mc.player.sendOpenInventory();
             try {
-                swapped = InventoryUtility.swapInventorySlotWithHotbar(inventorySlot, hotbarSlot);
+                swapped = swap.swap();
             } finally {
                 mc.player.connection.send(new ServerboundContainerClosePacket(containerId));
             }
@@ -318,11 +436,37 @@ public class AutoHeal extends Module {
     private record ActiveUse(UseType type, int previousSlot, int hotbarSlot, int initialCount, ItemStack initialStack) {
     }
 
-    private record VanillaUse(int appleSlot, int hotbarSlot, boolean useOpenInventoryPackets) {
+    private record VanillaUse(
+            int appleSlot,
+            int hotbarSlot,
+            boolean useOpenInventoryPackets,
+            boolean useOffhandIntermediate,
+            VanillaUsePhase phase
+    ) {
+        private VanillaUse withPhase(VanillaUsePhase phase) {
+            return new VanillaUse(
+                    this.appleSlot,
+                    this.hotbarSlot,
+                    this.useOpenInventoryPackets,
+                    this.useOffhandIntermediate,
+                    phase
+            );
+        }
+    }
+
+    @FunctionalInterface
+    private interface VanillaUseSwap {
+        boolean swap();
     }
 
     public enum Mode {
         NORMAL, VANILLA
+    }
+
+    private enum VanillaUsePhase {
+        MOVING_TO_MAINHAND,
+        ACTIVE,
+        RESTORING_TO_INVENTORY
     }
 
     private enum UseType {

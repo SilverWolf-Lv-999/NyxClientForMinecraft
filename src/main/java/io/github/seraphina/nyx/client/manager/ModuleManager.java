@@ -119,6 +119,7 @@ public final class ModuleManager {
                 AutoLeave.INSTANCE,
                 AutoCrystal.INSTANCE,
                 BedBreaker.INSTANCE,
+                AutoDestroy.INSTANCE,
                 PacketMine.INSTANCE,
                 PacketEat.INSTANCE,
                 Blink.INSTANCE,

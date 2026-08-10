@@ -132,6 +132,7 @@ public class AnchorAura extends Module {
     private int placeRotationVariant;
     private BlockPos activeAnchorPos;
     private Stage stage = Stage.PLACE_ANCHOR;
+    private List<LivingEntity> activeTargets = List.of();
 
     private boolean isVanilla() {
         return mode.getValue() == Mode.VANILLA;
@@ -164,6 +165,7 @@ public class AnchorAura extends Module {
         updateSpoofItemVisual();
         usedInteractionThisTick = false;
         queuedAction = null;
+        activeTargets = List.of();
 
         if (!canRun()) {
             restoreOriginalHotbarSlot();
@@ -418,7 +420,7 @@ public class AnchorAura extends Module {
             return;
         }
 
-        List<LivingEntity> activeTargets = selectTargets(targets);
+        activeTargets = List.copyOf(selectTargets(targets));
         PlaceTarget placeTarget = findBestPlace(activeTargets);
         if (placeTarget != null) {
             placeAnchor(placeTarget.pos());
@@ -607,6 +609,68 @@ public class AnchorAura extends Module {
         return mc.level.noCollision(mc.player, blockBox)
                 && mc.level.getEntities(null, blockBox).isEmpty()
                 && findClickFace(pos) != null;
+    }
+
+    public BlockPos findAutoDestroyPosition() {
+        if (!isEnabled()
+                || !canRun()
+                || !canAct()
+                || stage != Stage.PLACE_ANCHOR
+                || activeAnchorPos != null
+                || queuedAction != null
+                || syncedAction != null
+                || activeTargets.isEmpty()
+                || !hasRequiredHotbarItems()) {
+            return null;
+        }
+
+        if (hasAvailableAnchorPosition()) {
+            return null;
+        }
+
+        for (LivingEntity target : activeTargets) {
+            for (BlockPos pos : scanAnchorPositions(target)) {
+                if (canPlaceAnchorAfterBreaking(pos) && isSafeAutoDestroyBlock(pos)) {
+                    return pos;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private boolean hasAvailableAnchorPosition() {
+        for (LivingEntity target : activeTargets) {
+            for (BlockPos pos : scanAnchorPositions(target)) {
+                if (canPlaceAnchorAt(pos)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean canPlaceAnchorAfterBreaking(BlockPos pos) {
+        if (mc.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) > placeRange.getValue() * placeRange.getValue()) {
+            return false;
+        }
+
+        AABB blockBox = new AABB(pos);
+        return !mc.player.getBoundingBox().intersects(blockBox)
+                && mc.level.getEntities(null, blockBox).isEmpty()
+                && findClickFace(pos) != null;
+    }
+
+    private boolean isSafeAutoDestroyBlock(BlockPos pos) {
+        BlockState state = mc.level.getBlockState(pos);
+        if (state.isAir() || state.canBeReplaced() || state.getDestroySpeed(mc.level, pos) < 0.0F) {
+            return false;
+        }
+
+        AABB blockBox = new AABB(pos);
+        return !mc.player.getBoundingBox().intersects(blockBox)
+                && mc.level.getEntities(null, blockBox).isEmpty();
     }
 
     private double scoreExplosion(LivingEntity target, Vec3 explosionPos, double targetDamage, double selfDamage) {
@@ -1467,6 +1531,7 @@ public class AnchorAura extends Module {
         placeRotationVariant = 0;
         activeAnchorPos = null;
         stage = Stage.PLACE_ANCHOR;
+        activeTargets = List.of();
     }
 
     private record PlaceTarget(BlockPos pos, LivingEntity target, double score, double targetDamage, double selfDamage) {
