@@ -142,6 +142,7 @@ public final class ModuleManager {
                 ContainerESP.INSTANCE,
                 PlaceRender.INSTANCE,
                 BreakESP.INSTANCE,
+                BlockHighlight.INSTANCE,
                 ESP.INSTANCE,
                 Tracers.INSTANCE,
                 ViewClip.INSTANCE,
