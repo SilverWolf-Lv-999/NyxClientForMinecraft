@@ -81,7 +81,9 @@ public final class ModuleManager {
                 NoInertia.INSTANCE,
                 AutoIceBoot.INSTANCE,
                 EntityControl.INSTANCE,
-                Strafe.INSTANCE
+                Strafe.INSTANCE,
+                ChorusControl.INSTANCE,
+                RocketExtend.INSTANCE
         );
         //Other
         registerModule(
@@ -120,7 +122,9 @@ public final class ModuleManager {
                 AirPlace.INSTANCE,
                 AntiHunger.INSTANCE,
                 NoFall.INSTANCE,
-                Regen.INSTANCE
+                Regen.INSTANCE,
+                InfiniteTrident.INSTANCE,
+                XCarry.INSTANCE
         );
         //Visual
         registerModule(
@@ -134,6 +138,8 @@ public final class ModuleManager {
                 Chams.INSTANCE,
                 Shader.INSTANCE,
                 ContainerESP.INSTANCE,
+                PlaceRender.INSTANCE,
+                BreakESP.INSTANCE,
                 ESP.INSTANCE,
                 Tracers.INSTANCE,
                 ViewClip.INSTANCE,

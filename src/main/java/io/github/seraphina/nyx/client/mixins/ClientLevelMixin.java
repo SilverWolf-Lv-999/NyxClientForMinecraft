@@ -1,8 +1,11 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import io.github.seraphina.nyx.client.events.bus.EventBus;
+import io.github.seraphina.nyx.client.events.impl.BlockBreakingProgressEvent;
 import io.github.seraphina.nyx.client.module.client.ThreadRipper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.sounds.SoundEvent;
@@ -34,6 +37,11 @@ public abstract class ClientLevelMixin {
     @Shadow
     @Final
     private Minecraft minecraft;
+
+    @Inject(method = "destroyBlockProgress", at = @At("HEAD"))
+    private void nyx$onDestroyBlockProgress(int breakerId, BlockPos pos, int progress, CallbackInfo info) {
+        EventBus.INSTANCE.post(new BlockBreakingProgressEvent(breakerId, pos, progress));
+    }
 
     @Inject(method = "tickEntities", at = @At("HEAD"), cancellable = true)
     private void nyx$parallelTickEntities(CallbackInfo info) {
