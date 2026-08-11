@@ -28,9 +28,6 @@ public final class MicrosoftAuth {
     private static final URI MINECRAFT_AUTH_URL = URI.create("https://api.minecraftservices.com/authentication/login_with_xbox");
     private static final URI MINECRAFT_PROFILE_URL = URI.create("https://api.minecraftservices.com/minecraft/profile");
 
-    private MicrosoftAuth() {
-    }
-
     public static CompletableFuture<Void> login(
         Consumer<String> onUrl,
         Consumer<AltManager.Account> onSuccess,

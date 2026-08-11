@@ -1,7 +1,9 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.callables.EventCancellable;
+import lombok.Getter;
 
+@Getter
 public class MousePressEvent extends EventCancellable {
 
     private final int button;
@@ -12,18 +14,6 @@ public class MousePressEvent extends EventCancellable {
         this.button = button;
         this.action = action;
         this.modifiers = modifiers;
-    }
-
-    public int getButton() {
-        return button;
-    }
-
-    public int getAction() {
-        return action;
-    }
-
-    public int getModifiers() {
-        return modifiers;
     }
 
 }

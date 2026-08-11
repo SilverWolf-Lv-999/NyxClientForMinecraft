@@ -10,9 +10,6 @@ public final class NotificationManager implements IMinecraft {
     private static final int MAX_NOTIFICATIONS = 8;
     private static final List<Notification> NOTIFICATIONS = new ArrayList<>();
 
-    private NotificationManager() {
-    }
-
     public static synchronized void pushNotification(Notification notification) {
         if (notification == null || mc.player == null) {
             return;

@@ -1,7 +1,11 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.callables.EventCancellable;
+import lombok.Getter;
+import lombok.Setter;
 
+@Setter
+@Getter
 public class SendPositionEvent extends EventCancellable {
 
     private double x;
@@ -17,54 +21,6 @@ public class SendPositionEvent extends EventCancellable {
         this.z = z;
         this.yaw = yaw;
         this.pitch = pitch;
-        this.onGround = onGround;
-    }
-
-    public double getX() {
-        return this.x;
-    }
-
-    public double getY() {
-        return this.y;
-    }
-
-    public double getZ() {
-        return this.z;
-    }
-
-    public float getYaw() {
-        return this.yaw;
-    }
-
-    public float getPitch() {
-        return this.pitch;
-    }
-
-    public boolean isOnGround() {
-        return this.onGround;
-    }
-
-    public void setX(double x) {
-        this.x = x;
-    }
-
-    public void setY(double y) {
-        this.y = y;
-    }
-
-    public void setZ(double z) {
-        this.z = z;
-    }
-
-    public void setYaw(float yaw) {
-        this.yaw = yaw;
-    }
-
-    public void setPitch(float pitch) {
-        this.pitch = pitch;
-    }
-
-    public void setOnGround(boolean onGround) {
         this.onGround = onGround;
     }
 

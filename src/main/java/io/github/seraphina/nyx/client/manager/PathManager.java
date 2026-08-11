@@ -23,9 +23,6 @@ public final class PathManager {
     public static final String BACKGROUND = BACK_GROUND_PATH.toString();
     public static final String friend = FRIEND.toString();
 
-    private PathManager() {
-    }
-
     public static void init() throws IOException {
         Files.createDirectories(CLIENT_PATH);
         Files.createDirectories(CONFIG_PATH);

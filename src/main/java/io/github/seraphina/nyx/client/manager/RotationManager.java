@@ -14,6 +14,8 @@ import io.github.seraphina.nyx.client.events.impl.SendPositionEvent;
 import io.github.seraphina.nyx.client.events.impl.UseItemRaytraceEvent;
 import io.github.seraphina.nyx.client.utility.rotation.Priority;
 import io.github.seraphina.nyx.client.utility.rotation.RotationUtility;
+import lombok.Getter;
+import lombok.Setter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerRotationPacket;
@@ -35,7 +37,11 @@ public final class RotationManager {
     public Vector2f animationRotation;
     public Vector2f lastAnimationRotation;
 
+    @Setter
+    @Getter
     private boolean active;
+    @Getter
+    @Setter
     private boolean smoothed;
     private double rotationSpeed;
     private Function<Vector2f, Boolean> raytrace;
@@ -99,22 +105,6 @@ public final class RotationManager {
                 && targetRotations != null
                 && Math.abs(Mth.wrapDegrees(rotations.x - targetRotations.x)) <= 1.0F
                 && Math.abs(Mth.wrapDegrees(rotations.y - targetRotations.y)) <= 1.0F;
-    }
-
-    public boolean isActive() {
-        return active;
-    }
-
-    public void setActive(boolean active) {
-        this.active = active;
-    }
-
-    public boolean isSmoothed() {
-        return smoothed;
-    }
-
-    public void setSmoothed(boolean smoothed) {
-        this.smoothed = smoothed;
     }
 
     private void smooth() {

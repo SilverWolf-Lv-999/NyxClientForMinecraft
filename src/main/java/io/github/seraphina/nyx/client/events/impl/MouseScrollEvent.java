@@ -1,7 +1,9 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.callables.EventCancellable;
+import lombok.Getter;
 
+@Getter
 public class MouseScrollEvent extends EventCancellable {
     private final double scrollX;
     private final double scrollY;
@@ -11,11 +13,4 @@ public class MouseScrollEvent extends EventCancellable {
         this.scrollY = scrollY;
     }
 
-    public double getScrollX() {
-        return scrollX;
-    }
-
-    public double getScrollY() {
-        return scrollY;
-    }
 }

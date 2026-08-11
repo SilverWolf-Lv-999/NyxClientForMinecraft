@@ -2,7 +2,9 @@ package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.Event;
 import io.github.seraphina.nyx.client.value.impl.ButtonValue;
+import lombok.Getter;
 
+@Getter
 public class OnNyxButtonClickEvent implements Event {
     private final ButtonValue value;
     private final Button button;
@@ -14,22 +16,6 @@ public class OnNyxButtonClickEvent implements Event {
         this.button = button;
         this.action = action;
         this.time = Math.max(0, time);
-    }
-
-    public ButtonValue getValue() {
-        return value;
-    }
-
-    public Button getButton() {
-        return button;
-    }
-
-    public Action getAction() {
-        return action;
-    }
-
-    public int getTime() {
-        return time;
     }
 
     public boolean isLeftButton() {

@@ -34,9 +34,6 @@ public final class FriendManager {
 
     private static boolean shutdownHookRegistered;
 
-    private FriendManager() {
-    }
-
     public static void init() {
         try {
             PathManager.init();

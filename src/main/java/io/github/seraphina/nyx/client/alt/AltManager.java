@@ -46,9 +46,6 @@ public final class AltManager {
     private static Account currentAccount;
     private static boolean shutdownHookRegistered;
 
-    private AltManager() {
-    }
-
     public static void init() {
         try {
             PathManager.init();

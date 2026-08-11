@@ -1,7 +1,11 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.Event;
+import lombok.Getter;
+import lombok.Setter;
 
+@Setter
+@Getter
 public class RotationAnimationEvent implements Event {
 
     private float yaw;
@@ -13,38 +17,6 @@ public class RotationAnimationEvent implements Event {
         this.yaw = yaw;
         this.lastYaw = lastYaw;
         this.pitch = pitch;
-        this.lastPitch = lastPitch;
-    }
-
-    public float getYaw() {
-        return yaw;
-    }
-
-    public float getLastYaw() {
-        return lastYaw;
-    }
-
-    public float getPitch() {
-        return pitch;
-    }
-
-    public float getLastPitch() {
-        return lastPitch;
-    }
-
-    public void setYaw(float yaw) {
-        this.yaw = yaw;
-    }
-
-    public void setLastYaw(float lastYaw) {
-        this.lastYaw = lastYaw;
-    }
-
-    public void setPitch(float pitch) {
-        this.pitch = pitch;
-    }
-
-    public void setLastPitch(float lastPitch) {
         this.lastPitch = lastPitch;
     }
 

@@ -2,8 +2,12 @@ package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.Event;
 
+import lombok.Getter;
+import lombok.Setter;
 import net.minecraft.world.entity.player.Input;
 
+@Setter
+@Getter
 public class MoveInputEvent implements Event {
 
     private float forward;
@@ -32,46 +36,6 @@ public class MoveInputEvent implements Event {
                 this.sneak,
                 this.sprint
         );
-    }
-
-    public float getForward() {
-        return this.forward;
-    }
-
-    public float getStrafe() {
-        return this.strafe;
-    }
-
-    public boolean isJump() {
-        return this.jump;
-    }
-
-    public boolean isSneak() {
-        return this.sneak;
-    }
-
-    public void setForward(float forward) {
-        this.forward = forward;
-    }
-
-    public void setStrafe(float strafe) {
-        this.strafe = strafe;
-    }
-
-    public void setJump(boolean jump) {
-        this.jump = jump;
-    }
-
-    public void setSneak(boolean sneak) {
-        this.sneak = sneak;
-    }
-
-    public boolean isSprint() {
-        return sprint;
-    }
-
-    public void setSprint(boolean sprint) {
-        this.sprint = sprint;
     }
 
 }

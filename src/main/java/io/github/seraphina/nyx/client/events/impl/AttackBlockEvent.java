@@ -1,9 +1,13 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.callables.EventCancellable;
+import lombok.Getter;
+import lombok.Setter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
+@Setter
+@Getter
 public class AttackBlockEvent extends EventCancellable {
 
     private BlockPos blockPos;
@@ -11,22 +15,6 @@ public class AttackBlockEvent extends EventCancellable {
 
     public AttackBlockEvent(BlockPos blockPos, Direction direction) {
         this.blockPos = blockPos;
-        this.direction = direction;
-    }
-
-    public BlockPos getBlockPos() {
-        return this.blockPos;
-    }
-
-    public void setBlockPos(BlockPos blockPos) {
-        this.blockPos = blockPos;
-    }
-
-    public Direction getDirection() {
-        return this.direction;
-    }
-
-    public void setDirection(Direction direction) {
         this.direction = direction;
     }
 

@@ -2,11 +2,15 @@ package io.github.seraphina.nyx.client.events.impl;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.seraphina.nyx.client.events.api.events.callables.EventCancellable;
+import lombok.Getter;
+import lombok.Setter;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 
+@Setter
+@Getter
 public class RenderItemInHandEvent extends EventCancellable {
     private LivingEntity entity;
     private ItemStack stack;
@@ -31,107 +35,4 @@ public class RenderItemInHandEvent extends EventCancellable {
         this.packedLight = packedLight;
     }
 
-    public PoseStack getPoseStack() {
-        return poseStack;
-    }
-
-    public void setPoseStack(PoseStack poseStack) {
-        this.poseStack = poseStack;
-    }
-
-    public int getPackedLight() {
-        return packedLight;
-    }
-
-    public void setPackedLight(int packedLight) {
-        this.packedLight = packedLight;
-    }
-
-    public ItemDisplayContext getDisplayContext() {
-        return displayContext;
-    }
-
-    public void setDisplayContext(ItemDisplayContext displayContext) {
-        this.displayContext = displayContext;
-    }
-
-    public ItemStack getStack() {
-        return stack;
-    }
-
-    public void setStack(ItemStack stack) {
-        this.stack = stack;
-    }
-
-    public LivingEntity getEntity() {
-        return entity;
-    }
-
-    public void setEntity(LivingEntity entity) {
-        this.entity = entity;
-    }
-
-    public SubmitNodeCollector getNodeCollector() {
-        return nodeCollector;
-    }
-
-    public void setNodeCollector(SubmitNodeCollector nodeCollector) {
-        this.nodeCollector = nodeCollector;
-    }
-
-    public void setScale(float scale) {
-        this.scale = scale;
-    }
-
-    public float getScale() {
-        return scale;
-    }
-
-    public void setXPos(double xPos) {
-        this.xPos = xPos;
-    }
-
-    public double getXPos() {
-        return xPos;
-    }
-
-    public void setYPos(double yPos) {
-        this.yPos = yPos;
-    }
-
-    public double getYPos() {
-        return yPos;
-    }
-
-    public void setZPos(double zPos) {
-        this.zPos = zPos;
-    }
-
-    public double getZPos() {
-        return zPos;
-    }
-
-    public void setXRot(double xRot) {
-        this.xRot = xRot;
-    }
-
-    public double getXRot() {
-        return xRot;
-    }
-
-    public void setYRot(double yRot) {
-        this.yRot = yRot;
-    }
-
-    public double getYRot() {
-        return yRot;
-    }
-
-    public void setZRot(double zRot) {
-        this.zRot = zRot;
-    }
-
-    public double getZRot() {
-        return zRot;
-    }
 }

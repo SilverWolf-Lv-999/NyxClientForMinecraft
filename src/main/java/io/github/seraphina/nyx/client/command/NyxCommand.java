@@ -1,10 +1,12 @@
 package io.github.seraphina.nyx.client.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import lombok.Getter;
 import net.minecraft.client.multiplayer.ClientSuggestionProvider;
 
 import java.util.Locale;
 
+@Getter
 public abstract class NyxCommand {
     private final String name;
 
@@ -19,10 +21,6 @@ public abstract class NyxCommand {
         }
 
         this.name = commandName.toLowerCase(Locale.ROOT);
-    }
-
-    public String getName() {
-        return this.name;
     }
 
     public LiteralArgumentBuilder<ClientSuggestionProvider> build() {

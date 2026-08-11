@@ -58,9 +58,6 @@ public final class FontManager {
     private static Font debugChatFont;
     private static Font debugChatBoldFont;
 
-    private FontManager() {
-    }
-
     public static synchronized void init() {
         SystemFonts.load();
         defaultRenderer = getRenderer(SystemFonts.getDefaultFont(), DEFAULT_FONT_SIZE);

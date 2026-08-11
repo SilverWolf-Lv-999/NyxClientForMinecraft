@@ -39,9 +39,6 @@ public final class ConfigManager {
     private static String selectedConfigName = DEFAULT_CONFIG_NAME;
     private static boolean shutdownHookRegistered;
 
-    private ConfigManager() {
-    }
-
     public static void init() {
         try {
             PathManager.init();

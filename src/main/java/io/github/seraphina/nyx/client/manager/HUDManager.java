@@ -71,9 +71,6 @@ public final class HUDManager implements IMinecraft {
     private static boolean dirty;
     private static boolean shutdownHookRegistered;
 
-    private HUDManager() {
-    }
-
     public static void load() {
         try {
             PathManager.init();

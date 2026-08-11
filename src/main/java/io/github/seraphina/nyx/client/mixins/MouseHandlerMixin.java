@@ -1,9 +1,15 @@
 package io.github.seraphina.nyx.client.mixins;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import io.github.seraphina.nyx.client.events.bus.EventBus;
 import io.github.seraphina.nyx.client.events.impl.MousePressEvent;
 import io.github.seraphina.nyx.client.events.impl.MouseScrollEvent;
+import io.github.seraphina.nyx.client.module.player.FreeLook;
+import io.github.seraphina.nyx.client.module.player.Freecam;
+import io.github.seraphina.nyx.client.module.player.Yaw;
 import net.minecraft.client.MouseHandler;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.input.MouseButtonInfo;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -26,5 +32,19 @@ public class MouseHandlerMixin {
         if (event.isCancelled()) {
             info.cancel();
         }
+    }
+
+    @WrapOperation(
+            method = "turnPlayer",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;turn(DD)V")
+    )
+    private void nyx$handleCameraTurn(LocalPlayer player, double yawDelta, double pitchDelta, Operation<Void> original) {
+        if (Freecam.INSTANCE.handleMouseTurn(yawDelta, pitchDelta)
+                || FreeLook.INSTANCE.handleMouseTurn(yawDelta, pitchDelta)
+                || Yaw.INSTANCE.shouldBlockMouseInput()) {
+            return;
+        }
+
+        original.call(player, yawDelta, pitchDelta);
     }
 }

@@ -18,9 +18,6 @@ public final class ModuleManager {
     public static final Set<Module> MODULES = new LinkedHashSet<>();
     private static boolean initialized;
 
-    private ModuleManager() {
-    }
-
     public static void init() {
         if (initialized) {
             return;
@@ -109,7 +106,8 @@ public final class ModuleManager {
                 MusicPlayer.INSTANCE,
                 Auto2048.INSTANCE,
                 AutoNoWhite.INSTANCE,
-                Nuker.INSTANCE
+                Nuker.INSTANCE,
+                AntiElytraDamaged.INSTANCE
         );
         //Player
         registerModule(
@@ -137,7 +135,10 @@ public final class ModuleManager {
                 NoFall.INSTANCE,
                 Regen.INSTANCE,
                 InfiniteTrident.INSTANCE,
-                XCarry.INSTANCE
+                XCarry.INSTANCE,
+                FreeLook.INSTANCE,
+                Yaw.INSTANCE,
+                Freecam.INSTANCE
         );
         //Visual
         registerModule(

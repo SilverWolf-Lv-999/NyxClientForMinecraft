@@ -1,7 +1,11 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.Event;
+import lombok.Getter;
+import lombok.Setter;
 
+@Setter
+@Getter
 public class UseItemRaytraceEvent implements Event {
 
     private float yaw;
@@ -9,22 +13,6 @@ public class UseItemRaytraceEvent implements Event {
 
     public UseItemRaytraceEvent(float yaw, float pitch) {
         this.yaw = yaw;
-        this.pitch = pitch;
-    }
-
-    public float getYaw() {
-        return yaw;
-    }
-
-    public float getPitch() {
-        return pitch;
-    }
-
-    public void setYaw(float yaw) {
-        this.yaw = yaw;
-    }
-
-    public void setPitch(float pitch) {
         this.pitch = pitch;
     }
 

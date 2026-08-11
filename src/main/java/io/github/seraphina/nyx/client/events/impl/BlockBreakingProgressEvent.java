@@ -1,8 +1,10 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.Event;
+import lombok.Getter;
 import net.minecraft.core.BlockPos;
 
+@Getter
 public class BlockBreakingProgressEvent implements Event {
     private final int breakerId;
     private final BlockPos pos;
@@ -14,15 +16,4 @@ public class BlockBreakingProgressEvent implements Event {
         this.progress = progress;
     }
 
-    public int getBreakerId() {
-        return breakerId;
-    }
-
-    public BlockPos getPos() {
-        return pos;
-    }
-
-    public int getProgress() {
-        return progress;
-    }
 }

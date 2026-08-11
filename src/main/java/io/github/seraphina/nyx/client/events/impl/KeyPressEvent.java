@@ -1,8 +1,10 @@
 package io.github.seraphina.nyx.client.events.impl;
 
 import io.github.seraphina.nyx.client.events.api.events.callables.EventCancellable;
+import lombok.Getter;
 import net.minecraft.client.input.KeyEvent;
 
+@Getter
 public class KeyPressEvent extends EventCancellable {
 
     private final KeyEvent keyEvent;
@@ -11,14 +13,6 @@ public class KeyPressEvent extends EventCancellable {
     public KeyPressEvent(KeyEvent keyEvent, int action) {
         this.keyEvent = keyEvent;
         this.action = action;
-    }
-
-    public KeyEvent getKeyEvent() {
-        return this.keyEvent;
-    }
-
-    public int getAction() {
-        return this.action;
     }
 
     public int getKey() {
