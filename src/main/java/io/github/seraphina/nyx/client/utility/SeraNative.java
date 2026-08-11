@@ -94,6 +94,51 @@ public final class SeraNative {
         return status;
     }
 
+    public static boolean isSmtcSupported() {
+        if (!AVAILABLE) {
+            return false;
+        }
+
+        try {
+            return nativeIsSmtcSupported();
+        } catch (UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    public static SmtcMediaInfo getSmtcInfo() {
+        if (!isSmtcSupported()) {
+            return SmtcMediaInfo.EMPTY;
+        }
+
+        try {
+            String[] snapshot = nativeGetSmtcSnapshot();
+            if (snapshot == null || snapshot.length != 6) {
+                return SmtcMediaInfo.EMPTY;
+            }
+
+            return new SmtcMediaInfo(
+                true,
+                snapshot[0],
+                snapshot[1],
+                parseSmtcLong(snapshot[2]),
+                parseSmtcLong(snapshot[3]),
+                SmtcPlaybackStatus.fromNativeValue(parseSmtcInt(snapshot[4])),
+                snapshot[5]
+            );
+        } catch (UnsatisfiedLinkError ignored) {
+            return SmtcMediaInfo.EMPTY;
+        }
+    }
+
+    public static SmtcPlaybackStatus getSmtcPlaybackStatus() {
+        return getSmtcInfo().playbackStatus();
+    }
+
+    public static String getSmtcSourceAppId() {
+        return getSmtcInfo().sourceAppId();
+    }
+
     private static boolean load() {
         if (isProcessNativeLoaded()) {
             return true;
@@ -199,6 +244,22 @@ public final class SeraNative {
         }
     }
 
+    private static long parseSmtcLong(String value) {
+        try {
+            return Math.max(0L, Long.parseLong(value));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    private static int parseSmtcInt(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
@@ -274,6 +335,10 @@ public final class SeraNative {
 
     private static native int nativeRequestHighPerformanceGpu();
 
+    private static native boolean nativeIsSmtcSupported();
+
+    private static native String[] nativeGetSmtcSnapshot();
+
     private enum PreferenceWriteResult {
         ALREADY_CONFIGURED,
         UPDATED,
@@ -293,5 +358,100 @@ public final class SeraNative {
         NVIDIA_DRIVER_NOT_FOUND,
         UNAVAILABLE,
         NOT_WINDOWS
+    }
+
+    public enum SmtcPlaybackStatus {
+        CLOSED(0),
+        OPENED(1),
+        CHANGING(2),
+        STOPPED(3),
+        PLAYING(4),
+        PAUSED(5),
+        UNKNOWN(-1);
+
+        private final int thisNativeValue;
+
+        SmtcPlaybackStatus(int nativeValue) {
+            thisNativeValue = nativeValue;
+        }
+
+        public static SmtcPlaybackStatus fromNativeValue(int nativeValue) {
+            for (SmtcPlaybackStatus status : values()) {
+                if (status.thisNativeValue == nativeValue) {
+                    return status;
+                }
+            }
+            return UNKNOWN;
+        }
+
+        public int nativeValue() {
+            return thisNativeValue;
+        }
+    }
+
+    public static final class SmtcMediaInfo {
+        public static final SmtcMediaInfo EMPTY = new SmtcMediaInfo(
+            false,
+            "",
+            "",
+            0L,
+            0L,
+            SmtcPlaybackStatus.CLOSED,
+            ""
+        );
+
+        private final boolean thisHasActiveSession;
+        private final String thisTitle;
+        private final String thisArtist;
+        private final long thisPositionMilliseconds;
+        private final long thisDurationMilliseconds;
+        private final SmtcPlaybackStatus thisPlaybackStatus;
+        private final String thisSourceAppId;
+
+        private SmtcMediaInfo(
+                boolean hasActiveSession,
+                String title,
+                String artist,
+                long positionMilliseconds,
+                long durationMilliseconds,
+                SmtcPlaybackStatus playbackStatus,
+                String sourceAppId
+        ) {
+            this.thisHasActiveSession = hasActiveSession;
+            this.thisTitle = title == null ? "" : title;
+            this.thisArtist = artist == null ? "" : artist;
+            this.thisPositionMilliseconds = positionMilliseconds;
+            this.thisDurationMilliseconds = durationMilliseconds;
+            this.thisPlaybackStatus = playbackStatus == null ? SmtcPlaybackStatus.UNKNOWN : playbackStatus;
+            this.thisSourceAppId = sourceAppId == null ? "" : sourceAppId;
+        }
+
+        public boolean hasActiveSession() {
+            return thisHasActiveSession;
+        }
+
+        public String title() {
+            return thisTitle;
+        }
+
+        public String artist() {
+            return thisArtist;
+        }
+
+        public long positionMilliseconds() {
+            return thisPositionMilliseconds;
+        }
+
+        public long durationMilliseconds() {
+            return thisDurationMilliseconds;
+        }
+
+        public SmtcPlaybackStatus playbackStatus() {
+            return thisPlaybackStatus;
+        }
+
+        public String sourceAppId() {
+            return thisSourceAppId;
+        }
     }
 }

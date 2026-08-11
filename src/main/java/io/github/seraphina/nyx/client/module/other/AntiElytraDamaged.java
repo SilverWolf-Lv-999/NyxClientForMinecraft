@@ -51,6 +51,7 @@ public class AntiElytraDamaged extends Module {
         if (!antiStop.getValue()
                 || mc.player == null
                 || !mc.player.isFallFlying()
+                || mc.player.onGround()
                 || !(event.getPacket() instanceof ClientboundSetEntityDataPacket packet)
                 || packet.id() != mc.player.getId()) {
             return;

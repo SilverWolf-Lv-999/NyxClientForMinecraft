@@ -114,6 +114,7 @@ dependencies {
     compileOnly "io.github.llamalad7:mixinextras-common:0.5.3"
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
     compileOnly "org.projectlombok:lombok:1.18.42"
+    annotationProcessor "org.projectlombok:lombok:1.18.42"
     compileOnly("net.neoforged.fancymodloader:loader:2.0.20") { transitive = false }
     compileOnly("net.neoforged:bus:8.0.5") { transitive = false }
 
@@ -293,27 +294,18 @@ def nativePlatformId = providers.provider {
     return "linux-${arch}"
 }
 
-def isCommandAvailable = { String command ->
-    if (file(command).isFile()) {
-        return true
-    }
-    try {
-        def stdout = new ByteArrayOutputStream()
-        exec {
-            commandLine command, '--version'
-            standardOutput = stdout
-            errorOutput = stdout
-            ignoreExitValue = true
-        }.exitValue == 0
-    } catch (Exception ignored) {
-        false
-    }
-}
+def nativeToolchainDirectory = mingwCxxCompiler.get() == null ? null : new File(mingwCxxCompiler.get()).parent
+def nativeToolchainPath = nativeToolchainDirectory == null
+    ? System.getenv('PATH')
+    : "${nativeToolchainDirectory}${File.pathSeparator}${System.getenv('PATH')}"
+def shouldBuildSeraNative = providers.gradleProperty('nyx.buildNative')
+    .map { it.toBoolean() }
+    .getOrElse(false)
 
 tasks.register('configureSeraNative', Exec) {
-    onlyIf { isCommandAvailable(cmakeExecutable.get()) }
     inputs.files fileTree('src/main/cpp')
     outputs.dir nativeBuildDir
+    environment 'PATH', nativeToolchainPath
 
     def args = [
         cmakeExecutable.get(),
@@ -335,9 +327,9 @@ tasks.register('configureSeraNative', Exec) {
 
 tasks.register('buildSeraNative', Exec) {
     dependsOn tasks.named('configureSeraNative')
-    onlyIf { isCommandAvailable(cmakeExecutable.get()) }
     inputs.files fileTree('src/main/cpp')
     outputs.dir nativeBuildDir
+    environment 'PATH', nativeToolchainPath
 
     commandLine cmakeExecutable.get(),
         '--build', nativeBuildDir.get().asFile.absolutePath,
@@ -345,26 +337,27 @@ tasks.register('buildSeraNative', Exec) {
 }
 
 tasks.register('packageSeraNative', Copy) {
-    if (providers.gradleProperty('nyx.buildNative').map { it.toBoolean() }.getOrElse(false)) {
+    if (shouldBuildSeraNative) {
         dependsOn tasks.named('buildSeraNative')
-    }
-    from(nativeBuildDir) {
-        include '**/sera_native.dll'
-        include '**/libsera_native.dll'
-        include '**/libsera_native.so'
-        include '**/libsera_native.dylib'
-        eachFile { details ->
-            details.path = "assets/nyxclient/native/${nativePlatformId.get()}/${details.name}"
+        from(nativeBuildDir) {
+            include '**/sera_native.dll'
+            include '**/libsera_native.dll'
+            include '**/libsera_native.so'
+            include '**/libsera_native.dylib'
+            eachFile { details ->
+                details.path = "assets/nyxclient/native/${nativePlatformId.get()}/${details.name}"
+            }
+            includeEmptyDirs = false
         }
-        includeEmptyDirs = false
-    }
-    from(clionNativeBuildDir) {
-        include '**/sera_native.dll'
-        include '**/libsera_native.dll'
-        eachFile { details ->
-            details.path = "assets/nyxclient/native/${nativePlatformId.get()}/${details.name}"
+    } else {
+        from(clionNativeBuildDir) {
+            include '**/sera_native.dll'
+            include '**/libsera_native.dll'
+            eachFile { details ->
+                details.path = "assets/nyxclient/native/${nativePlatformId.get()}/${details.name}"
+            }
+            includeEmptyDirs = false
         }
-        includeEmptyDirs = false
     }
     into bundledNativeDir
 }

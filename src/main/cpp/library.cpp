@@ -1,11 +1,21 @@
 #include "library.h"
 
 #include <jni.h>
+#include <array>
+#include <chrono>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#if defined(SERA_NATIVE_HAS_SMTC)
+#include <roapi.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Media.Control.h>
+#endif
 
 extern "C" {
 __declspec(dllexport) std::uint32_t NvOptimusEnablement = 0x00000001;
@@ -21,6 +31,162 @@ bool load_driver_library(const wchar_t* name) {
     HMODULE module = LoadLibraryW(name);
     return module != nullptr;
 }
+
+#if defined(SERA_NATIVE_HAS_SMTC)
+struct SmtcSnapshot {
+    std::string title;
+    std::string artist;
+    std::int64_t positionMilliseconds;
+    std::int64_t durationMilliseconds;
+    jint playbackStatus;
+    std::string sourceAppId;
+};
+
+class WinRtApartment {
+public:
+    WinRtApartment() {
+        const HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
+        thisInitialized = SUCCEEDED(result);
+        usable = thisInitialized || result == RPC_E_CHANGED_MODE;
+    }
+
+    ~WinRtApartment() {
+        if (thisInitialized) {
+            RoUninitialize();
+        }
+    }
+
+    bool isUsable() const {
+        return usable;
+    }
+
+private:
+    bool thisInitialized = false;
+    bool usable = false;
+};
+
+std::optional<SmtcSnapshot> get_smtc_snapshot() {
+    WinRtApartment apartment;
+    if (!apartment.isUsable()) {
+        return std::nullopt;
+    }
+
+    try {
+        using namespace winrt::Windows::Media::Control;
+
+        const auto manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        const auto session = manager.GetCurrentSession();
+        if (!session) {
+            return std::nullopt;
+        }
+
+        const auto properties = session.TryGetMediaPropertiesAsync().get();
+        const auto timeline = session.GetTimelineProperties();
+        const auto playback = session.GetPlaybackInfo();
+
+        return SmtcSnapshot {
+            .title = winrt::to_string(properties.Title()),
+            .artist = winrt::to_string(properties.Artist()),
+            .positionMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                timeline.Position()
+            ).count(),
+            .durationMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                timeline.EndTime()
+            ).count(),
+            .playbackStatus = static_cast<jint>(playback.PlaybackStatus()),
+            .sourceAppId = winrt::to_string(session.SourceAppUserModelId())
+        };
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+jstring new_java_string(JNIEnv* environment, std::string_view value) {
+    const auto length = static_cast<jsize>(value.size());
+    jbyteArray bytes = environment->NewByteArray(length);
+    if (bytes == nullptr) {
+        return nullptr;
+    }
+
+    environment->SetByteArrayRegion(
+        bytes,
+        0,
+        length,
+        reinterpret_cast<const jbyte*>(value.data())
+    );
+    if (environment->ExceptionCheck()) {
+        environment->DeleteLocalRef(bytes);
+        return nullptr;
+    }
+
+    jclass stringClass = environment->FindClass("java/lang/String");
+    if (stringClass == nullptr) {
+        environment->DeleteLocalRef(bytes);
+        return nullptr;
+    }
+
+    jmethodID constructor = environment->GetMethodID(
+        stringClass,
+        "<init>",
+        "([BLjava/lang/String;)V"
+    );
+    jstring charset = environment->NewStringUTF("UTF-8");
+    jstring result = nullptr;
+    if (constructor != nullptr && charset != nullptr) {
+        result = static_cast<jstring>(environment->NewObject(
+            stringClass,
+            constructor,
+            bytes,
+            charset
+        ));
+    }
+
+    if (charset != nullptr) {
+        environment->DeleteLocalRef(charset);
+    }
+    environment->DeleteLocalRef(stringClass);
+    environment->DeleteLocalRef(bytes);
+    return result;
+}
+
+jobjectArray new_java_smtc_snapshot(JNIEnv* environment, const SmtcSnapshot& snapshot) {
+    jclass stringClass = environment->FindClass("java/lang/String");
+    if (stringClass == nullptr) {
+        return nullptr;
+    }
+
+    jobjectArray result = environment->NewObjectArray(6, stringClass, nullptr);
+    environment->DeleteLocalRef(stringClass);
+    if (result == nullptr) {
+        return nullptr;
+    }
+
+    const std::array<std::string, 6> values {
+        snapshot.title,
+        snapshot.artist,
+        std::to_string(snapshot.positionMilliseconds),
+        std::to_string(snapshot.durationMilliseconds),
+        std::to_string(snapshot.playbackStatus),
+        snapshot.sourceAppId
+    };
+    for (jsize index = 0; index < static_cast<jsize>(values.size()); ++index) {
+        jstring value = new_java_string(environment, values[index]);
+        if (value == nullptr) {
+            environment->DeleteLocalRef(result);
+            return nullptr;
+        }
+
+        environment->SetObjectArrayElement(result, index, value);
+        environment->DeleteLocalRef(value);
+        if (environment->ExceptionCheck()) {
+            environment->DeleteLocalRef(result);
+            return nullptr;
+        }
+    }
+
+    return result;
+}
+#endif
 }
 #endif
 
@@ -42,5 +208,24 @@ Java_io_github_seraphina_nyx_client_utility_SeraNative_nativeRequestHighPerforma
     return flags;
 #else
     return 0;
+#endif
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_seraphina_nyx_client_utility_SeraNative_nativeIsSmtcSupported(JNIEnv*, jclass) {
+#if defined(_WIN32) && defined(SERA_NATIVE_HAS_SMTC)
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_io_github_seraphina_nyx_client_utility_SeraNative_nativeGetSmtcSnapshot(JNIEnv* environment, jclass) {
+#if defined(_WIN32) && defined(SERA_NATIVE_HAS_SMTC)
+    const std::optional<SmtcSnapshot> snapshot = get_smtc_snapshot();
+    return snapshot ? new_java_smtc_snapshot(environment, *snapshot) : nullptr;
+#else
+    return nullptr;
 #endif
 }
