@@ -26,9 +26,6 @@ public final class SeraNative {
     private static final boolean AVAILABLE = load();
     private static GpuPreferenceStatus gpuPreferenceStatus;
 
-    private SeraNative() {
-    }
-
     public static boolean isAvailable() {
         return AVAILABLE;
     }
@@ -113,18 +110,19 @@ public final class SeraNative {
 
         try {
             String[] snapshot = nativeGetSmtcSnapshot();
-            if (snapshot == null || snapshot.length != 6) {
+            if (snapshot == null || snapshot.length != 8) {
                 return SmtcMediaInfo.EMPTY;
             }
 
             return new SmtcMediaInfo(
-                true,
+                parseSmtcBoolean(snapshot[6]),
                 snapshot[0],
                 snapshot[1],
                 parseSmtcLong(snapshot[2]),
                 parseSmtcLong(snapshot[3]),
                 SmtcPlaybackStatus.fromNativeValue(parseSmtcInt(snapshot[4])),
-                snapshot[5]
+                snapshot[5],
+                snapshot[7]
             );
         } catch (UnsatisfiedLinkError ignored) {
             return SmtcMediaInfo.EMPTY;
@@ -140,10 +138,6 @@ public final class SeraNative {
     }
 
     private static boolean load() {
-        if (isProcessNativeLoaded()) {
-            return true;
-        }
-
         if (loadBundled() && probe()) {
             markLoaded("bundled", System.getProperty(PROPERTY_LOAD_PATH, ""));
             return true;
@@ -177,10 +171,13 @@ public final class SeraNative {
                 return false;
             }
 
-            Path directory = Files.createDirectories(Path.of(
+            Path parentDirectory = Files.createDirectories(Path.of(
                     System.getProperty("java.io.tmpdir"),
                     "nyxclient-native"
             ));
+            // JNI libraries are registered per class loader, so a shared DLL path cannot serve
+            // NeoForge's early-loading and regular mod class loaders at the same time.
+            Path directory = Files.createTempDirectory(parentDirectory, "loader-");
             Path library = directory.resolve(libraryName);
             Files.copy(input, library, StandardCopyOption.REPLACE_EXISTING);
             System.load(library.toAbsolutePath().toString());
@@ -189,10 +186,6 @@ public final class SeraNative {
         } catch (IOException | SecurityException | UnsatisfiedLinkError ignored) {
             return false;
         }
-    }
-
-    private static boolean isProcessNativeLoaded() {
-        return System.getProperty(PROPERTY_LOAD_STATUS, "").startsWith("loaded");
     }
 
     private static void markLoaded(String source, String path) {
@@ -258,6 +251,10 @@ public final class SeraNative {
         } catch (NumberFormatException ignored) {
             return -1;
         }
+    }
+
+    private static boolean parseSmtcBoolean(String value) {
+        return "1".equals(value) || Boolean.parseBoolean(value);
     }
 
     private static boolean isWindows() {
@@ -397,7 +394,8 @@ public final class SeraNative {
             0L,
             0L,
             SmtcPlaybackStatus.CLOSED,
-            ""
+            "",
+            "SMTC native library is unavailable"
         );
 
         private final boolean thisHasActiveSession;
@@ -407,6 +405,7 @@ public final class SeraNative {
         private final long thisDurationMilliseconds;
         private final SmtcPlaybackStatus thisPlaybackStatus;
         private final String thisSourceAppId;
+        private final String thisDiagnostic;
 
         private SmtcMediaInfo(
                 boolean hasActiveSession,
@@ -415,7 +414,8 @@ public final class SeraNative {
                 long positionMilliseconds,
                 long durationMilliseconds,
                 SmtcPlaybackStatus playbackStatus,
-                String sourceAppId
+                String sourceAppId,
+                String diagnostic
         ) {
             this.thisHasActiveSession = hasActiveSession;
             this.thisTitle = title == null ? "" : title;
@@ -424,6 +424,7 @@ public final class SeraNative {
             this.thisDurationMilliseconds = durationMilliseconds;
             this.thisPlaybackStatus = playbackStatus == null ? SmtcPlaybackStatus.UNKNOWN : playbackStatus;
             this.thisSourceAppId = sourceAppId == null ? "" : sourceAppId;
+            this.thisDiagnostic = diagnostic == null ? "" : diagnostic;
         }
 
         public boolean hasActiveSession() {
@@ -452,6 +453,10 @@ public final class SeraNative {
 
         public String sourceAppId() {
             return thisSourceAppId;
+        }
+
+        public String diagnostic() {
+            return thisDiagnostic;
         }
     }
 }

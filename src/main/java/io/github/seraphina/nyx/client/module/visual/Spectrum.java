@@ -2,11 +2,11 @@ package io.github.seraphina.nyx.client.module.visual;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.Render2DEvent;
-import io.github.seraphina.nyx.client.music.MusicPlaybackService;
 import io.github.seraphina.nyx.client.module.Category;
 import io.github.seraphina.nyx.client.module.Module;
 import io.github.seraphina.nyx.client.module.ModuleInfo;
 import io.github.seraphina.nyx.client.utility.MathUtility;
+import io.github.seraphina.nyx.client.utility.MusicUtility;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
@@ -61,7 +61,7 @@ public class Spectrum extends Module {
 
         int barCount = bars.getValue();
         float frameSeconds = frameSeconds();
-        float[] targets = MusicPlaybackService.INSTANCE.spectrumSnapshot(barCount);
+        float[] targets = MusicUtility.spectrumSnapshot(barCount);
         float maxValue = updateAnimation(targets, barCount, frameSeconds);
         if (maxValue <= 0.002F) {
             return;

@@ -4,11 +4,11 @@ import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.music.LyricLine;
 import io.github.seraphina.nyx.client.music.LyricLineProcessor;
-import io.github.seraphina.nyx.client.music.MusicPlaybackService;
 import io.github.seraphina.nyx.client.music.Song;
 import io.github.seraphina.nyx.client.module.visual.hud.HUD;
 import io.github.seraphina.nyx.client.ui.UIComponent;
 import io.github.seraphina.nyx.client.utility.MathUtility;
+import io.github.seraphina.nyx.client.utility.MusicUtility;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import io.github.seraphina.nyx.client.utility.web.WebUtility;
@@ -154,16 +154,16 @@ public final class LyricComponent implements UIComponent<HUD> {
     }
 
     private LyricState lyricState() {
-        MusicPlaybackService player = MusicPlaybackService.INSTANCE;
-        Song song = player.currentSong();
-        boolean hasMusic = song != null && player.isPlaying();
+        MusicUtility.MusicSnapshot music = MusicUtility.snapshot();
+        Song song = music.song();
+        boolean hasMusic = song != null && music.playing();
 
-        List<LyricLine> lyrics = player.lyricsSnapshot();
+        List<LyricLine> lyrics = music.lyrics();
         if (lyrics.isEmpty()) {
             return new LyricState(hasMusic, song, List.of(), 0);
         }
 
-        int index = LyricLineProcessor.currentIndex(lyrics, player.positionMs());
+        int index = LyricLineProcessor.currentIndex(lyrics, music.positionMs());
         int currentIndex = Math.max(0, Math.min(index, lyrics.size() - 1));
         return new LyricState(hasMusic, song, lyrics, currentIndex);
     }

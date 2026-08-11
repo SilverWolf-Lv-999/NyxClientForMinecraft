@@ -4,9 +4,9 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -34,12 +34,28 @@ bool load_driver_library(const wchar_t* name) {
 
 #if defined(SERA_NATIVE_HAS_SMTC)
 struct SmtcSnapshot {
+    bool hasActiveSession;
     std::string title;
     std::string artist;
     std::int64_t positionMilliseconds;
     std::int64_t durationMilliseconds;
     jint playbackStatus;
     std::string sourceAppId;
+    std::string diagnostic;
+};
+
+SRWLOCK smtcManagerLock = SRWLOCK_INIT;
+winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager smtcManager{nullptr};
+
+class SmtcManagerLock {
+public:
+    SmtcManagerLock() {
+        AcquireSRWLockExclusive(&smtcManagerLock);
+    }
+
+    ~SmtcManagerLock() {
+        ReleaseSRWLockExclusive(&smtcManagerLock);
+    }
 };
 
 class WinRtApartment {
@@ -65,19 +81,47 @@ private:
     bool usable = false;
 };
 
-std::optional<SmtcSnapshot> get_smtc_snapshot() {
+winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager get_smtc_manager() {
+    SmtcManagerLock lock;
+    if (smtcManager) {
+        return smtcManager;
+    }
+
+    smtcManager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+    return smtcManager;
+}
+
+SmtcSnapshot smtc_inactive_snapshot(std::string diagnostic) {
+    return SmtcSnapshot {
+        .hasActiveSession = false,
+        .title = "",
+        .artist = "",
+        .positionMilliseconds = 0L,
+        .durationMilliseconds = 0L,
+        .playbackStatus = 0,
+        .sourceAppId = "",
+        .diagnostic = std::move(diagnostic)
+    };
+}
+
+std::string smtc_hresult_diagnostic(const winrt::hresult_error& error) {
+    return "SMTC WinRT error " + std::to_string(error.code().value);
+}
+
+SmtcSnapshot get_smtc_snapshot() {
     WinRtApartment apartment;
     if (!apartment.isUsable()) {
-        return std::nullopt;
+        return smtc_inactive_snapshot("SMTC WinRT apartment is unavailable");
     }
 
     try {
-        using namespace winrt::Windows::Media::Control;
-
-        const auto manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        const auto manager = get_smtc_manager();
+        if (!manager) {
+            return smtc_inactive_snapshot("SMTC session manager is unavailable");
+        }
         const auto session = manager.GetCurrentSession();
         if (!session) {
-            return std::nullopt;
+            return smtc_inactive_snapshot("No active SMTC session");
         }
 
         const auto properties = session.TryGetMediaPropertiesAsync().get();
@@ -85,6 +129,7 @@ std::optional<SmtcSnapshot> get_smtc_snapshot() {
         const auto playback = session.GetPlaybackInfo();
 
         return SmtcSnapshot {
+            .hasActiveSession = true,
             .title = winrt::to_string(properties.Title()),
             .artist = winrt::to_string(properties.Artist()),
             .positionMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -94,10 +139,13 @@ std::optional<SmtcSnapshot> get_smtc_snapshot() {
                 timeline.EndTime()
             ).count(),
             .playbackStatus = static_cast<jint>(playback.PlaybackStatus()),
-            .sourceAppId = winrt::to_string(session.SourceAppUserModelId())
+            .sourceAppId = winrt::to_string(session.SourceAppUserModelId()),
+            .diagnostic = ""
         };
+    } catch (const winrt::hresult_error& error) {
+        return smtc_inactive_snapshot(smtc_hresult_diagnostic(error));
     } catch (...) {
-        return std::nullopt;
+        return smtc_inactive_snapshot("SMTC native query failed");
     }
 }
 
@@ -155,19 +203,21 @@ jobjectArray new_java_smtc_snapshot(JNIEnv* environment, const SmtcSnapshot& sna
         return nullptr;
     }
 
-    jobjectArray result = environment->NewObjectArray(6, stringClass, nullptr);
+    jobjectArray result = environment->NewObjectArray(8, stringClass, nullptr);
     environment->DeleteLocalRef(stringClass);
     if (result == nullptr) {
         return nullptr;
     }
 
-    const std::array<std::string, 6> values {
+    const std::array<std::string, 8> values {
         snapshot.title,
         snapshot.artist,
         std::to_string(snapshot.positionMilliseconds),
         std::to_string(snapshot.durationMilliseconds),
         std::to_string(snapshot.playbackStatus),
-        snapshot.sourceAppId
+        snapshot.sourceAppId,
+        snapshot.hasActiveSession ? "1" : "0",
+        snapshot.diagnostic
     };
     for (jsize index = 0; index < static_cast<jsize>(values.size()); ++index) {
         jstring value = new_java_string(environment, values[index]);
@@ -223,8 +273,7 @@ Java_io_github_seraphina_nyx_client_utility_SeraNative_nativeIsSmtcSupported(JNI
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_io_github_seraphina_nyx_client_utility_SeraNative_nativeGetSmtcSnapshot(JNIEnv* environment, jclass) {
 #if defined(_WIN32) && defined(SERA_NATIVE_HAS_SMTC)
-    const std::optional<SmtcSnapshot> snapshot = get_smtc_snapshot();
-    return snapshot ? new_java_smtc_snapshot(environment, *snapshot) : nullptr;
+    return new_java_smtc_snapshot(environment, get_smtc_snapshot());
 #else
     return nullptr;
 #endif

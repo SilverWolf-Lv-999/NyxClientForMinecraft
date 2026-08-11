@@ -9,6 +9,10 @@ find_package(JNI REQUIRED)
 add_library(sera_native SHARED library.cpp)
 target_include_directories(sera_native PRIVATE ${JNI_INCLUDE_DIRS})
 
+if (MINGW)
+    target_link_options(sera_native PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
 if (WIN32)
     file(GLOB cppwinrtIncludeDirectories LIST_DIRECTORIES true
         "$ENV{WindowsSdkDir}/Include/*/cppwinrt"

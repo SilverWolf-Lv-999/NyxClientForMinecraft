@@ -10,6 +10,7 @@ import io.github.seraphina.nyx.client.music.Playlist;
 import io.github.seraphina.nyx.client.music.Song;
 import io.github.seraphina.nyx.client.manager.FontManager;
 import io.github.seraphina.nyx.client.ui.LuaScreen;
+import io.github.seraphina.nyx.client.utility.MusicUtility;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import io.github.seraphina.nyx.client.utility.web.WebUtility;
@@ -163,7 +164,8 @@ public class MusicPlayerScreen extends LuaScreen {
     @Override
     protected void appendLuaState(Map<String, Object> state) {
         MusicPlaybackService player = MusicPlaybackService.INSTANCE;
-        Song currentSong = player.currentSong();
+        MusicUtility.MusicSnapshot musicSnapshot = MusicUtility.snapshot();
+        Song currentSong = musicSnapshot.song();
         NeteaseMusicApi.LoginSession session = NeteaseMusicApi.currentSession();
 
         List<Map<String, Object>> playlistStates = new ArrayList<>();
@@ -186,13 +188,13 @@ public class MusicPlayerScreen extends LuaScreen {
             songState.put("name", song.name());
             songState.put("artist", song.displayArtist());
             songState.put("cover", song.image());
-            songState.put("duration", MusicPlaybackService.formatTime(song.duration()));
+            songState.put("duration", MusicUtility.formatTime(song.duration()));
             songState.put("current", song.equals(currentSong));
             songStates.add(songState);
         }
 
-        List<LyricLine> lyrics = player.lyricsSnapshot();
-        int lyricIndex = LyricLineProcessor.currentIndex(lyrics, player.positionMs());
+        List<LyricLine> lyrics = musicSnapshot.lyrics();
+        int lyricIndex = LyricLineProcessor.currentIndex(lyrics, musicSnapshot.positionMs());
         String lyric = lyricIndex >= 0 && lyricIndex < lyrics.size() ? lyrics.get(lyricIndex).text() : "";
         int detailLyricIndex = lyrics.isEmpty() ? -1 : Math.max(0, Math.min(lyricIndex, lyrics.size() - 1));
         List<Map<String, Object>> detailLyrics = new ArrayList<>();
@@ -227,19 +229,19 @@ public class MusicPlayerScreen extends LuaScreen {
         state.put("qr_image", this.qrLogin == null ? "" : this.qrLogin.qrImage());
 
         state.put("current_song", currentSong == null ? "No song selected" : currentSong.name());
-        state.put("current_artist", currentSong == null ? player.status() : currentSong.displayArtist());
+        state.put("current_artist", currentSong == null ? musicSnapshot.status() : currentSong.displayArtist());
         state.put("current_cover", currentSong == null ? "" : currentSong.image());
         state.put("has_current_song", currentSong != null);
-        state.put("playing", player.isPlaying());
-        state.put("position", player.positionMs());
-        state.put("duration", player.totalDurationMs());
-        state.put("progress", player.totalDurationMs() <= 0L
+        state.put("playing", musicSnapshot.playing());
+        state.put("position", musicSnapshot.positionMs());
+        state.put("duration", musicSnapshot.durationMs());
+        state.put("progress", musicSnapshot.durationMs() <= 0L
             ? 0.0F
-            : clamp(player.positionMs() / (float)player.totalDurationMs(), 0.0F, 1.0F));
-        state.put("position_label", MusicPlaybackService.formatTime(player.positionMs()));
-        state.put("duration_label", MusicPlaybackService.formatTime(player.totalDurationMs()));
-        state.put("time_label", MusicPlaybackService.formatTime(player.positionMs())
-            + " / " + MusicPlaybackService.formatTime(player.totalDurationMs()));
+            : clamp(musicSnapshot.positionMs() / (float)musicSnapshot.durationMs(), 0.0F, 1.0F));
+        state.put("position_label", MusicUtility.formatTime(musicSnapshot.positionMs()));
+        state.put("duration_label", MusicUtility.formatTime(musicSnapshot.durationMs()));
+        state.put("time_label", MusicUtility.formatTime(musicSnapshot.positionMs())
+            + " / " + MusicUtility.formatTime(musicSnapshot.durationMs()));
         state.put("volume", player.volume());
         state.put("volume_label", Math.round(player.volume() * 100.0F) + "%");
         state.put("mode_label", player.playbackMode().label());
@@ -342,7 +344,7 @@ public class MusicPlayerScreen extends LuaScreen {
                 yield true;
             }
             case "open_detail" -> {
-                this.detailOpen = player.currentSong() != null;
+                this.detailOpen = MusicUtility.snapshot().song() != null;
                 yield true;
             }
             case "close_detail" -> {
@@ -676,7 +678,7 @@ public class MusicPlayerScreen extends LuaScreen {
     }
 
     private void renderSongRow(GuiGraphics guiGraphics, Song song, int index, float x, float y, int mouseX, int mouseY) {
-        boolean current = song.equals(MusicPlaybackService.INSTANCE.currentSong());
+        boolean current = song.equals(MusicUtility.snapshot().song());
         boolean hovered = isInsideExclusive(mouseX, mouseY, x, y, contentWidth(), 36.0F);
         Render2DUtility.drawRoundedRect(x, y, contentWidth(), 36.0F, 6.0F, current ? 0x1E57C7FF : hovered ? CARD_HOVER : CARD);
         renderCover(song.image(), x + 6.0F, y + 5.0F, 26.0F, 5.0F);
@@ -685,12 +687,13 @@ public class MusicPlayerScreen extends LuaScreen {
         }
         draw(trim(song.name(), 250), x + 40.0F, y + 6.0F, current ? ACCENT : TEXT);
         drawMeta(trim(song.displayArtist(), 250), x + 40.0F, y + 20.0F, TEXT_DIM);
-        drawMeta(MusicPlaybackService.formatTime(song.duration()), x + contentWidth() - 48.0F, y + 14.0F, TEXT_MUTED);
+        drawMeta(MusicUtility.formatTime(song.duration()), x + contentWidth() - 48.0F, y + 14.0F, TEXT_MUTED);
         addScrollableClickZone(x, y, contentWidth(), 36.0F, () -> playVisibleSong(song));
     }
 
     private void renderPlayer(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         MusicPlaybackService player = MusicPlaybackService.INSTANCE;
+        MusicUtility.MusicSnapshot musicSnapshot = MusicUtility.snapshot();
         float x = panelX + SIDEBAR_WIDTH;
         float y = panelY + PANEL_HEIGHT - PLAYER_HEIGHT;
         clickZones.add(new ClickZone(x, y, PANEL_WIDTH - SIDEBAR_WIDTH, PLAYER_HEIGHT, () -> {
@@ -698,14 +701,14 @@ public class MusicPlayerScreen extends LuaScreen {
         Render2DUtility.drawRect(x, y, PANEL_WIDTH - SIDEBAR_WIDTH, 1.0F, BORDER);
         Render2DUtility.drawRect(x, y + 1.0F, PANEL_WIDTH - SIDEBAR_WIDTH, PLAYER_HEIGHT - 1.0F, 0xDD0B0D12);
 
-        Song currentSong = player.currentSong();
+        Song currentSong = musicSnapshot.song();
         renderCover(currentSong == null ? "" : currentSong.image(), x + 16.0F, y + 14.0F, 48.0F, 8.0F);
         draw(currentSong == null ? "No song selected" : trim(currentSong.name(), 205), x + 74.0F, y + 17.0F, TEXT);
-        drawMeta(currentSong == null ? player.status() : trim(currentSong.displayArtist(), 205), x + 74.0F, y + 33.0F, TEXT_DIM);
+        drawMeta(currentSong == null ? musicSnapshot.status() : trim(currentSong.displayArtist(), 205), x + 74.0F, y + 33.0F, TEXT_DIM);
 
         float controlsX = x + 286.0F;
         iconButton(guiGraphics, Icon.PREVIOUS, controlsX, y + 17.0F, 24.0F, mouseX, mouseY, player::playPrevious);
-        iconButton(guiGraphics, player.isPlaying() ? Icon.PAUSE : Icon.PLAY, controlsX + 32.0F, y + 12.0F, 34.0F, mouseX, mouseY, player::toggle);
+        iconButton(guiGraphics, musicSnapshot.playing() ? Icon.PAUSE : Icon.PLAY, controlsX + 32.0F, y + 12.0F, 34.0F, mouseX, mouseY, player::toggle);
         iconButton(guiGraphics, Icon.NEXT, controlsX + 74.0F, y + 17.0F, 24.0F, mouseX, mouseY, player::playNext);
         iconButton(guiGraphics, Icon.STOP, controlsX + 106.0F, y + 17.0F, 24.0F, mouseX, mouseY, player::stop);
         modeButton(guiGraphics, player, controlsX + 138.0F, y + 17.0F, mouseX, mouseY);
@@ -713,18 +716,18 @@ public class MusicPlayerScreen extends LuaScreen {
         float barX = x + 74.0F;
         float barY = y + 61.0F;
         float barW = PANEL_WIDTH - SIDEBAR_WIDTH - 172.0F;
-        float progress = player.totalDurationMs() <= 0L ? 0.0F : clamp(player.positionMs() / (float)player.totalDurationMs(), 0.0F, 1.0F);
+        float progress = musicSnapshot.durationMs() <= 0L ? 0.0F : clamp(musicSnapshot.positionMs() / (float)musicSnapshot.durationMs(), 0.0F, 1.0F);
         Render2DUtility.drawRoundedRect(barX, barY, barW, 4.0F, 2.0F, TRACK);
         Render2DUtility.drawRoundedHorizontalGradientRect(barX, barY, barW * progress, 4.0F, 2.0F, ACCENT, ACCENT_DARK);
         Render2DUtility.drawCircle(barX + barW * progress, barY + 2.0F, 3.0F, TEXT);
-        drawMeta(MusicPlaybackService.formatTime(player.positionMs()) + " / " + MusicPlaybackService.formatTime(player.totalDurationMs()), barX + barW + 8.0F, barY - 4.0F, TEXT_DIM);
+        drawMeta(MusicUtility.formatTime(musicSnapshot.positionMs()) + " / " + MusicUtility.formatTime(musicSnapshot.durationMs()), barX + barW + 8.0F, barY - 4.0F, TEXT_DIM);
 
         float volumeX = x + 322.0F;
         float volumeY = y + 73.0F;
         drawIcon(Icon.VOLUME, volumeX, volumeY - 4.0F, 11.0F, 11.0F, TEXT_DIM);
         renderVolumeSlider(guiGraphics, volumeX + 17.0F, volumeY, 112.0F, mouseX, mouseY);
 
-        renderCurrentLyric(guiGraphics, player, x + 16.0F, y + 72.0F);
+        renderCurrentLyric(musicSnapshot, x + 16.0F, y + 72.0F);
     }
 
     private void iconButton(GuiGraphics guiGraphics, Icon icon, float x, float y, float size, int mouseX, int mouseY, Runnable action) {
@@ -781,9 +784,9 @@ public class MusicPlayerScreen extends LuaScreen {
         clickZones.add(new ClickZone(clippedX, clippedY, clippedRight - clippedX, clippedBottom - clippedY, action));
     }
 
-    private void renderCurrentLyric(GuiGraphics guiGraphics, MusicPlaybackService player, float x, float y) {
-        List<LyricLine> lyrics = player.lyricsSnapshot();
-        int index = LyricLineProcessor.currentIndex(lyrics, player.positionMs());
+    private void renderCurrentLyric(MusicUtility.MusicSnapshot musicSnapshot, float x, float y) {
+        List<LyricLine> lyrics = musicSnapshot.lyrics();
+        int index = LyricLineProcessor.currentIndex(lyrics, musicSnapshot.positionMs());
         if (index >= 0 && index < lyrics.size()) {
             draw(trim(lyrics.get(index).text().isBlank() ? "..." : lyrics.get(index).text(), 260), x, y, ACCENT);
         }

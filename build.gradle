@@ -300,7 +300,7 @@ def nativeToolchainPath = nativeToolchainDirectory == null
     : "${nativeToolchainDirectory}${File.pathSeparator}${System.getenv('PATH')}"
 def shouldBuildSeraNative = providers.gradleProperty('nyx.buildNative')
     .map { it.toBoolean() }
-    .getOrElse(false)
+    .getOrElse(true)
 
 tasks.register('configureSeraNative', Exec) {
     inputs.files fileTree('src/main/cpp')
@@ -337,6 +337,7 @@ tasks.register('buildSeraNative', Exec) {
 }
 
 tasks.register('packageSeraNative', Copy) {
+    inputs.property('shouldBuildSeraNative', shouldBuildSeraNative)
     if (shouldBuildSeraNative) {
         dependsOn tasks.named('buildSeraNative')
         from(nativeBuildDir) {

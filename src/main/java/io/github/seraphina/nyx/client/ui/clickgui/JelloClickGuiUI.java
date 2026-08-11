@@ -12,6 +12,7 @@ import io.github.seraphina.nyx.client.music.NeteaseMusicApi;
 import io.github.seraphina.nyx.client.music.Playlist;
 import io.github.seraphina.nyx.client.music.Song;
 import io.github.seraphina.nyx.client.ui.LuaScreen;
+import io.github.seraphina.nyx.client.utility.MusicUtility;
 import io.github.seraphina.nyx.client.utility.Render2DUtility;
 import io.github.seraphina.nyx.client.utility.font.FontRenderer;
 import io.github.seraphina.nyx.client.utility.web.WebUtility;
@@ -270,7 +271,8 @@ public final class JelloClickGuiUI extends LuaScreen {
 
     private void appendMusicState(Map<String, Object> state, long now) {
         MusicPlaybackService player = MusicPlaybackService.INSTANCE;
-        Song song = player.currentSong();
+        MusicUtility.MusicSnapshot musicSnapshot = MusicUtility.snapshot();
+        Song song = musicSnapshot.song();
         NeteaseMusicApi.LoginSession session = NeteaseMusicApi.currentSession();
 
         Map<String, Object> music = new LinkedHashMap<>();
@@ -311,7 +313,7 @@ public final class JelloClickGuiUI extends LuaScreen {
             songState.put("name", visibleSong.name());
             songState.put("artist", visibleSong.displayArtist());
             songState.put("cover", visibleSong.image());
-            songState.put("duration", MusicPlaybackService.formatTime(visibleSong.duration()));
+            songState.put("duration", MusicUtility.formatTime(visibleSong.duration()));
             songState.put("current", visibleSong.equals(song));
             songStates.add(songState);
         }
@@ -319,23 +321,23 @@ public final class JelloClickGuiUI extends LuaScreen {
 
         music.put("has_song", song != null);
         music.put("song_name", song == null ? "暂无音乐" : song.name());
-        music.put("artist", song == null ? player.status() : song.displayArtist());
+        music.put("artist", song == null ? musicSnapshot.status() : song.displayArtist());
         music.put("cover", song == null ? "" : song.image());
         music.put("cover_progress", this.coverProgress);
-        music.put("playing", player.isPlaying());
-        music.put("progress", player.totalDurationMs() <= 0L
+        music.put("playing", musicSnapshot.playing());
+        music.put("progress", musicSnapshot.durationMs() <= 0L
             ? 0.0F
-            : clamp(player.positionMs() / (float)player.totalDurationMs(), 0.0F, 1.0F));
-        music.put("position_label", MusicPlaybackService.formatTime(player.positionMs()));
-        music.put("duration_label", MusicPlaybackService.formatTime(player.totalDurationMs()));
+            : clamp(musicSnapshot.positionMs() / (float)musicSnapshot.durationMs(), 0.0F, 1.0F));
+        music.put("position_label", MusicUtility.formatTime(musicSnapshot.positionMs()));
+        music.put("duration_label", MusicUtility.formatTime(musicSnapshot.durationMs()));
         music.put("volume", player.volume());
         music.put("volume_label", Math.round(player.volume() * 100.0F) + "%");
         music.put("previous_scale", musicButtonScale("previous", now));
         music.put("toggle_scale", musicButtonScale("toggle", now));
         music.put("next_scale", musicButtonScale("next", now));
 
-        List<LyricLine> lyrics = player.lyricsSnapshot();
-        int currentLyric = LyricLineProcessor.currentIndex(lyrics, player.positionMs());
+        List<LyricLine> lyrics = musicSnapshot.lyrics();
+        int currentLyric = LyricLineProcessor.currentIndex(lyrics, musicSnapshot.positionMs());
         List<Map<String, Object>> lyricStates = new ArrayList<>();
         if (!lyrics.isEmpty()) {
             int center = Math.max(0, Math.min(currentLyric, lyrics.size() - 1));
@@ -411,7 +413,7 @@ public final class JelloClickGuiUI extends LuaScreen {
                 yield true;
             }
             case "music_detail" -> {
-                if (player.currentSong() != null) {
+                if (MusicUtility.snapshot().song() != null) {
                     this.detailTargetOpen = true;
                 }
                 yield true;
@@ -609,7 +611,7 @@ public final class JelloClickGuiUI extends LuaScreen {
         if (!this.detailTargetOpen && this.detailProgress < 0.006F) {
             this.detailProgress = 0.0F;
         }
-        Song song = MusicPlaybackService.INSTANCE.currentSong();
+        Song song = MusicUtility.snapshot().song();
         long songId = song == null ? Long.MIN_VALUE : song.id();
         if (songId != this.lastSongId) {
             this.lastSongId = songId;

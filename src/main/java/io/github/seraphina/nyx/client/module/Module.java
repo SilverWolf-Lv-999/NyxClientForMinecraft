@@ -5,7 +5,9 @@ import io.github.seraphina.nyx.client.manager.NotificationManager;
 import io.github.seraphina.nyx.client.utility.IMinecraft;
 import io.github.seraphina.nyx.client.utility.LanguageUtility;
 import io.github.seraphina.nyx.client.value.AbstractValue;
+import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.ValueGroup;
+import io.github.seraphina.nyx.client.value.impl.BoolValue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,8 +21,7 @@ public abstract class Module implements IMinecraft {
 
     int key = -1;
 
-    public Module() {
-    }
+    public final BoolValue hide = ValueBuild.boolSetting("hide", false, this);
 
     public void registerValue(AbstractValue<?>... values) {
         this.values.addAll(Arrays.asList(values));

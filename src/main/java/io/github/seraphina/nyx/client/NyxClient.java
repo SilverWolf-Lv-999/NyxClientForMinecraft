@@ -26,6 +26,7 @@ public class NyxClient {
     public void init() {
         LOGGER.info("Initializing NyxClient");
         LOGGER.info("Sera native acceleration hints {}", SeraNative.loadStatus());
+        LOGGER.info("SMTC native support {}", SeraNative.isSmtcSupported());
         LOGGER.info("Native high-performance GPU request status {}", SeraNative.requestNativeHighPerformanceGpu());
         LOGGER.info("Windows high-performance GPU preference status {}", SeraNative.ensureHighPerformanceGpuPreference());
         NyxViaForge.init();

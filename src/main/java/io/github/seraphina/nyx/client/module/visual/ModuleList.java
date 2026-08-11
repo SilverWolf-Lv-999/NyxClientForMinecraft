@@ -280,7 +280,8 @@ public class ModuleList extends Module {
     }
 
     private boolean shouldDisplay(Module module) {
-        return type.getValue() != Type.NO_VISUAL || module.getCategory() != Category.VISUAL;
+        return !module.hide.getValue()
+            && (type.getValue() != Type.NO_VISUAL || module.getCategory() != Category.VISUAL);
     }
 
     private String suffixText(Module module) {
