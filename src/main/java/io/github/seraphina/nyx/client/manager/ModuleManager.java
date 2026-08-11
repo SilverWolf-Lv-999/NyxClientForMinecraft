@@ -63,7 +63,8 @@ public final class ModuleManager {
                 AutoWeb.INSTANCE,
                 Blocker.INSTANCE,
                 AutoPush.INSTANCE,
-                MaceSpoof.INSTANCE
+                MaceSpoof.INSTANCE,
+                Criticals.INSTANCE
         );
         //Movement
         registerModule(
@@ -89,7 +90,12 @@ public final class ModuleManager {
                 EntityControl.INSTANCE,
                 Strafe.INSTANCE,
                 ChorusControl.INSTANCE,
-                RocketExtend.INSTANCE
+                RocketExtend.INSTANCE,
+                VClip.INSTANCE,
+                Flatten.INSTANCE,
+                BlockStrafe.INSTANCE,
+                HoleSnap.INSTANCE,
+                MovementSync.INSTANCE
         );
         //Other
         registerModule(

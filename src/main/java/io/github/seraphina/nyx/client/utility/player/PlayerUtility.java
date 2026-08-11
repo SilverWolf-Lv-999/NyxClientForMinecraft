@@ -22,6 +22,12 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 public final class PlayerUtility implements IMinecraft {
+    public static boolean isInsideBlock() {
+        return mc.player != null
+                && mc.level != null
+                && !mc.level.noBlockCollision(mc.player, mc.player.getBoundingBox().deflate(1.0E-7D));
+    }
+
     public static void sendMsg(String msg) {
         if (mc.player == null || mc.player.connection == null || msg == null || msg.isBlank()) {
             return;

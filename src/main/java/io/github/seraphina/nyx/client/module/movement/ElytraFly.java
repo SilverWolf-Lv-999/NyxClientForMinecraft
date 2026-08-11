@@ -2,6 +2,7 @@ package io.github.seraphina.nyx.client.module.movement;
 
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.ClickEvent;
+import io.github.seraphina.nyx.client.events.impl.FallFlyingEvent;
 import io.github.seraphina.nyx.client.events.impl.JumpEvent;
 import io.github.seraphina.nyx.client.events.impl.MoveInputEvent;
 import io.github.seraphina.nyx.client.events.impl.PlayerTickEvent;
@@ -51,19 +52,48 @@ public class ElytraFly extends Module {
     private static final double GRIM_ARMOR_ROTATION_SPEED = 180.0D;
     private static final double GRIM_ARMOR_MIN_FIREWORK_SPEED = 1.0D;
     private static final double GRIM_ARMOR_BOOST_COLLISION_CHECK_DISTANCE = 0.25D;
+    private static final double NORMAL_ROTATION_SPEED = 180.0D;
     public final BoolValue onlyOnPreeSpace = ValueBuild.boolSetting("on space press", false, this);
 
     public final EnumValue<FlyType> flyType = ValueBuild.enumSetting("fly type", FlyType.NORMAL, this);
 
+    public final EnumValue<NormalMode> normalMode = ValueBuild.enumSetting(
+            "normal mode",
+            NormalMode.CONTROL,
+            () -> flyType.getValue() == FlyType.NORMAL,
+            ignored -> resetNormalState(),
+            this
+    );
+
     public final DoubleValue flySpeed = ValueBuild.doubleSetting("fly speed", 1.0, 0.1, 10.0, 0.1, ()-> flyType.getValue() == FlyType.NORMAL, this);
 
     public final DoubleValue verticalSpeed = ValueBuild.doubleSetting("vertical speed", 1.0, 0.1, 10.0, 0.1, ()-> flyType.getValue() == FlyType.NORMAL, this);
+
+    public final BoolValue speedLimit = ValueBuild.boolSetting("speed limit", true, () -> isNormalMode(NormalMode.CONTROL), this);
+
+    public final DoubleValue maxSpeed = ValueBuild.doubleSetting("max speed", 2.5D, 0.1D, 10.0D, 0.1D, () -> isNormalMode(NormalMode.CONTROL) && speedLimit.getValue(), this);
+
+    public final BoolValue noDrag = ValueBuild.boolSetting("no drag", false, () -> isNormalMode(NormalMode.CONTROL), this);
 
     public final BoolValue hover = ValueBuild.boolSetting("hover", false, ()-> flyType.getValue() == FlyType.NORMAL, this);
 
     public final BoolValue shouldDown = ValueBuild.boolSetting("should down", false, ()-> flyType.getValue() == FlyType.NORMAL, this);
 
     public final DoubleValue downFlySpeed = ValueBuild.doubleSetting("down speed", 0.2, 0.1, 1.0, 0.1, ()-> flyType.getValue() == FlyType.NORMAL && shouldDown.getValue(), this);
+
+    public final DoubleValue boost = ValueBuild.doubleSetting("boost", 1.0D, 0.1D, 4.0D, 0.1D, () -> isNormalMode(NormalMode.BOOST), this);
+
+    public final BoolValue freeze = ValueBuild.boolSetting("freeze", false, () -> isNormalMode(NormalMode.ROTATION), this);
+
+    public final BoolValue motionStop = ValueBuild.boolSetting("motion stop", false, () -> isNormalMode(NormalMode.ROTATION), this);
+
+    public final DoubleValue infiniteMaxSpeed = ValueBuild.doubleSetting("infinite max speed", 150.0D, 50.0D, 170.0D, 1.0D, () -> isNormalMode(NormalMode.PITCH), this);
+
+    public final DoubleValue infiniteMinSpeed = ValueBuild.doubleSetting("infinite min speed", 25.0D, 10.0D, 70.0D, 1.0D, () -> isNormalMode(NormalMode.PITCH), this);
+
+    public final DoubleValue infiniteMaxHeight = ValueBuild.doubleSetting("infinite max height", 200.0D, -50.0D, 360.0D, 1.0D, () -> isNormalMode(NormalMode.PITCH), this);
+
+    public final BoolValue autoStop = ValueBuild.boolSetting("auto stop", true, () -> flyType.getValue() == FlyType.NORMAL, this);
 
     public final IntValue startPacketDelay = ValueBuild.intSetting("start packet delay", 5, 2, 40, 1, ()-> flyType.getValue() == FlyType.NORMAL, this);
 
@@ -84,6 +114,10 @@ public class ElytraFly extends Module {
     private int fireworkOriginalSlot = InventoryUtility.NOT_FOUND;
     private int fireworkSlot = InventoryUtility.NOT_FOUND;
     private int fireworkRestoreSlotDelayTicks;
+    private Vector2f normalRotations;
+    private boolean normalControllingRotations;
+    private boolean normalPitchDescending;
+    private float normalInfinitePitch;
     private GrimArmorFlyStage grimArmorFlyStage = GrimArmorFlyStage.IDLE;
     private long grimArmorFlyStageStartTimeNs;
     private long grimArmorFlyNextActionTimeNs;
@@ -120,9 +154,13 @@ public class ElytraFly extends Module {
         if (flyType.is(FlyType.NORMAL)) {
             if (canRun()) {
                 applyNormalVelocity();
+            } else {
+                resetNormalState();
             }
             return;
         }
+
+        resetNormalState();
 
         if (flyType.is(FlyType.GRIM_ARMOR_FLY)) {
             if (shouldPauseForGoldenAppleUse()) {
@@ -182,6 +220,7 @@ public class ElytraFly extends Module {
     public void onPostTick(TickEvent.Post event) {
         if (flyType.is(FlyType.NORMAL)) {
             if (!canRun()) {
+                resetNormalState();
                 resetFireworkUseState(true);
                 resetGrimArmorFlyState(true);
                 return;
@@ -277,6 +316,7 @@ public class ElytraFly extends Module {
         fireworkDelayTicks = 0;
         fallFlyingTicks = 0;
         lastFallFlyingTick = -1;
+        resetNormalState();
         resetFireworkUseState(true);
         resetGrimArmorFlyState(true);
     }
@@ -295,24 +335,129 @@ public class ElytraFly extends Module {
     }
 
     private void applyNormalVelocity() {
-        Vec3 direction = horizontalDirection();
-        Vec3 velocity = mc.player.getDeltaMovement();
-        double speed = flySpeed.getValue();
-        mc.player.setDeltaMovement(direction.x * speed, verticalVelocity(velocity.y), direction.z * speed);
-    }
-
-    private Vec3 horizontalDirection() {
-        int forward = MovingUtility.forwardVal();
-        int strafe = MovingUtility.strafeVal();
-        if (forward == 0 && strafe == 0) {
-            return Vec3.ZERO;
+        if (shouldAutoStopNormal() || shouldFreezeNormalMovement()) {
+            mc.player.setDeltaMovement(Vec3.ZERO);
+            return;
         }
 
-        float yaw = mc.player.getYRot() * Mth.DEG_TO_RAD;
-        float sinYaw = Mth.sin(yaw);
-        float cosYaw = Mth.cos(yaw);
-        Vec3 direction = new Vec3(strafe * cosYaw - forward * sinYaw, 0.0D, forward * cosYaw + strafe * sinYaw);
-        return direction.lengthSqr() > 1.0E-6D ? direction.normalize() : Vec3.ZERO;
+        switch (normalMode.getValue()) {
+            case CONTROL -> applyNormalControlVelocity();
+            case BOOST -> applyNormalBoost();
+            case FREEZE -> {
+            }
+            case ROTATION -> applyNormalRotation();
+            case PITCH -> updateNormalInfinitePitch();
+        }
+    }
+
+    private void applyNormalControlVelocity() {
+        Vec3 horizontalVelocity = MovingUtility.horizontalVelocity(flySpeed.getValue(), mc.player.getYRot());
+        Vec3 velocity = mc.player.getDeltaMovement();
+        mc.player.setDeltaMovement(applyNormalControlModifiers(new Vec3(
+                horizontalVelocity.x,
+                verticalVelocity(velocity.y),
+                horizontalVelocity.z
+        )));
+    }
+
+    private void applyNormalBoost() {
+        if (!mc.options.keyUp.isDown()) {
+            return;
+        }
+
+        Vec3 boostVelocity = MovingUtility.horizontalVelocity(boost.getValue() / 10.0D, mc.player.getYRot());
+        mc.player.setDeltaMovement(mc.player.getDeltaMovement().add(boostVelocity.x, 0.0D, boostVelocity.z));
+    }
+
+    private void applyNormalRotation() {
+        int forward = MovingUtility.forwardVal();
+        int strafe = MovingUtility.strafeVal();
+        int vertical = verticalInput();
+        boolean hasHorizontalInput = forward != 0 || strafe != 0;
+        Vec3 velocity = mc.player.getDeltaMovement();
+
+        float yaw = normalRotations == null ? mc.player.getYRot() : normalRotations.x;
+        float pitch = normalRotations == null ? mc.player.getXRot() : normalRotations.y;
+        if (hasHorizontalInput) {
+            yaw = getNormalMovementYaw(forward, strafe);
+            if (vertical > 0) {
+                pitch = -45.0F;
+            } else if (vertical < 0) {
+                pitch = 45.0F;
+            } else {
+                pitch = -1.9F;
+                if (motionStop.getValue()) {
+                    velocity = velocity.multiply(1.0D, 0.0D, 1.0D);
+                }
+            }
+        } else if (vertical > 0) {
+            pitch = -89.0F;
+        } else if (vertical < 0) {
+            pitch = 89.0F;
+        } else if (motionStop.getValue()) {
+            velocity = velocity.multiply(1.0D, 0.0D, 1.0D);
+        }
+
+        if (!hasHorizontalInput && motionStop.getValue()) {
+            velocity = new Vec3(0.0D, velocity.y, 0.0D);
+        }
+
+        mc.player.setDeltaMovement(velocity);
+        setNormalRotations(new Vector2f(yaw, Mth.clamp(pitch, -90.0F, 90.0F)));
+    }
+
+    private float getNormalMovementYaw(int forward, int strafe) {
+        float yaw = mc.player.getYRot();
+        if (forward < 0) {
+            yaw += 180.0F;
+        }
+
+        if (strafe != 0) {
+            if (forward == 0) {
+                yaw -= strafe * 90.0F;
+            } else {
+                yaw -= strafe * (forward > 0 ? 45.0F : -45.0F);
+            }
+        }
+
+        return yaw;
+    }
+
+    private void updateNormalInfinitePitch() {
+        double currentSpeed = mc.player.getDeltaMovement().horizontalDistance() * 72.0D;
+        if (mc.player.getY() < infiniteMaxHeight.getValue()) {
+            if (currentSpeed < infiniteMinSpeed.getValue() && !normalPitchDescending) {
+                normalPitchDescending = true;
+            }
+
+            if (currentSpeed > infiniteMaxSpeed.getValue() && normalPitchDescending) {
+                normalPitchDescending = false;
+            }
+        } else {
+            normalPitchDescending = true;
+        }
+
+        normalInfinitePitch += normalPitchDescending ? 3.0F : -3.0F;
+        normalInfinitePitch = Mth.clamp(normalInfinitePitch, -40.0F, 40.0F);
+    }
+
+    private Vec3 applyNormalControlModifiers(Vec3 velocity) {
+        Vec3 modifiedVelocity = velocity;
+        if (!noDrag.getValue()) {
+            modifiedVelocity = modifiedVelocity.multiply(0.98D, 0.99D, 0.99D);
+        }
+
+        if (!speedLimit.getValue()) {
+            return modifiedVelocity;
+        }
+
+        double horizontalSpeed = modifiedVelocity.horizontalDistance();
+        if (horizontalSpeed <= maxSpeed.getValue()) {
+            return modifiedVelocity;
+        }
+
+        double multiplier = maxSpeed.getValue() / horizontalSpeed;
+        return new Vec3(modifiedVelocity.x * multiplier, modifiedVelocity.y, modifiedVelocity.z * multiplier);
     }
 
     private double verticalVelocity(double currentVelocity) {
@@ -337,7 +482,49 @@ public class ElytraFly extends Module {
             return velocity;
         }
 
-        return new Vec3(velocity.x, verticalVelocity(velocity.y), velocity.z);
+        if (shouldAutoStopNormal() || shouldFreezeNormalMovement()) {
+            return Vec3.ZERO;
+        }
+
+        if (!normalMode.is(NormalMode.CONTROL)) {
+            return velocity;
+        }
+
+        return applyNormalControlModifiers(new Vec3(velocity.x, verticalVelocity(velocity.y), velocity.z));
+    }
+
+    @EventTarget(4)
+    public void onFallFlying(FallFlyingEvent event) {
+        if (!isEnabled() || !flyType.is(FlyType.NORMAL) || !canRun()) {
+            return;
+        }
+
+        if (normalMode.is(NormalMode.ROTATION) && normalRotations != null) {
+            event.setPitch(normalRotations.y);
+        } else if (normalMode.is(NormalMode.PITCH)) {
+            event.setPitch(normalInfinitePitch);
+        }
+    }
+
+    private boolean shouldFreezeNormalMovement() {
+        return (normalMode.is(NormalMode.FREEZE)
+                || normalMode.is(NormalMode.ROTATION) && freeze.getValue())
+                && !hasNormalMovementInput();
+    }
+
+    private boolean hasNormalMovementInput() {
+        return MovingUtility.forwardVal() != 0 || MovingUtility.strafeVal() != 0 || verticalInput() != 0;
+    }
+
+    private boolean shouldAutoStopNormal() {
+        return autoStop.getValue()
+                && mc.player != null
+                && mc.level != null
+                && !mc.level.hasChunkAt(mc.player.blockPosition());
+    }
+
+    private boolean isNormalMode(NormalMode mode) {
+        return flyType.is(FlyType.NORMAL) && normalMode.is(mode);
     }
 
     public boolean shouldHover() {
@@ -349,6 +536,33 @@ public class ElytraFly extends Module {
                 && !mc.options.keyJump.isDown()
                 && !mc.options.keyShift.isDown()
                 && !onlyOnPreeSpace.getValue();
+    }
+
+    private void setNormalRotations(Vector2f rotations) {
+        RotationManager.INSTANCE.setSmoothed(false);
+        RotationManager.INSTANCE.setRotations(rotations, NORMAL_ROTATION_SPEED, Priority.Highest);
+        normalRotations = new Vector2f(RotationManager.INSTANCE.getRotation());
+        normalControllingRotations = true;
+    }
+
+    private void resetNormalState() {
+        releaseNormalRotations();
+        normalRotations = null;
+        normalControllingRotations = false;
+        normalPitchDescending = false;
+        normalInfinitePitch = 0.0F;
+    }
+
+    private void releaseNormalRotations() {
+        if (!normalControllingRotations || normalRotations == null || !RotationManager.INSTANCE.isActive()) {
+            return;
+        }
+
+        Vector2f activeRotations = RotationManager.INSTANCE.getRotation();
+        if (Math.abs(Mth.wrapDegrees(activeRotations.x - normalRotations.x)) <= 1.0F
+                && Math.abs(activeRotations.y - normalRotations.y) <= 1.0F) {
+            RotationManager.INSTANCE.setActive(false);
+        }
     }
 
     private void keepFallFlying() {
@@ -1169,6 +1383,10 @@ public class ElytraFly extends Module {
 
     public enum FlyType {
         NORMAL, GRIM, GRIM_ARMOR_FLY
+    }
+
+    public enum NormalMode {
+        CONTROL, BOOST, FREEZE, ROTATION, PITCH
     }
 
     private enum FireworkUseStage {
