@@ -12,6 +12,9 @@ local ACTION_BUTTON_HEIGHT = 30
 local ACTION_BUTTON_GAP = 8
 local ACTION_BUTTON_TOP_GAP = 14
 local FLIP_EDGE_MIN_SCALE = 0.075
+local ROW_ANIMATION_SCALE = 1.18
+local ROW_ANIMATION_STAGGER = 0.045
+local ROW_ANIMATION_MAX_DELAY = ROW_ANIMATION_SCALE - 1
 
 local TEXT = 0xFFFFFFFF
 local TEXT_MUTED = 0xFFE2E6EF
@@ -332,8 +335,9 @@ function common.render_collection_area(state, panel, face_alpha, config)
         for index, item in ipairs(items) do
             local row_y = list_y + (index - 1) * (ROW_HEIGHT + ROW_GAP) - scroll
             if row_y + ROW_HEIGHT >= list_y and row_y <= list_y + list_height then
+                local row_delay = math.min((index - 1) * ROW_ANIMATION_STAGGER, ROW_ANIMATION_MAX_DELAY)
                 local row_progress = common.ease_out_cubic(common.clamp(
-                    math.min(list_progress, state.content_progress or 1) * 1.18 - (index - 1) * 0.045, 0, 1))
+                    math.min(list_progress, state.content_progress or 1) * ROW_ANIMATION_SCALE - row_delay, 0, 1))
                 if row_progress > 0.001 then
                     local active = config.active(item)
                     local selected = item.selected == true
