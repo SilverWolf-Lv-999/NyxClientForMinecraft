@@ -143,6 +143,7 @@ public final class ModuleManager {
         //Visual
         registerModule(
                 Cape.INSTANCE,
+                Blur.INSTANCE,
                 NoRenderer.INSTANCE,
                 HUD.INSTANCE,
                 Watermaker.INSTANCE,

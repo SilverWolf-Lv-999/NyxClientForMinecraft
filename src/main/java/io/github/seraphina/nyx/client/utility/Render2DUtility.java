@@ -12,6 +12,7 @@ import com.mojang.blaze3d.textures.TextureFormat;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import io.github.seraphina.nyx.client.module.visual.Blur;
 import io.github.seraphina.nyx.client.utility.render.GL;
 import io.github.seraphina.nyx.client.utility.render.Shader;
 import io.github.seraphina.nyx.client.utility.render.Shaders;
@@ -44,7 +45,17 @@ public final class Render2DUtility {
     private static final int MAX_SEGMENTS = 64;
     private static final float ANTIALIAS_PIXELS = 1.25F;
     private static final float MAX_GAUSSIAN_BLUR_RADIUS = 32.0F;
+    private static final float MAX_KAWASE_BLUR_RADIUS = 20.0F;
     private static final float MAX_BLOOM_RADIUS = 64.0F;
+    private static final int MAX_KAWASE_PASSES = 5;
+    private static final int[] KAWASE_BLUR_ITERATIONS = {
+        1, 1, 2, 2, 2, 3, 3, 3, 3, 4,
+        4, 4, 4, 4, 4, 5, 5, 5, 5, 5
+    };
+    private static final float[] KAWASE_BLUR_OFFSETS = {
+        1.25F, 2.25F, 2.0F, 3.0F, 4.25F, 2.5F, 3.25F, 4.25F, 5.5F, 3.25F,
+        4.0F, 5.0F, 6.0F, 7.25F, 8.25F, 4.5F, 5.25F, 6.25F, 7.25F, 8.5F
+    };
     private static final float VERTICAL_FLIP_CAMERA_DISTANCE_MULTIPLIER = 4.5F;
     private static final float VERTICAL_FLIP_MIN_CAMERA_DISTANCE = 720.0F;
     private static final float SKIN_HEAD_U = 8.0F;
@@ -72,9 +83,16 @@ public final class Render2DUtility {
     private static final ThreadLocal<VertexProjector> CURRENT_VERTEX_PROJECTOR = new ThreadLocal<>();
     private static final Matrix3x2f IDENTITY_POSE = new Matrix3x2f();
     private static final Map<BlurCacheKey, BlurTarget> GAUSSIAN_BLUR_CACHE = new HashMap<>();
+    private static final Map<KawaseBlurCacheKey, BlurTarget> KAWASE_BLUR_CACHE = new HashMap<>();
     private static final Map<BloomCacheKey, BlurTarget> BLOOM_CACHE = new HashMap<>();
+    private static final Map<ShadowCacheKey, BlurTarget> SHADOW_CACHE = new HashMap<>();
     private static BlurTarget gaussianBlurScratch;
+    private static final BlurTarget[] kawaseBlurLevels = new BlurTarget[MAX_KAWASE_PASSES + 1];
+    private static BlurTarget shadowMaskScratch;
+    private static BlurTarget shadowBlurScratch;
     private static int gaussianBlurVao;
+    private static int kawaseBlurVao;
+    private static int shadowVao;
     private static int bloomVao;
 
     private Render2DUtility() {
@@ -119,6 +137,8 @@ public final class Render2DUtility {
 
     public static void close() {
         closeGaussianBlurResources();
+        closeKawaseBlurResources();
+        closeShadowResources();
         closeBloomResources();
         Shaders.close();
     }
@@ -499,9 +519,9 @@ public final class Render2DUtility {
     }
 
     public static void drawRoundedGaussianBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
-                                                        float topLeftRadius, float topRightRadius,
-                                                        float bottomRightRadius, float bottomLeftRadius,
-                                                        float blurRadius, int color) {
+                                                         float topLeftRadius, float topRightRadius,
+                                                         float bottomRightRadius, float bottomLeftRadius,
+                                                         float blurRadius, int color) {
         Objects.requireNonNull(texture, "texture");
         if (!canDraw(width, height, color)) {
             return;
@@ -513,6 +533,109 @@ public final class Render2DUtility {
         }
         drawRoundedTexture(blurred, x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius,
             0.0F, 0.0F, 1.0F, 1.0F, color);
+    }
+
+    public static void drawKawaseBlur(float x, float y, float width, float height, float blurRadius) {
+        drawKawaseBlurredRect(x, y, width, height, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawKawaseBlur(float x, float y, float width, float height, float blurRadius, int color) {
+        drawKawaseBlurredRect(x, y, width, height, blurRadius, color);
+    }
+
+    public static void drawKawaseBlurredRect(float x, float y, float width, float height, float blurRadius) {
+        drawKawaseBlurredRect(x, y, width, height, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawKawaseBlurredRect(float x, float y, float width, float height, float blurRadius, int color) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F || currentVertexProjector() != null) {
+            return;
+        }
+
+        GpuTextureView blurred = kawaseBlurredMainTexture(blurRadius);
+        if (blurred == null) {
+            return;
+        }
+
+        TextureUv uv = mainTargetUv(x, y, width, height, blurred);
+        drawTexture(blurred, x, y, width, height, uv.u0(), uv.v0(), uv.u1(), uv.v1(), color);
+    }
+
+    public static void drawRoundedKawaseBlur(float x, float y, float width, float height, float radius, float blurRadius) {
+        drawRoundedKawaseBlurredRect(x, y, width, height, radius, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawRoundedKawaseBlur(float x, float y, float width, float height, float radius, float blurRadius, int color) {
+        drawRoundedKawaseBlurredRect(x, y, width, height, radius, blurRadius, color);
+    }
+
+    public static void drawRoundedKawaseBlurredRect(float x, float y, float width, float height, float radius, float blurRadius) {
+        drawRoundedKawaseBlurredRect(x, y, width, height, radius, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawRoundedKawaseBlurredRect(float x, float y, float width, float height, float radius, float blurRadius, int color) {
+        drawRoundedKawaseBlurredRect(x, y, width, height, radius, radius, radius, radius, blurRadius, color);
+    }
+
+    public static void drawRoundedKawaseBlurredRect(float x, float y, float width, float height,
+                                                    float topLeftRadius, float topRightRadius,
+                                                    float bottomRightRadius, float bottomLeftRadius,
+                                                    float blurRadius, int color) {
+        if (!canDraw(width, height, color) || blurRadius <= 0.0F || currentVertexProjector() != null) {
+            return;
+        }
+
+        GpuTextureView blurred = kawaseBlurredMainTexture(blurRadius);
+        if (blurred == null) {
+            return;
+        }
+
+        TextureUv uv = mainTargetUv(x, y, width, height, blurred);
+        drawRoundedTexture(blurred, x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius,
+            uv.u0(), uv.v0(), uv.u1(), uv.v1(), color);
+    }
+
+    public static void drawKawaseBlurredTexture(GpuTextureView texture, float x, float y, float width, float height, float blurRadius) {
+        drawKawaseBlurredTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, blurRadius, 0xFFFFFFFF);
+    }
+
+    public static void drawKawaseBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                float blurRadius, int color) {
+        drawKawaseBlurredTexture(texture, x, y, width, height, 0.0F, 0.0F, 1.0F, 1.0F, blurRadius, color);
+    }
+
+    public static void drawKawaseBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                float u0, float v0, float u1, float v1, float blurRadius, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        GpuTextureView blurred = kawaseBlurredTexture(texture, blurRadius);
+        if (blurred != null) {
+            drawTexture(blurred, x, y, width, height, u0, v0, u1, v1, color);
+        }
+    }
+
+    public static void drawRoundedKawaseBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                       float radius, float blurRadius, int color) {
+        drawRoundedKawaseBlurredTexture(texture, x, y, width, height, radius, radius, radius, radius, blurRadius, color);
+    }
+
+    public static void drawRoundedKawaseBlurredTexture(GpuTextureView texture, float x, float y, float width, float height,
+                                                       float topLeftRadius, float topRightRadius,
+                                                       float bottomRightRadius, float bottomLeftRadius,
+                                                       float blurRadius, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color)) {
+            return;
+        }
+
+        GpuTextureView blurred = kawaseBlurredTexture(texture, blurRadius);
+        if (blurred != null) {
+            drawRoundedTexture(blurred, x, y, width, height, topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius,
+                0.0F, 0.0F, 1.0F, 1.0F, color);
+        }
     }
 
     public static void drawRect(float x, float y, float width, float height, int color) {
@@ -756,7 +879,16 @@ public final class Render2DUtility {
 
     public static void drawDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
                                       float blurRadius, int color) {
+        drawShaderDropShadow(x, y, width, height, radius, offsetX, offsetY, blurRadius, color);
+    }
+
+    public static void drawShaderDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
+                                            float blurRadius, int color) {
         if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
+            return;
+        }
+
+        if (drawShaderDropShadowTexture(x, y, width, height, radius, offsetX, offsetY, blurRadius, color)) {
             return;
         }
 
@@ -1263,6 +1395,158 @@ public final class Render2DUtility {
         );
     }
 
+    private static boolean drawShaderDropShadowTexture(float x, float y, float width, float height, float radius, float offsetX,
+                                                       float offsetY, float blurRadius, int color) {
+        float safeBlurRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, blurRadius));
+        int blurPasses = Math.max(1, Math.min(12, (int)Math.ceil(safeBlurRadius / 3.0F)));
+        int padding = Math.max(3, (int)Math.ceil(safeBlurRadius));
+        int textureWidth = Math.max(1, (int)Math.ceil(width + padding * 2.0F));
+        int textureHeight = Math.max(1, (int)Math.ceil(height + padding * 2.0F));
+
+        ShadowCacheKey key = new ShadowCacheKey(
+            Math.round(width * 100.0F),
+            Math.round(height * 100.0F),
+            Math.round(clampRadius(width, height, radius) * 100.0F),
+            Math.round(safeBlurRadius * 100.0F),
+            blurPasses,
+            padding,
+            textureWidth,
+            textureHeight
+        );
+        BlurTarget target = SHADOW_CACHE.get(key);
+        if (target == null) {
+            target = new BlurTarget("nyx-shadow-output");
+            try {
+                if (!renderShaderShadow(target, textureWidth, textureHeight, padding, padding, width, height, radius, blurPasses)) {
+                    target.close();
+                    return false;
+                }
+                SHADOW_CACHE.put(key, target);
+            } catch (RuntimeException exception) {
+                target.close();
+                return false;
+            }
+        }
+
+        if (target.view == null || target.view.isClosed()) {
+            SHADOW_CACHE.remove(key);
+            target.close();
+            return false;
+        }
+
+        drawTexture(target.view, x + offsetX - padding, y + offsetY - padding, textureWidth, textureHeight, color);
+        return true;
+    }
+
+    private static boolean renderShaderShadow(BlurTarget output, int textureWidth, int textureHeight, float rectX, float rectY,
+                                              float rectWidth, float rectHeight, float radius, int blurPasses) {
+        ensureGaussianBlurTarget(output, textureWidth, textureHeight);
+        ensureShadowScratchTargets(textureWidth, textureHeight);
+
+        Shader maskShader = shadowMaskShader();
+        Shader shader = shadowShader();
+        if (maskShader == null || shader == null || shadowMaskScratch == null || shadowBlurScratch == null
+            || shadowMaskScratch.view == null || shadowBlurScratch.view == null) {
+            return false;
+        }
+
+        int previousFramebuffer = GlStateManager.getFrameBuffer(GL32C.GL_FRAMEBUFFER);
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+        int previousVertexArray = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+        int previousActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+        int previousTexture0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int[] previousViewport = new int[4];
+        GL11.glGetIntegerv(GL11.GL_VIEWPORT, previousViewport);
+        float[] previousClearColor = new float[4];
+        GL11.glGetFloatv(GL11.GL_COLOR_CLEAR_VALUE, previousClearColor);
+        boolean previousDepthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
+        boolean previousCull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        boolean previousScissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+
+        try {
+            if (shadowVao == 0) {
+                shadowVao = GL.genVertexArray();
+            }
+
+            GL.bindVertexArray(shadowVao);
+            GL.disableDepth();
+            GL.disableBlend();
+            GL.disableCull();
+            GL.disableScissorTest();
+
+            GL.bindFramebuffer(shadowMaskScratch.framebuffer);
+            GL.viewport(0, 0, textureWidth, textureHeight);
+            GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+            GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+            maskShader.bind();
+            maskShader.set("TextureSize", textureWidth, textureHeight);
+            maskShader.set("Rect", rectX, rectY, rectWidth, rectHeight);
+            maskShader.set("Radius", clampRadius(rectWidth, rectHeight, radius));
+            GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+
+            int inputTexture = glTextureId(shadowMaskScratch.view);
+            for (int pass = 0; pass < blurPasses; pass++) {
+                renderShadowPass(shader, inputTexture, shadowBlurScratch, textureWidth, textureHeight, 1.0F, 0.0F);
+                renderShadowPass(shader, glTextureId(shadowBlurScratch.view), output, textureWidth, textureHeight, 0.0F, 1.0F);
+                inputTexture = glTextureId(output.view);
+            }
+        } finally {
+            GL.bindFramebuffer(previousFramebuffer);
+            GL.viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+            GL.bindVertexArray(previousVertexArray);
+            GL.useProgram(previousProgram);
+            GL.bindTexture(previousTexture0, 0);
+            GlStateManager._activeTexture(previousActiveTexture);
+            GL11.glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+            setCapability(GL11.GL_DEPTH_TEST, previousDepthTest);
+            setCapability(GL11.GL_BLEND, previousBlend);
+            setCapability(GL11.GL_CULL_FACE, previousCull);
+            setCapability(GL11.GL_SCISSOR_TEST, previousScissor);
+        }
+
+        return output.view != null && !output.view.isClosed();
+    }
+
+    private static void renderShadowPass(Shader shader, int inputTexture, BlurTarget output, int width, int height,
+                                         float directionX, float directionY) {
+        GL.bindFramebuffer(output.framebuffer);
+        GL.viewport(0, 0, width, height);
+        GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+        GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+
+        shader.bind();
+        shader.set("u_Texture", 0);
+        shader.set("u_Size", width, height);
+        shader.set("u_Direction", directionX, directionY);
+        configureTextureForBlur(inputTexture);
+        GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+    }
+
+    private static void ensureShadowScratchTargets(int width, int height) {
+        if (shadowMaskScratch == null) {
+            shadowMaskScratch = new BlurTarget("nyx-shadow-mask");
+        }
+        if (shadowBlurScratch == null) {
+            shadowBlurScratch = new BlurTarget("nyx-shadow-blur-scratch");
+        }
+        ensureGaussianBlurTarget(shadowMaskScratch, width, height);
+        ensureGaussianBlurTarget(shadowBlurScratch, width, height);
+    }
+
+    @Nullable
+    private static Shader shadowShader() {
+        Shaders.init();
+        return Shaders.SHADOW;
+    }
+
+    @Nullable
+    private static Shader shadowMaskShader() {
+        Shaders.init();
+        return Shaders.SHADOW_MASK;
+    }
+
     private static boolean drawBloomShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
                                            float blurRadius, int color) {
         float safeBlurRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, blurRadius));
@@ -1471,6 +1755,159 @@ public final class Render2DUtility {
         return Shaders.GAUSSIAN_BLUR;
     }
 
+    @Nullable
+    private static GpuTextureView kawaseBlurredMainTexture(float blurRadius) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            return null;
+        }
+
+        RenderTarget target = minecraft.getMainRenderTarget();
+        if (target == null || target.getColorTextureView() == null) {
+            return null;
+        }
+        return kawaseBlurredTexture(target.getColorTextureView(), blurRadius);
+    }
+
+    @Nullable
+    private static GpuTextureView kawaseBlurredTexture(GpuTextureView source, float blurRadius) {
+        Objects.requireNonNull(source, "source");
+        if (source.isClosed() || source.texture() == null || source.texture().isClosed()) {
+            return null;
+        }
+        if (blurRadius <= 0.0F) {
+            return source;
+        }
+
+        int sourceId = glTextureId(source);
+        if (sourceId == 0) {
+            return source;
+        }
+
+        int width = source.getWidth(0);
+        int height = source.getHeight(0);
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+
+        KawaseBlurStrength strength = kawaseBlurStrength(blurRadius);
+        int previousFramebuffer = GlStateManager.getFrameBuffer(GL32C.GL_FRAMEBUFFER);
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+        int previousVertexArray = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+        int previousActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+        int previousTexture0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int[] previousViewport = new int[4];
+        GL11.glGetIntegerv(GL11.GL_VIEWPORT, previousViewport);
+        float[] previousClearColor = new float[4];
+        GL11.glGetFloatv(GL11.GL_COLOR_CLEAR_VALUE, previousClearColor);
+        boolean previousDepthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
+        boolean previousCull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        boolean previousScissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+        GpuTextureView result = source;
+
+        try {
+            KawaseBlurCacheKey key = new KawaseBlurCacheKey(sourceId, width, height, strength.iterations(), Math.round(strength.offset() * 100.0F));
+            BlurTarget output = KAWASE_BLUR_CACHE.computeIfAbsent(key, ignored -> new BlurTarget("nyx-kawase-blur-output"));
+            ensureGaussianBlurTarget(output, width, height);
+            ensureKawaseBlurLevels(width, height, strength.iterations());
+
+            Shader downShader = kawaseBlurDownShader();
+            Shader upShader = kawaseBlurUpShader();
+            if (downShader == null || upShader == null || kawaseBlurLevels[0] == null || kawaseBlurLevels[0].view == null) {
+                return source;
+            }
+
+            if (kawaseBlurVao == 0) {
+                kawaseBlurVao = GL.genVertexArray();
+            }
+            GL.bindVertexArray(kawaseBlurVao);
+            GL.disableDepth();
+            GL.disableBlend();
+            GL.disableCull();
+            GL.disableScissorTest();
+
+            renderKawaseBlurPass(downShader, sourceId, kawaseBlurLevels[0], strength.offset());
+            for (int level = 1; level <= strength.iterations(); level++) {
+                BlurTarget input = kawaseBlurLevels[level - 1];
+                BlurTarget target = kawaseBlurLevels[level];
+                if (input == null || input.view == null || target == null) {
+                    return source;
+                }
+                renderKawaseBlurPass(downShader, glTextureId(input.view), target, strength.offset());
+            }
+            for (int level = strength.iterations(); level >= 1; level--) {
+                BlurTarget input = kawaseBlurLevels[level];
+                BlurTarget target = level == 1 ? output : kawaseBlurLevels[level - 1];
+                if (input == null || input.view == null || target == null) {
+                    return source;
+                }
+                renderKawaseBlurPass(upShader, glTextureId(input.view), target, strength.offset());
+            }
+            result = output.view;
+        } finally {
+            GL.bindFramebuffer(previousFramebuffer);
+            GL.viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+            GL.bindVertexArray(previousVertexArray);
+            GL.useProgram(previousProgram);
+            GL.bindTexture(previousTexture0, 0);
+            GlStateManager._activeTexture(previousActiveTexture);
+            GL11.glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+            setCapability(GL11.GL_DEPTH_TEST, previousDepthTest);
+            setCapability(GL11.GL_BLEND, previousBlend);
+            setCapability(GL11.GL_CULL_FACE, previousCull);
+            setCapability(GL11.GL_SCISSOR_TEST, previousScissor);
+        }
+
+        return result;
+    }
+
+    private static KawaseBlurStrength kawaseBlurStrength(float blurRadius) {
+        float modulePower = Blur.INSTANCE.isEnabled() ? Blur.INSTANCE.power.getValue().floatValue() : 1.0F;
+        float effectiveRadius = Math.min(MAX_KAWASE_BLUR_RADIUS, Math.max(0.0F, blurRadius * modulePower));
+        int index = Math.min(KAWASE_BLUR_ITERATIONS.length - 1, Math.max(0, (int)Math.ceil(effectiveRadius) - 1));
+        return new KawaseBlurStrength(KAWASE_BLUR_ITERATIONS[index], KAWASE_BLUR_OFFSETS[index]);
+    }
+
+    private static void renderKawaseBlurPass(Shader shader, int inputTexture, BlurTarget output, float offset) {
+        GL.bindFramebuffer(output.framebuffer);
+        GL.viewport(0, 0, output.width, output.height);
+        GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+        GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+
+        shader.bind();
+        shader.set("uTexture", 0);
+        shader.set("uHalfTexelSize", 0.5F / output.width, 0.5F / output.height);
+        shader.set("uOffset", offset);
+        configureTextureForBlur(inputTexture);
+        GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+    }
+
+    private static void ensureKawaseBlurLevels(int width, int height, int iterations) {
+        for (int level = 0; level <= iterations; level++) {
+            if (kawaseBlurLevels[level] == null) {
+                kawaseBlurLevels[level] = new BlurTarget("nyx-kawase-blur-level-" + level);
+            }
+
+            int levelWidth = Math.max(1, width >> level);
+            int levelHeight = Math.max(1, height >> level);
+            ensureGaussianBlurTarget(kawaseBlurLevels[level], levelWidth, levelHeight);
+        }
+    }
+
+    @Nullable
+    private static Shader kawaseBlurDownShader() {
+        Shaders.init();
+        return Shaders.KAWASE_BLUR_DOWN;
+    }
+
+    @Nullable
+    private static Shader kawaseBlurUpShader() {
+        Shaders.init();
+        return Shaders.KAWASE_BLUR_UP;
+    }
+
     private static void renderGaussianBlurPass(Shader shader, int inputTexture, BlurTarget output, int width, int height,
                                                float radius, float directionX, float directionY) {
         GL.bindFramebuffer(output.framebuffer);
@@ -1525,6 +1962,46 @@ public final class Render2DUtility {
         if (gaussianBlurVao != 0) {
             GL.deleteVertexArray(gaussianBlurVao);
             gaussianBlurVao = 0;
+        }
+    }
+
+    private static void closeKawaseBlurResources() {
+        for (BlurTarget target : KAWASE_BLUR_CACHE.values()) {
+            target.close();
+        }
+        KAWASE_BLUR_CACHE.clear();
+
+        for (int level = 0; level < kawaseBlurLevels.length; level++) {
+            if (kawaseBlurLevels[level] != null) {
+                kawaseBlurLevels[level].close();
+                kawaseBlurLevels[level] = null;
+            }
+        }
+
+        if (kawaseBlurVao != 0) {
+            GL.deleteVertexArray(kawaseBlurVao);
+            kawaseBlurVao = 0;
+        }
+    }
+
+    private static void closeShadowResources() {
+        if (shadowMaskScratch != null) {
+            shadowMaskScratch.close();
+            shadowMaskScratch = null;
+        }
+        if (shadowBlurScratch != null) {
+            shadowBlurScratch.close();
+            shadowBlurScratch = null;
+        }
+
+        for (BlurTarget target : SHADOW_CACHE.values()) {
+            target.close();
+        }
+        SHADOW_CACHE.clear();
+
+        if (shadowVao != 0) {
+            GL.deleteVertexArray(shadowVao);
+            shadowVao = 0;
         }
     }
 
@@ -2247,7 +2724,17 @@ public final class Render2DUtility {
     private record BlurCacheKey(int sourceTexture, int width, int height, int radius) {
     }
 
+    private record KawaseBlurCacheKey(int sourceTexture, int width, int height, int iterations, int offset) {
+    }
+
     private record BloomCacheKey(int width, int height, int radius, int blurRadius, int padding, int textureWidth, int textureHeight) {
+    }
+
+    private record ShadowCacheKey(int width, int height, int radius, int blurRadius, int blurPasses, int padding,
+                                  int textureWidth, int textureHeight) {
+    }
+
+    private record KawaseBlurStrength(int iterations, float offset) {
     }
 
     private static final class BlurTarget implements AutoCloseable {
