@@ -86,6 +86,7 @@ public final class Render2DUtility {
     private static final Map<KawaseBlurCacheKey, BlurTarget> KAWASE_BLUR_CACHE = new HashMap<>();
     private static final Map<BloomCacheKey, BlurTarget> BLOOM_CACHE = new HashMap<>();
     private static final Map<ShadowCacheKey, BlurTarget> SHADOW_CACHE = new HashMap<>();
+    private static final Map<GlowCacheKey, BlurTarget> GLOW_CACHE = new HashMap<>();
     private static BlurTarget gaussianBlurScratch;
     private static final BlurTarget[] kawaseBlurLevels = new BlurTarget[MAX_KAWASE_PASSES + 1];
     private static BlurTarget shadowMaskScratch;
@@ -94,6 +95,7 @@ public final class Render2DUtility {
     private static int kawaseBlurVao;
     private static int shadowVao;
     private static int bloomVao;
+    private static int glowVao;
 
     private Render2DUtility() {
     }
@@ -140,6 +142,7 @@ public final class Render2DUtility {
         closeKawaseBlurResources();
         closeShadowResources();
         closeBloomResources();
+        closeGlowResources();
         Shaders.close();
     }
 
@@ -882,6 +885,20 @@ public final class Render2DUtility {
         drawShaderDropShadow(x, y, width, height, radius, offsetX, offsetY, blurRadius, color);
     }
 
+    public static void drawGlow(float x, float y, float width, float height, float glowRadius, int color) {
+        drawGlow(x, y, width, height, 0.0F, glowRadius, color);
+    }
+
+    public static void drawGlow(float x, float y, float width, float height, float radius, float glowRadius, int color) {
+        if (!canDraw(width, height, color) || glowRadius <= 0.0F) {
+            return;
+        }
+
+        if (!drawShaderGlow(x, y, width, height, radius, glowRadius, color)) {
+            drawSoftGlowFallback(x, y, width, height, radius, glowRadius, color);
+        }
+    }
+
     public static void drawShaderDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
                                             float blurRadius, int color) {
         if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
@@ -897,6 +914,21 @@ public final class Render2DUtility {
         }
 
         drawSoftDropShadowFallback(x, y, width, height, radius, offsetX, offsetY, blurRadius, color);
+    }
+
+    private static void drawSoftGlowFallback(float x, float y, float width, float height, float radius, float glowRadius, int color) {
+        float safeGlowRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, glowRadius));
+        float safeRadius = clampRadius(width, height, radius);
+        int rings = Math.max(10, Math.min(32, (int)Math.ceil(safeGlowRadius * 1.35F)));
+        int cornerSegments = Math.max(6, segmentsForRadius(safeRadius + safeGlowRadius) / 4);
+
+        for (int i = 0; i < rings; i++) {
+            float innerSpread = safeGlowRadius * i / rings;
+            float outerSpread = safeGlowRadius * (i + 1) / rings;
+            int innerColor = applyOpacity(color, glowFalloff(innerSpread, safeGlowRadius));
+            int outerColor = applyOpacity(color, glowFalloff(outerSpread, safeGlowRadius));
+            submitBloomRing(x, y, width, height, safeRadius, innerSpread, outerSpread, cornerSegments, innerColor, outerColor);
+        }
     }
 
     private static void drawSoftDropShadowFallback(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
@@ -955,6 +987,12 @@ public final class Render2DUtility {
     private static float bloomFalloff(float distance, float blurRadius) {
         float sigma = Math.max(blurRadius * 0.42F, 0.5F);
         return 0.42F * (float)Math.exp(-(distance * distance) / (2.0F * sigma * sigma));
+    }
+
+    private static float glowFalloff(float distance, float glowRadius) {
+        float progress = clamp01(distance / Math.max(glowRadius, 0.0001F));
+        float falloff = 1.0F - progress * progress * (3.0F - 2.0F * progress);
+        return falloff * falloff;
     }
 
     public static void drawBlurredRect(float x, float y, float width, float height, float radius, float blurRadius, int color) {
@@ -1393,6 +1431,114 @@ public final class Render2DUtility {
             filterMode,
             color
         );
+    }
+
+    private static boolean drawShaderGlow(float x, float y, float width, float height, float radius, float glowRadius, int color) {
+        float safeGlowRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, glowRadius));
+        int padding = Math.max(2, (int)Math.ceil(safeGlowRadius + 1.0F));
+        int textureWidth = Math.max(1, (int)Math.ceil(width + padding * 2.0F));
+        int textureHeight = Math.max(1, (int)Math.ceil(height + padding * 2.0F));
+
+        GlowCacheKey key = new GlowCacheKey(
+            Math.round(width * 100.0F),
+            Math.round(height * 100.0F),
+            Math.round(clampRadius(width, height, radius) * 100.0F),
+            Math.round(safeGlowRadius * 100.0F),
+            padding,
+            textureWidth,
+            textureHeight
+        );
+        BlurTarget target = GLOW_CACHE.get(key);
+        if (target == null) {
+            target = new BlurTarget("nyx-glow-mask");
+            try {
+                if (!renderGlowMask(target, textureWidth, textureHeight, padding, padding, width, height, radius, safeGlowRadius)) {
+                    target.close();
+                    return false;
+                }
+                GLOW_CACHE.put(key, target);
+            } catch (RuntimeException exception) {
+                target.close();
+                return false;
+            }
+        }
+
+        if (target.view == null || target.view.isClosed()) {
+            GLOW_CACHE.remove(key);
+            target.close();
+            return false;
+        }
+
+        drawTexture(target.view, x - padding, y - padding, textureWidth, textureHeight, color);
+        return true;
+    }
+
+    private static boolean renderGlowMask(BlurTarget target, int textureWidth, int textureHeight, float rectX, float rectY,
+                                          float rectWidth, float rectHeight, float radius, float glowRadius) {
+        ensureGaussianBlurTarget(target, textureWidth, textureHeight);
+
+        Shader shader = glowShader();
+        if (shader == null || target.framebuffer == 0) {
+            return false;
+        }
+
+        int previousFramebuffer = GlStateManager.getFrameBuffer(GL32C.GL_FRAMEBUFFER);
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+        int previousVertexArray = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+        int previousActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL13.GL_TEXTURE0);
+        int previousTexture0 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int[] previousViewport = new int[4];
+        GL11.glGetIntegerv(GL11.GL_VIEWPORT, previousViewport);
+        float[] previousClearColor = new float[4];
+        GL11.glGetFloatv(GL11.GL_COLOR_CLEAR_VALUE, previousClearColor);
+        boolean previousDepthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
+        boolean previousCull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        boolean previousScissor = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+
+        try {
+            if (glowVao == 0) {
+                glowVao = GL.genVertexArray();
+            }
+
+            GL.bindFramebuffer(target.framebuffer);
+            GL.viewport(0, 0, textureWidth, textureHeight);
+            GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+            GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+            GL.bindVertexArray(glowVao);
+            GL.disableDepth();
+            GL.disableBlend();
+            GL.disableCull();
+            GL.disableScissorTest();
+
+            shader.bind();
+            shader.set("TextureSize", textureWidth, textureHeight);
+            shader.set("Rect", rectX, rectY, rectWidth, rectHeight);
+            shader.set("Radius", clampRadius(rectWidth, rectHeight, radius));
+            shader.set("GlowRadius", glowRadius);
+            GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+        } finally {
+            GL.bindFramebuffer(previousFramebuffer);
+            GL.viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+            GL.bindVertexArray(previousVertexArray);
+            GL.useProgram(previousProgram);
+            GL.bindTexture(previousTexture0, 0);
+            GlStateManager._activeTexture(previousActiveTexture);
+            GL11.glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+            setCapability(GL11.GL_DEPTH_TEST, previousDepthTest);
+            setCapability(GL11.GL_BLEND, previousBlend);
+            setCapability(GL11.GL_CULL_FACE, previousCull);
+            setCapability(GL11.GL_SCISSOR_TEST, previousScissor);
+        }
+
+        return target.view != null && !target.view.isClosed();
+    }
+
+    @Nullable
+    private static Shader glowShader() {
+        Shaders.init();
+        return Shaders.GLOW;
     }
 
     private static boolean drawShaderDropShadowTexture(float x, float y, float width, float height, float radius, float offsetX,
@@ -2014,6 +2160,18 @@ public final class Render2DUtility {
         if (bloomVao != 0) {
             GL.deleteVertexArray(bloomVao);
             bloomVao = 0;
+        }
+    }
+
+    private static void closeGlowResources() {
+        for (BlurTarget target : GLOW_CACHE.values()) {
+            target.close();
+        }
+        GLOW_CACHE.clear();
+
+        if (glowVao != 0) {
+            GL.deleteVertexArray(glowVao);
+            glowVao = 0;
         }
     }
 
@@ -2732,6 +2890,9 @@ public final class Render2DUtility {
 
     private record ShadowCacheKey(int width, int height, int radius, int blurRadius, int blurPasses, int padding,
                                   int textureWidth, int textureHeight) {
+    }
+
+    private record GlowCacheKey(int width, int height, int radius, int glowRadius, int padding, int textureWidth, int textureHeight) {
     }
 
     private record KawaseBlurStrength(int iterations, float offset) {

@@ -8,6 +8,7 @@ public final class Shaders {
    public static Shader KAWASE_BLUR_UP;
    public static Shader SHADOW;
    public static Shader SHADOW_MASK;
+   public static Shader GLOW;
 
    private Shaders() {
    }
@@ -33,6 +34,9 @@ public final class Shaders {
       }
       if (SHADOW_MASK == null) {
          SHADOW_MASK = new Shader("shadow_mask.vert", "shadow_mask.frag");
+      }
+      if (GLOW == null) {
+         GLOW = new Shader("glow.vert", "glow.frag");
       }
    }
 
@@ -64,6 +68,10 @@ public final class Shaders {
       if (SHADOW_MASK != null) {
          SHADOW_MASK.close();
          SHADOW_MASK = null;
+      }
+      if (GLOW != null) {
+         GLOW.close();
+         GLOW = null;
       }
    }
 }
