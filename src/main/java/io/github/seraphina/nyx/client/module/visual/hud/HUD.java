@@ -25,7 +25,6 @@ public class HUD extends Module {
     public static final Set<UIComponent<?>> components = new LinkedHashSet<>();
     public static final HUD INSTANCE = new HUD();
 
-    public final BoolValue watermark = ValueBuild.boolSetting("watermaker", true, this);
     public final BoolValue notification = ValueBuild.boolSetting("notification", true, this);
     public final BoolValue tps = ValueBuild.boolSetting("tps", true, this);
     public final BoolValue levelType = ValueBuild.boolSetting("level type", true, this);
@@ -36,7 +35,6 @@ public class HUD extends Module {
     public final BoolValue lyric = ValueBuild.boolSetting("lyric", false, this);
 
     public HUD() {
-        components.add(new WatermarkComponent());
         components.add(new TPSView());
         components.add(new LevelTypeView());
         components.add(new PlayerPosView());

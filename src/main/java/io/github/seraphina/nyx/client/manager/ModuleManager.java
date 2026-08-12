@@ -145,6 +145,7 @@ public final class ModuleManager {
                 Cape.INSTANCE,
                 NoRenderer.INSTANCE,
                 HUD.INSTANCE,
+                Watermaker.INSTANCE,
                 Animations.INSTANCE,
                 FullBright.INSTANCE,
                 XRay.INSTANCE,

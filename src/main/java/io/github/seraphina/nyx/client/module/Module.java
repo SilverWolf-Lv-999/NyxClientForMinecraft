@@ -8,6 +8,8 @@ import io.github.seraphina.nyx.client.value.AbstractValue;
 import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.ValueGroup;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,8 +19,11 @@ import java.util.List;
 public abstract class Module implements IMinecraft {
     private final List<AbstractValue<?>> values = new ArrayList<>();
     private final List<ValueGroup> valueGroups = new ArrayList<>();
+    @Getter
     boolean enabled;
 
+    @Setter
+    @Getter
     int key = -1;
 
     public final BoolValue hide = ValueBuild.boolSetting("hide", false, this);
@@ -71,20 +76,8 @@ public abstract class Module implements IMinecraft {
 
     public void onDisable() {}
 
-    public boolean isEnabled() {
-        return enabled;
-    }
-
     public boolean hasKey() {
         return key != -1;
-    }
-
-    public int getKey() {
-        return this.key;
-    }
-
-    public void setKey(int key) {
-        this.key = key;
     }
 
     public String getConfigName() {
