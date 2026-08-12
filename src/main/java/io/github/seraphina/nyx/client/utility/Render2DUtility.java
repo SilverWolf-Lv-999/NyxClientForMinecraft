@@ -87,10 +87,13 @@ public final class Render2DUtility {
     private static final Map<BloomCacheKey, BlurTarget> BLOOM_CACHE = new HashMap<>();
     private static final Map<ShadowCacheKey, BlurTarget> SHADOW_CACHE = new HashMap<>();
     private static final Map<GlowCacheKey, BlurTarget> GLOW_CACHE = new HashMap<>();
+    private static final Map<TextureGlowCacheKey, BlurTarget> TEXTURE_GLOW_CACHE = new HashMap<>();
     private static BlurTarget gaussianBlurScratch;
     private static final BlurTarget[] kawaseBlurLevels = new BlurTarget[MAX_KAWASE_PASSES + 1];
     private static BlurTarget shadowMaskScratch;
     private static BlurTarget shadowBlurScratch;
+    private static BlurTarget glowMaskScratch;
+    private static BlurTarget glowBlurScratch;
     private static int gaussianBlurVao;
     private static int kawaseBlurVao;
     private static int shadowVao;
@@ -899,6 +902,56 @@ public final class Render2DUtility {
         }
     }
 
+    public static void drawTextureGlow(GpuTextureView texture, float x, float y, float width, float height, float glowRadius, int color) {
+        Objects.requireNonNull(texture, "texture");
+        if (!canDraw(width, height, color) || glowRadius <= 0.0F || texture.isClosed()) {
+            return;
+        }
+
+        int sourceTexture = glTextureId(texture);
+        if (sourceTexture == 0) {
+            return;
+        }
+
+        float safeGlowRadius = Math.min(MAX_GAUSSIAN_BLUR_RADIUS, Math.max(0.0F, glowRadius));
+        int padding = Math.max(2, (int)Math.ceil(safeGlowRadius + 1.0F));
+        int textureWidth = Math.max(1, (int)Math.ceil(width + padding * 2.0F));
+        int textureHeight = Math.max(1, (int)Math.ceil(height + padding * 2.0F));
+        TextureGlowCacheKey key = new TextureGlowCacheKey(
+            sourceTexture,
+            texture.getWidth(0),
+            texture.getHeight(0),
+            Math.round(width * 100.0F),
+            Math.round(height * 100.0F),
+            Math.round(safeGlowRadius * 100.0F),
+            padding,
+            textureWidth,
+            textureHeight
+        );
+        BlurTarget target = TEXTURE_GLOW_CACHE.get(key);
+        if (target == null) {
+            target = new BlurTarget("nyx-texture-glow-output");
+            try {
+                if (!renderGlowMask(target, textureWidth, textureHeight, padding, padding, width, height, 0.0F, safeGlowRadius, sourceTexture)) {
+                    target.close();
+                    return;
+                }
+                TEXTURE_GLOW_CACHE.put(key, target);
+            } catch (RuntimeException exception) {
+                target.close();
+                return;
+            }
+        }
+
+        if (target.view == null || target.view.isClosed()) {
+            TEXTURE_GLOW_CACHE.remove(key);
+            target.close();
+            return;
+        }
+
+        drawTexture(target.view, x - padding, y - padding, textureWidth, textureHeight, color);
+    }
+
     public static void drawShaderDropShadow(float x, float y, float width, float height, float radius, float offsetX, float offsetY,
                                             float blurRadius, int color) {
         if (!canDraw(width, height, color) || blurRadius <= 0.0F) {
@@ -1434,7 +1487,7 @@ public final class Render2DUtility {
     }
 
     private static boolean drawShaderGlow(float x, float y, float width, float height, float radius, float glowRadius, int color) {
-        float safeGlowRadius = Math.min(MAX_BLOOM_RADIUS, Math.max(0.0F, glowRadius));
+        float safeGlowRadius = Math.min(MAX_GAUSSIAN_BLUR_RADIUS, Math.max(0.0F, glowRadius));
         int padding = Math.max(2, (int)Math.ceil(safeGlowRadius + 1.0F));
         int textureWidth = Math.max(1, (int)Math.ceil(width + padding * 2.0F));
         int textureHeight = Math.max(1, (int)Math.ceil(height + padding * 2.0F));
@@ -1452,7 +1505,7 @@ public final class Render2DUtility {
         if (target == null) {
             target = new BlurTarget("nyx-glow-mask");
             try {
-                if (!renderGlowMask(target, textureWidth, textureHeight, padding, padding, width, height, radius, safeGlowRadius)) {
+                if (!renderGlowMask(target, textureWidth, textureHeight, padding, padding, width, height, radius, safeGlowRadius, 0)) {
                     target.close();
                     return false;
                 }
@@ -1474,11 +1527,14 @@ public final class Render2DUtility {
     }
 
     private static boolean renderGlowMask(BlurTarget target, int textureWidth, int textureHeight, float rectX, float rectY,
-                                          float rectWidth, float rectHeight, float radius, float glowRadius) {
+                                          float rectWidth, float rectHeight, float radius, float glowRadius, int sourceTexture) {
         ensureGaussianBlurTarget(target, textureWidth, textureHeight);
+        ensureGlowScratchTargets(textureWidth, textureHeight);
 
-        Shader shader = glowShader();
-        if (shader == null || target.framebuffer == 0) {
+        Shader maskShader = glowShader();
+        Shader blurShader = gaussianBlurShader();
+        if (maskShader == null || blurShader == null || target.framebuffer == 0 || glowMaskScratch == null || glowBlurScratch == null
+            || glowMaskScratch.view == null || glowBlurScratch.view == null) {
             return false;
         }
 
@@ -1512,12 +1568,41 @@ public final class Render2DUtility {
             GL.disableCull();
             GL.disableScissorTest();
 
-            shader.bind();
-            shader.set("TextureSize", textureWidth, textureHeight);
-            shader.set("Rect", rectX, rectY, rectWidth, rectHeight);
-            shader.set("Radius", clampRadius(rectWidth, rectHeight, radius));
-            shader.set("GlowRadius", glowRadius);
+            GL.bindFramebuffer(glowMaskScratch.framebuffer);
+            GL.viewport(0, 0, textureWidth, textureHeight);
+            GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+            GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
+            maskShader.bind();
+            maskShader.set("TextureSize", textureWidth, textureHeight);
+            maskShader.set("Rect", rectX, rectY, rectWidth, rectHeight);
+            maskShader.set("Radius", clampRadius(rectWidth, rectHeight, radius));
+            maskShader.set("UseTextureMask", sourceTexture != 0);
+            if (sourceTexture != 0) {
+                maskShader.set("InputTexture", 0);
+                configureTextureForBlur(sourceTexture);
+            }
             GL32C.glDrawArrays(GL32C.GL_TRIANGLES, 0, 3);
+
+            renderGaussianBlurPass(
+                blurShader,
+                glTextureId(glowMaskScratch.view),
+                glowBlurScratch,
+                textureWidth,
+                textureHeight,
+                glowRadius,
+                1.0F,
+                0.0F
+            );
+            renderGaussianBlurPass(
+                blurShader,
+                glTextureId(glowBlurScratch.view),
+                target,
+                textureWidth,
+                textureHeight,
+                glowRadius,
+                0.0F,
+                1.0F
+            );
         } finally {
             GL.bindFramebuffer(previousFramebuffer);
             GL.viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
@@ -1533,6 +1618,17 @@ public final class Render2DUtility {
         }
 
         return target.view != null && !target.view.isClosed();
+    }
+
+    private static void ensureGlowScratchTargets(int width, int height) {
+        if (glowMaskScratch == null) {
+            glowMaskScratch = new BlurTarget("nyx-glow-mask");
+        }
+        if (glowBlurScratch == null) {
+            glowBlurScratch = new BlurTarget("nyx-glow-blur-scratch");
+        }
+        ensureGaussianBlurTarget(glowMaskScratch, width, height);
+        ensureGaussianBlurTarget(glowBlurScratch, width, height);
     }
 
     @Nullable
@@ -2164,10 +2260,24 @@ public final class Render2DUtility {
     }
 
     private static void closeGlowResources() {
+        if (glowMaskScratch != null) {
+            glowMaskScratch.close();
+            glowMaskScratch = null;
+        }
+        if (glowBlurScratch != null) {
+            glowBlurScratch.close();
+            glowBlurScratch = null;
+        }
+
         for (BlurTarget target : GLOW_CACHE.values()) {
             target.close();
         }
         GLOW_CACHE.clear();
+
+        for (BlurTarget target : TEXTURE_GLOW_CACHE.values()) {
+            target.close();
+        }
+        TEXTURE_GLOW_CACHE.clear();
 
         if (glowVao != 0) {
             GL.deleteVertexArray(glowVao);
@@ -2893,6 +3003,10 @@ public final class Render2DUtility {
     }
 
     private record GlowCacheKey(int width, int height, int radius, int glowRadius, int padding, int textureWidth, int textureHeight) {
+    }
+
+    private record TextureGlowCacheKey(int sourceTexture, int sourceWidth, int sourceHeight, int width, int height,
+                                       int glowRadius, int padding, int textureWidth, int textureHeight) {
     }
 
     private record KawaseBlurStrength(int iterations, float offset) {

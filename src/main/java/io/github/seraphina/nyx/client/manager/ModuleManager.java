@@ -33,6 +33,7 @@ public final class ModuleManager {
                 ClientSpoof.INSTANCE,
                 Zoom.INSTANCE,
                 NetworkOptimization.INSTANCE,
+                FastCrystal.INSTANCE,
                 NameProtection.INSTANCE,
                 EntityCulling.INSTANCE,
                 BlockCulling.INSTANCE,

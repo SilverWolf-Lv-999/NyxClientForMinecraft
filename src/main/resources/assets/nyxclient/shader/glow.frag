@@ -2,10 +2,11 @@
 
 in vec2 textureCoord;
 
+uniform sampler2D InputTexture;
 uniform vec2 TextureSize;
 uniform vec4 Rect;
 uniform float Radius;
-uniform float GlowRadius;
+uniform bool UseTextureMask;
 
 out vec4 fragColor;
 
@@ -18,10 +19,19 @@ float roundedRectDistance(vec2 point, vec2 rectPosition, vec2 rectSize, float ra
 }
 
 void main() {
-    float distance = roundedRectDistance(textureCoord * TextureSize, Rect.xy, Rect.zw, Radius);
-    float outsideDistance = max(distance, 0.0);
-    float outsideMask = smoothstep(0.0, 1.0, outsideDistance);
-    float falloff = 1.0 - smoothstep(0.0, max(GlowRadius, 0.0001), outsideDistance);
+    vec2 point = textureCoord * TextureSize;
+    float alpha;
+    if (UseTextureMask) {
+        vec2 uv = (point - Rect.xy) / Rect.zw;
+        if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
+            fragColor = vec4(0.0);
+            return;
+        }
+        alpha = texture(InputTexture, uv).a;
+    } else {
+        float distance = roundedRectDistance(point, Rect.xy, Rect.zw, Radius);
+        alpha = 1.0 - smoothstep(0.0, 1.0, distance);
+    }
 
-    fragColor = vec4(1.0, 1.0, 1.0, outsideMask * falloff * falloff);
+    fragColor = vec4(1.0, 1.0, 1.0, alpha);
 }

@@ -20,6 +20,7 @@ public class Watermaker extends Module {
 
     private static final Identifier LOGO = Identifier.fromNamespaceAndPath("nyxclient", "ui/icon/logo.png");
     private static final float LOGO_SIZE = 48.0F;
+    private static final float GLOW_RADIUS = 8.0F;
     private static final float GRADIENT_CYCLE_SECONDS = 4.0F;
     private static final float RAINBOW_CYCLE_SECONDS = 6.0F;
 
@@ -50,16 +51,21 @@ public class Watermaker extends Module {
             return;
         }
 
-        float size = LOGO_SIZE * scale.getValue().floatValue();
+        float logoScale = scale.getValue().floatValue();
+        float size = LOGO_SIZE * logoScale;
         int color = color();
-        Render2DUtility.withGuiGraphics(event.getGuiGraphics(), () -> Render2DUtility.drawTexture(
-            mc.getTextureManager().getTexture(LOGO).getTextureView(),
-            0.0F,
-            0.0F,
-            size,
-            size,
-            color
-        ));
+        Render2DUtility.withGuiGraphics(event.getGuiGraphics(), () -> {
+            var texture = mc.getTextureManager().getTexture(LOGO).getTextureView();
+            Render2DUtility.drawTextureGlow(texture, 0.0F, 0.0F, size, size, GLOW_RADIUS * logoScale, color);
+            Render2DUtility.drawTexture(
+                texture,
+                0.0F,
+                0.0F,
+                size,
+                size,
+                color
+            );
+        });
     }
 
     private int color() {

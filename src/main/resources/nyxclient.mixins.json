@@ -65,6 +65,7 @@
     "PlayerTabOverlayMixin",
     "RecipeBookComponentMixin",
     "ScreenEffectRendererMixin",
+    "ServerboundInteractPacketAccessor",
     "SubmitNodeCollectionMixin",
     "TooltipRenderUtilMixin",
     "WeatherEffectRendererMixin",
