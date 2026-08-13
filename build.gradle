@@ -22,6 +22,7 @@ repositories {
         }
     }
     maven { url = 'https://maven.parchmentmc.org' }
+    maven { url = 'https://babbaj.github.io/maven/' }
     maven { url = 'https://jitpack.io' }
     maven { url = 'https://api.modrinth.com/maven' }
     maven {
@@ -111,6 +112,9 @@ neoForge {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 dependencies {
+    jarJar(implementation("dev.babbaj:nether-pathfinder:1.4.1"))
+    compileOnly "com.google.code.findbugs:jsr305:3.0.2"
+
     compileOnly "io.github.llamalad7:mixinextras-common:0.5.3"
     annotationProcessor "io.github.llamalad7:mixinextras-common:0.5.3"
     compileOnly "org.projectlombok:lombok:1.18.42"
