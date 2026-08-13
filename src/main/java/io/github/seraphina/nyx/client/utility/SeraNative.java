@@ -1,5 +1,9 @@
 package io.github.seraphina.nyx.client.utility;
 
+import io.github.seraphina.nyx.client.events.api.EventManager;
+import io.github.seraphina.nyx.client.events.impl.NetworkChangedEvent;
+import net.minecraft.client.Minecraft;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -8,6 +12,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 
 /*
@@ -23,7 +28,10 @@ public final class SeraNative {
     private static final String PROPERTY_GPU_HINT_STATUS = "nyx.native.gpuHintStatus";
     private static final String GPU_PREFERENCE_KEY = "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences";
     private static final String HIGH_PERFORMANCE_GPU = "GpuPreference=2;";
+    private static final String[] EMPTY_DNS_RESULTS = new String[0];
     private static final boolean AVAILABLE = load();
+    private static final AtomicBoolean NETWORK_CHANGE_EVENT_DISPATCH_ENABLED = new AtomicBoolean();
+    private static final AtomicBoolean NETWORK_CHANGE_EVENT_QUEUED = new AtomicBoolean();
     private static GpuPreferenceStatus gpuPreferenceStatus;
 
     public static boolean isAvailable() {
@@ -135,6 +143,72 @@ public final class SeraNative {
 
     public static String getSmtcSourceAppId() {
         return getSmtcInfo().sourceAppId();
+    }
+
+    public static boolean flushDnsResolverCache() {
+        if (!AVAILABLE) {
+            return false;
+        }
+
+        try {
+            return nativeFlushDnsResolverCache();
+        } catch (UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    public static String[] resolveHostnameWithoutCache(String hostname) {
+        if (!AVAILABLE || hostname == null || hostname.isBlank()) {
+            return EMPTY_DNS_RESULTS;
+        }
+
+        try {
+            String[] addresses = nativeResolveHostnameWithoutCache(hostname);
+            return addresses == null ? EMPTY_DNS_RESULTS : addresses;
+        } catch (UnsatisfiedLinkError ignored) {
+            return EMPTY_DNS_RESULTS;
+        }
+    }
+
+    public static boolean startNetworkChangeMonitor() {
+        if (!AVAILABLE) {
+            return false;
+        }
+
+        NETWORK_CHANGE_EVENT_DISPATCH_ENABLED.set(true);
+        try {
+            boolean started = nativeStartNetworkChangeMonitor();
+            if (!started) {
+                NETWORK_CHANGE_EVENT_DISPATCH_ENABLED.set(false);
+            }
+            return started;
+        } catch (UnsatisfiedLinkError ignored) {
+            NETWORK_CHANGE_EVENT_DISPATCH_ENABLED.set(false);
+            return false;
+        }
+    }
+
+    public static void setNetworkChangeEventDispatchEnabled(boolean enabled) {
+        NETWORK_CHANGE_EVENT_DISPATCH_ENABLED.set(enabled);
+    }
+
+    private static void onNativeNetworkChanged() {
+        if (!NETWORK_CHANGE_EVENT_DISPATCH_ENABLED.get()
+                || !NETWORK_CHANGE_EVENT_QUEUED.compareAndSet(false, true)) {
+            return;
+        }
+
+        try {
+            Minecraft.getInstance().execute(() -> {
+                try {
+                    EventManager.post(new NetworkChangedEvent());
+                } finally {
+                    NETWORK_CHANGE_EVENT_QUEUED.set(false);
+                }
+            });
+        } catch (RuntimeException ignored) {
+            NETWORK_CHANGE_EVENT_QUEUED.set(false);
+        }
     }
 
     private static boolean load() {
@@ -335,6 +409,12 @@ public final class SeraNative {
     private static native boolean nativeIsSmtcSupported();
 
     private static native String[] nativeGetSmtcSnapshot();
+
+    private static native boolean nativeFlushDnsResolverCache();
+
+    private static native String[] nativeResolveHostnameWithoutCache(String hostname);
+
+    private static native boolean nativeStartNetworkChangeMonitor();
 
     private enum PreferenceWriteResult {
         ALREADY_CONFIGURED,

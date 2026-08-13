@@ -251,6 +251,11 @@ public final class NeteaseMusicApi {
 
     public static List<LyricLine> getLyric(long id) throws IOException, InterruptedException {
         JsonObject root = getJsonObject(withSession("/lyric?id=" + id));
+        JsonObject yrc = object(root.get("yrc"));
+        List<LyricLine> wordTimedLyrics = LyricLineProcessor.parseYrc(string(yrc, "lyric"));
+        if (!wordTimedLyrics.isEmpty()) {
+            return wordTimedLyrics;
+        }
         JsonObject lrc = object(root.get("lrc"));
         return LyricLineProcessor.parse(string(lrc, "lyric"));
     }

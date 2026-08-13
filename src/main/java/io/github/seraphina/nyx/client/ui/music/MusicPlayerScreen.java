@@ -3,6 +3,7 @@ package io.github.seraphina.nyx.client.ui.music;
 import com.mojang.blaze3d.platform.NativeImage;
 import io.github.seraphina.nyx.client.music.LyricLine;
 import io.github.seraphina.nyx.client.music.LyricLineProcessor;
+import io.github.seraphina.nyx.client.music.LyricWord;
 import io.github.seraphina.nyx.client.music.MusicPlaybackService;
 import io.github.seraphina.nyx.client.music.MusicPlaybackService.PlaybackMode;
 import io.github.seraphina.nyx.client.music.NeteaseMusicApi;
@@ -46,6 +47,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.github.seraphina.nyx.client.utility.MathUtility.clamp;
+import static io.github.seraphina.nyx.client.utility.MathUtility.cubicBezier;
 import static io.github.seraphina.nyx.client.utility.MathUtility.isInsideExclusive;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_BACKSPACE;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER;
@@ -83,6 +85,13 @@ public class MusicPlayerScreen extends LuaScreen {
     private static final float TITLE_FONT_SIZE = 12.0F;
     private static final float BODY_FONT_SIZE = 8.5F;
     private static final float META_FONT_SIZE = 7.5F;
+    private static final float PLAYER_LYRIC_LINE_SPACING = 16.0F;
+    private static final float DETAIL_LYRIC_LINE_SPACING = 25.0F;
+    private static final long LYRIC_TRANSITION_NANOS = 360_000_000L;
+    private static final long LYRIC_SEEK_THRESHOLD_MS = 1_500L;
+    private static final long LYRIC_FALLBACK_DURATION_MS = 3_000L;
+    private static final float LYRIC_GLYPH_STAGGER_PER_GLYPH = 0.018F;
+    private static final float LYRIC_GLYPH_STAGGER_MAX = 0.22F;
 
     private final List<ClickZone> clickZones = new ArrayList<>();
     private final List<Song> homeSongs = new ArrayList<>();
@@ -114,6 +123,12 @@ public class MusicPlayerScreen extends LuaScreen {
     private float panelX;
     private float panelY;
     private boolean draggingVolume;
+    private long lyricSongId = Long.MIN_VALUE;
+    private long lyricLastPositionMs = Long.MIN_VALUE;
+    private int lyricVisibleIndex = -1;
+    private int lyricTransitionFromIndex = -1;
+    private int lyricTransitionToIndex = -1;
+    private long lyricTransitionStartedNanos;
 
     public MusicPlayerScreen() {
         super("nyxclient:ui/screen/musicplayer.lua", Component.literal("Music Player"));
@@ -193,22 +208,6 @@ public class MusicPlayerScreen extends LuaScreen {
             songStates.add(songState);
         }
 
-        List<LyricLine> lyrics = musicSnapshot.lyrics();
-        int lyricIndex = LyricLineProcessor.currentIndex(lyrics, musicSnapshot.positionMs());
-        String lyric = lyricIndex >= 0 && lyricIndex < lyrics.size() ? lyrics.get(lyricIndex).text() : "";
-        int detailLyricIndex = lyrics.isEmpty() ? -1 : Math.max(0, Math.min(lyricIndex, lyrics.size() - 1));
-        List<Map<String, Object>> detailLyrics = new ArrayList<>();
-        if (detailLyricIndex >= 0) {
-            int start = Math.max(0, detailLyricIndex - 8);
-            int end = Math.min(lyrics.size(), detailLyricIndex + 9);
-            for (int index = start; index < end; index++) {
-                Map<String, Object> lyricState = new LinkedHashMap<>();
-                lyricState.put("index", index + 1);
-                lyricState.put("text", lyrics.get(index).text());
-                detailLyrics.add(lyricState);
-            }
-        }
-
         state.put("page", this.page.name().toLowerCase(Locale.ROOT));
         state.put("title", title());
         state.put("status", this.statusText);
@@ -246,10 +245,7 @@ public class MusicPlayerScreen extends LuaScreen {
         state.put("volume_label", Math.round(player.volume() * 100.0F) + "%");
         state.put("mode_label", player.playbackMode().label());
         state.put("mode_icon", modeIcon(player.playbackMode()).name().toLowerCase(Locale.ROOT));
-        state.put("lyric", lyric == null || lyric.isBlank() ? "" : lyric);
         state.put("detail_open", this.detailOpen && currentSong != null);
-        state.put("detail_lyric_index", detailLyricIndex + 1);
-        state.put("detail_lyrics", detailLyrics);
     }
 
     @Override
@@ -403,6 +399,25 @@ public class MusicPlayerScreen extends LuaScreen {
         if (name.equals("detail_cover") && args.length >= 5) {
             renderDetailCover(
                 args[0].optjstring(""),
+                (float)args[1].checkdouble(),
+                (float)args[2].checkdouble(),
+                (float)args[3].checkdouble(),
+                (float)args[4].checkdouble()
+            );
+            return;
+        }
+        if (name.equals("player_lyrics") && args.length >= 4) {
+            renderPlayerLyrics(
+                (float)args[0].checkdouble(),
+                (float)args[1].checkdouble(),
+                (float)args[2].checkdouble(),
+                (float)args[3].checkdouble()
+            );
+            return;
+        }
+        if (name.equals("detail_lyrics") && args.length >= 5) {
+            renderDetailLyrics(
+                (float)args[0].checkdouble(),
                 (float)args[1].checkdouble(),
                 (float)args[2].checkdouble(),
                 (float)args[3].checkdouble(),
@@ -790,6 +805,388 @@ public class MusicPlayerScreen extends LuaScreen {
         if (index >= 0 && index < lyrics.size()) {
             draw(trim(lyrics.get(index).text().isBlank() ? "..." : lyrics.get(index).text(), 260), x, y, ACCENT);
         }
+    }
+
+    private void renderPlayerLyrics(float x, float y, float width, float height) {
+        LyricRenderState state = lyricRenderState();
+        if (state.lyrics().isEmpty()) {
+            return;
+        }
+
+        FontRenderer font = textFont();
+        float centerY = y + (height - font.getLineHeight()) * 0.5F;
+        int firstIndex = Math.max(0, (int)Math.floor(state.visualIndex()) - 1);
+        int lastIndex = Math.min(state.lyrics().size() - 1, (int)Math.ceil(state.visualIndex()) + 1);
+        Render2DUtility.withClip(x, y, width, height, () -> {
+            for (int index = firstIndex; index <= lastIndex; index++) {
+                float rowOffset = index - state.visualIndex();
+                float rowY = centerY + rowOffset * PLAYER_LYRIC_LINE_SPACING;
+                if (rowY < y - font.getLineHeight() || rowY > y + height) {
+                    continue;
+                }
+
+                float opacity = clamp(1.0F - Math.abs(rowOffset) * 0.42F, 0.0F, 1.0F);
+                int baseColor = index == state.currentIndex() ? TEXT_MUTED : TEXT_DIM;
+                renderTimedLyric(
+                    font,
+                    state,
+                    index,
+                    x,
+                    rowY,
+                    width,
+                    baseColor,
+                    ACCENT,
+                    opacity,
+                    PLAYER_LYRIC_LINE_SPACING
+                );
+            }
+        });
+    }
+
+    private void renderDetailLyrics(float x, float y, float width, float height, float alpha) {
+        LyricRenderState state = lyricRenderState();
+        FontRenderer font = textFont();
+        if (state.lyrics().isEmpty()) {
+            font.drawCenteredString("No lyrics available", x + width * 0.5F,
+                y + (height - font.getLineHeight()) * 0.5F, Render2DUtility.applyOpacity(TEXT_DIM, alpha));
+            return;
+        }
+
+        float centerY = y + (height - font.getLineHeight()) * 0.5F;
+        int firstIndex = Math.max(0, (int)Math.floor(state.visualIndex()) - 3);
+        int lastIndex = Math.min(state.lyrics().size() - 1, (int)Math.ceil(state.visualIndex()) + 3);
+        Render2DUtility.withClip(x, y, width, height, () -> {
+            for (int index = firstIndex; index <= lastIndex; index++) {
+                float rowOffset = index - state.visualIndex();
+                float rowY = centerY + rowOffset * DETAIL_LYRIC_LINE_SPACING;
+                if (rowY < y - font.getLineHeight() || rowY > y + height) {
+                    continue;
+                }
+
+                float lineAlpha = alpha * clamp(1.0F - Math.abs(rowOffset) * 0.13F, 0.18F, 1.0F);
+                int baseColor = index == state.currentIndex() ? TEXT : TEXT_MUTED;
+                String text = trimLyric(font, lyricText(state.lyrics().get(index)), Math.max(1.0F, width - 16.0F));
+                float textX = x + (width - font.getStringWidth(text)) * 0.5F;
+                renderTimedLyric(
+                    font,
+                    state,
+                    index,
+                    textX,
+                    rowY,
+                    font.getStringWidth(text),
+                    baseColor,
+                    ACCENT,
+                    lineAlpha,
+                    text,
+                    DETAIL_LYRIC_LINE_SPACING
+                );
+            }
+        });
+    }
+
+    private LyricRenderState lyricRenderState() {
+        MusicUtility.MusicSnapshot musicSnapshot = MusicUtility.snapshot();
+        List<LyricLine> lyrics = musicSnapshot.lyrics();
+        Song song = musicSnapshot.song();
+        if (lyrics.isEmpty() || song == null) {
+            resetLyricAnimation();
+            return new LyricRenderState(List.of(), -1, 0.0F, 0L, 0L, -1, -1, 1.0F);
+        }
+
+        int currentIndex = LyricLineProcessor.currentIndex(lyrics, musicSnapshot.positionMs());
+        if (currentIndex < 0) {
+            resetLyricAnimation();
+            return new LyricRenderState(List.of(), -1, 0.0F, 0L, 0L, -1, -1, 1.0F);
+        }
+        currentIndex = Math.min(currentIndex, lyrics.size() - 1);
+        long songId = song.id();
+        long positionMs = musicSnapshot.positionMs();
+        long now = System.nanoTime();
+        boolean songChanged = this.lyricSongId != songId;
+        boolean seeked = this.lyricLastPositionMs != Long.MIN_VALUE
+            && Math.abs(positionMs - this.lyricLastPositionMs) > LYRIC_SEEK_THRESHOLD_MS;
+
+        if (songChanged || seeked || this.lyricVisibleIndex < 0 || this.lyricVisibleIndex >= lyrics.size()) {
+            this.lyricSongId = songId;
+            this.lyricVisibleIndex = currentIndex;
+            clearLyricTransition();
+        } else if (this.lyricTransitionToIndex >= 0) {
+            if (currentIndex != this.lyricTransitionToIndex) {
+                this.lyricVisibleIndex = currentIndex;
+                clearLyricTransition();
+            } else if (now - this.lyricTransitionStartedNanos >= LYRIC_TRANSITION_NANOS) {
+                this.lyricVisibleIndex = this.lyricTransitionToIndex;
+                clearLyricTransition();
+            }
+        } else if (currentIndex != this.lyricVisibleIndex) {
+            if (Math.abs(currentIndex - this.lyricVisibleIndex) == 1) {
+                this.lyricTransitionFromIndex = this.lyricVisibleIndex;
+                this.lyricTransitionToIndex = currentIndex;
+                this.lyricTransitionStartedNanos = now;
+            } else {
+                this.lyricVisibleIndex = currentIndex;
+                clearLyricTransition();
+            }
+        }
+
+        this.lyricLastPositionMs = positionMs;
+        float transitionProgress = lyricTransitionProgress(now);
+        float visualIndex = lyricVisualIndex(transitionProgress);
+        return new LyricRenderState(
+            lyrics,
+            currentIndex,
+            visualIndex,
+            positionMs,
+            musicSnapshot.durationMs(),
+            this.lyricTransitionFromIndex,
+            this.lyricTransitionToIndex,
+            transitionProgress
+        );
+    }
+
+    private float lyricTransitionProgress(long now) {
+        if (this.lyricTransitionToIndex < 0) {
+            return 1.0F;
+        }
+
+        return clamp((now - this.lyricTransitionStartedNanos) / (float)LYRIC_TRANSITION_NANOS, 0.0F, 1.0F);
+    }
+
+    private float lyricVisualIndex(float transitionProgress) {
+        if (this.lyricTransitionToIndex < 0) {
+            return this.lyricVisibleIndex;
+        }
+
+        float eased = cubicBezier(transitionProgress, 0.22F, 0.80F, 0.22F, 1.0F);
+        return this.lyricTransitionFromIndex + (this.lyricTransitionToIndex - this.lyricTransitionFromIndex) * eased;
+    }
+
+    private void resetLyricAnimation() {
+        this.lyricSongId = Long.MIN_VALUE;
+        this.lyricLastPositionMs = Long.MIN_VALUE;
+        this.lyricVisibleIndex = -1;
+        clearLyricTransition();
+    }
+
+    private void clearLyricTransition() {
+        this.lyricTransitionFromIndex = -1;
+        this.lyricTransitionToIndex = -1;
+        this.lyricTransitionStartedNanos = 0L;
+    }
+
+    private void renderTimedLyric(
+        FontRenderer font,
+        LyricRenderState state,
+        int index,
+        float x,
+        float y,
+        float width,
+        int baseColor,
+        int highlightColor,
+        float opacity,
+        float lineSpacing
+    ) {
+        String text = trimLyric(font, lyricText(state.lyrics().get(index)), width);
+        renderTimedLyric(
+            font,
+            state,
+            index,
+            x,
+            y,
+            font.getStringWidth(text),
+            baseColor,
+            highlightColor,
+            opacity,
+            text,
+            lineSpacing
+        );
+    }
+
+    private void renderTimedLyric(
+        FontRenderer font,
+        LyricRenderState state,
+        int index,
+        float x,
+        float y,
+        float width,
+        int baseColor,
+        int highlightColor,
+        float opacity,
+        String text,
+        float lineSpacing
+    ) {
+        if (text.isEmpty() || width <= 0.0F || opacity <= 0.0F) {
+            return;
+        }
+
+        LyricLine line = state.lyrics().get(index);
+        float highlightedWidth = index == state.currentIndex()
+            ? lyricHighlightWidth(font, line, lyricEndTime(state, index), state.positionMs(), width)
+            : 0.0F;
+        if (isGlyphStaggerTransition(state, index)) {
+            renderStaggeredTimedLyric(
+                font,
+                state,
+                index,
+                x,
+                y,
+                baseColor,
+                highlightColor,
+                opacity,
+                text,
+                lineSpacing,
+                highlightedWidth
+            );
+            return;
+        }
+
+        font.drawString(text, x, y, Render2DUtility.applyOpacity(baseColor, opacity));
+        if (index != state.currentIndex()) {
+            return;
+        }
+
+        if (highlightedWidth <= 0.0F) {
+            return;
+        }
+
+        Render2DUtility.withClip(x, y - 1.0F, highlightedWidth, font.getLineHeight() + 2.0F,
+            () -> font.drawString(text, x, y, Render2DUtility.applyOpacity(highlightColor, opacity)));
+    }
+
+    private void renderStaggeredTimedLyric(
+        FontRenderer font,
+        LyricRenderState state,
+        int index,
+        float x,
+        float y,
+        int baseColor,
+        int highlightColor,
+        float opacity,
+        String text,
+        float lineSpacing,
+        float highlightedWidth
+    ) {
+        int characterCount = text.codePointCount(0, text.length());
+        float glyphX = x;
+        int characterIndex = 0;
+        for (int offset = 0; offset < text.length(); ) {
+            int codePoint = text.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+
+            String glyphText = new String(Character.toChars(codePoint));
+            float glyphWidth = font.getStringWidth(glyphText);
+            float glyphProgress = staggeredGlyphProgress(state.transitionProgress(), characterIndex, characterCount);
+            float glyphVisualIndex = state.transitionFromIndex()
+                + (state.transitionToIndex() - state.transitionFromIndex()) * glyphProgress;
+            float glyphY = y + (state.visualIndex() - glyphVisualIndex) * lineSpacing;
+            float glyphOpacity = staggeredGlyphOpacity(opacity, state, index, glyphProgress);
+            float renderedGlyphX = glyphX;
+
+            font.drawString(glyphText, renderedGlyphX, glyphY, Render2DUtility.applyOpacity(baseColor, glyphOpacity));
+            float glyphHighlightedWidth = clamp(highlightedWidth - (renderedGlyphX - x), 0.0F, glyphWidth);
+            if (glyphHighlightedWidth >= glyphWidth) {
+                font.drawString(glyphText, renderedGlyphX, glyphY, Render2DUtility.applyOpacity(highlightColor, glyphOpacity));
+            } else if (glyphHighlightedWidth > 0.0F) {
+                Render2DUtility.withClip(renderedGlyphX, glyphY - 1.0F, glyphHighlightedWidth, font.getLineHeight() + 2.0F,
+                    () -> font.drawString(glyphText, renderedGlyphX, glyphY, Render2DUtility.applyOpacity(highlightColor, glyphOpacity)));
+            }
+
+            glyphX += glyphWidth;
+            characterIndex++;
+        }
+    }
+
+    private static boolean isGlyphStaggerTransition(LyricRenderState state, int index) {
+        return state.transitionFromIndex() >= 0
+            && state.transitionToIndex() >= 0
+            && state.transitionProgress() < 1.0F
+            && (index == state.transitionFromIndex() || index == state.transitionToIndex());
+    }
+
+    private static float staggeredGlyphProgress(float transitionProgress, int characterIndex, int characterCount) {
+        if (characterCount <= 1) {
+            return cubicBezier(transitionProgress, 0.22F, 0.80F, 0.22F, 1.0F);
+        }
+
+        float totalDelay = Math.min(LYRIC_GLYPH_STAGGER_MAX, (characterCount - 1) * LYRIC_GLYPH_STAGGER_PER_GLYPH);
+        float delay = totalDelay * characterIndex / (characterCount - 1);
+        float glyphProgress = clamp((transitionProgress - delay) / (1.0F - delay), 0.0F, 1.0F);
+        return cubicBezier(glyphProgress, 0.22F, 0.80F, 0.22F, 1.0F);
+    }
+
+    private static float staggeredGlyphOpacity(float opacity, LyricRenderState state, int index, float glyphProgress) {
+        float transitionOpacity = index == state.transitionToIndex()
+            ? 0.65F + glyphProgress * 0.35F
+            : 1.0F - glyphProgress * 0.15F;
+        return opacity * transitionOpacity;
+    }
+
+    private static float lyricHighlightWidth(FontRenderer font, LyricLine line, long lineEndMs, long positionMs, float renderedWidth) {
+        List<LyricWord> words = line.words();
+        if (words.isEmpty()) {
+            float progress = lyricProgress(positionMs, line.timeMs(), lineEndMs);
+            return renderedWidth * progress;
+        }
+
+        StringBuilder completedText = new StringBuilder();
+        float highlightedWidth = 0.0F;
+        for (LyricWord word : words) {
+            if (positionMs >= word.timeMs() + word.durationMs()) {
+                completedText.append(word.text());
+                highlightedWidth = font.getStringWidth(completedText.toString());
+                continue;
+            }
+            if (positionMs > word.timeMs()) {
+                float wordProgress = lyricProgress(positionMs, word.timeMs(), word.timeMs() + word.durationMs());
+                highlightedWidth = font.getStringWidth(completedText.toString())
+                    + font.getStringWidth(word.text()) * wordProgress;
+            }
+            break;
+        }
+        return clamp(highlightedWidth, 0.0F, renderedWidth);
+    }
+
+    private static float lyricProgress(long positionMs, long startMs, long endMs) {
+        if (endMs <= startMs) {
+            return positionMs >= endMs ? 1.0F : 0.0F;
+        }
+        return clamp((positionMs - startMs) / (float)(endMs - startMs), 0.0F, 1.0F);
+    }
+
+    private static long lyricEndTime(LyricRenderState state, int index) {
+        if (index + 1 < state.lyrics().size()) {
+            return state.lyrics().get(index + 1).timeMs();
+        }
+        if (state.durationMs() > state.lyrics().get(index).timeMs()) {
+            return state.durationMs();
+        }
+        return state.lyrics().get(index).timeMs() + LYRIC_FALLBACK_DURATION_MS;
+    }
+
+    private static String lyricText(LyricLine line) {
+        String text = line.text();
+        return text == null || text.isBlank() ? "..." : text.strip();
+    }
+
+    private static String trimLyric(FontRenderer font, String text, float maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0.0F) {
+            return "";
+        }
+        if (font.getStringWidth(text) <= maxWidth) {
+            return text;
+        }
+
+        String suffix = "...";
+        float suffixWidth = font.getStringWidth(suffix);
+        if (suffixWidth >= maxWidth) {
+            return "";
+        }
+
+        int end = text.length();
+        while (end > 0 && font.getStringWidth(text.substring(0, end)) + suffixWidth > maxWidth) {
+            end = text.offsetByCodePoints(end, -1);
+        }
+        return text.substring(0, Math.max(0, end)) + suffix;
     }
 
     private void playVisibleSong(Song song) {
@@ -1546,5 +1943,17 @@ public class MusicPlayerScreen extends LuaScreen {
     }
 
     private record UserData(NeteaseMusicApi.LoginSession session, List<Playlist> playlists) {
+    }
+
+    private record LyricRenderState(
+        List<LyricLine> lyrics,
+        int currentIndex,
+        float visualIndex,
+        long positionMs,
+        long durationMs,
+        int transitionFromIndex,
+        int transitionToIndex,
+        float transitionProgress
+    ) {
     }
 }

@@ -23,7 +23,6 @@ local META_FONT_SIZE = 7.5
 local hover_progress = {}
 local icon_hover_progress = {}
 local detail_progress = 0
-local detail_lyric_position = nil
 
 local function clamp(value, minimum, maximum)
     return math.max(minimum, math.min(maximum, value))
@@ -433,12 +432,8 @@ local function render_player(state, panel)
     ui.hitbox(slider_x - 4, volume_y - 7, volume_width + 8, 16, "set_volume",
         {x = slider_x, width = volume_width}, true, true)
 
-    if state.lyric and state.lyric ~= "" then
-        ui.clip(x + 16, y + panel.player_height - 25, math.max(1, volume_x - x - 24), 18, function()
-            body(ui.trim_text("text", state.lyric, BODY_FONT_SIZE, math.max(1, volume_x - x - 24)),
-                x + 16, y + panel.player_height - 20, ACCENT)
-        end)
-    end
+    ui.custom("player_lyrics", x + 16, y + panel.player_height - 25,
+        math.max(1, volume_x - x - 24), 18)
 end
 
 local function detail_icon_button(state, id, name, x, y, size, action, accent, alpha, rotation)
@@ -464,21 +459,6 @@ local function detail_icon_button(state, id, name, x, y, size, action, accent, a
     ui.hitbox(x, y, size, size, action, nil, active)
 end
 
-local function update_detail_lyric_position(state)
-    local target = state.detail_lyric_index or 0
-    if target <= 0 then
-        detail_lyric_position = nil
-        return
-    end
-    if detail_lyric_position == nil or math.abs(detail_lyric_position - target) > 5 then
-        detail_lyric_position = target
-        return
-    end
-    local frame_seconds = state.frame_seconds or 1 / 60
-    detail_lyric_position = target
-        + (detail_lyric_position - target) * math.exp(-9 * frame_seconds)
-end
-
 local function render_detail_lyrics(state, panel, split_y, alpha)
     local area_x = panel.x + 24
     local area_y = panel.y + 47
@@ -487,36 +467,7 @@ local function render_detail_lyrics(state, panel, split_y, alpha)
     title("Lyrics", panel.x + 54, panel.y + 19, opacity(TEXT, alpha))
     meta("NOW PLAYING", panel.x + 54, panel.y + 35, opacity(TEXT_DIM, alpha))
 
-    local lyrics = state.detail_lyrics or {}
-    if #lyrics == 0 or detail_lyric_position == nil then
-        ui.text_centered("No lyrics available", area_x + area_width * 0.5,
-            area_y + area_height * 0.5, BODY_FONT_SIZE, opacity(TEXT_DIM, alpha))
-        return
-    end
-
-    local center_y = area_y + area_height * 0.5
-    local current_index = state.detail_lyric_index or 0
-    ui.clip(area_x, area_y, area_width, area_height, function()
-        for _, line in ipairs(lyrics) do
-            local distance = line.index - detail_lyric_position
-            local row_y = center_y + distance * 25
-            if row_y >= area_y - 16 and row_y <= area_y + area_height + 4 then
-                local absolute_distance = math.abs(distance)
-                local row_alpha = alpha * clamp(1 - absolute_distance * 0.13, 0.18, 1)
-                local current = line.index == current_index
-                local font_size = current and 11 or BODY_FONT_SIZE
-                local color = current and ACCENT or TEXT_MUTED
-                local text = (line.text == nil or line.text == "") and "..." or line.text
-                ui.text_centered(
-                    ui.trim_text("text", text, font_size, math.max(1, area_width - 16)),
-                    area_x + area_width * 0.5,
-                    row_y - font_size * 0.5,
-                    font_size,
-                    opacity(color, row_alpha)
-                )
-            end
-        end
-    end)
+    ui.custom("detail_lyrics", area_x, area_y, area_width, area_height, alpha)
 end
 
 local function detail_cover_target(panel, split_y)
@@ -609,11 +560,8 @@ local function render_detail(state, panel)
     end
     if detail_progress <= 0.001 then
         detail_progress = 0
-        detail_lyric_position = nil
         return
     end
-
-    update_detail_lyric_position(state)
 
     local eased = ease_in_out_cubic(detail_progress)
     local content_alpha = phase(0.24, 0.72, eased)

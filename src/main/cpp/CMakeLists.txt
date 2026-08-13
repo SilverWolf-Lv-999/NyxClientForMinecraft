@@ -14,6 +14,8 @@ if (MINGW)
 endif()
 
 if (WIN32)
+    target_link_libraries(sera_native PRIVATE dnsapi iphlpapi ws2_32)
+
     file(GLOB cppwinrtIncludeDirectories LIST_DIRECTORIES true
         "$ENV{WindowsSdkDir}/Include/*/cppwinrt"
         "C:/Program Files (x86)/Windows Kits/10/Include/*/cppwinrt"

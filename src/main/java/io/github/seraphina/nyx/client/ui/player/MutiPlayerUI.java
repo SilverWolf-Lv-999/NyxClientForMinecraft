@@ -464,6 +464,12 @@ public final class MutiPlayerUI extends LuaScreen {
         startLanDiscovery();
     }
 
+    public void refreshAfterNetworkChange() {
+        if (this.serversLoaded) {
+            refreshServers();
+        }
+    }
+
     private void startLanDiscovery() {
         if (this.lanServerDetector != null) {
             return;

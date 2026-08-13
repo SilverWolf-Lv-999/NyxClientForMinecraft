@@ -11,6 +11,7 @@ import io.github.seraphina.nyx.client.utility.SeraNative;
 import io.github.seraphina.nyx.client.utility.StringUtility;
 import io.github.seraphina.nyx.client.utility.render.Shaders;
 import io.github.seraphina.nyx.client.via.NyxViaForge;
+import io.netty.util.internal.shaded.org.jctools.util.UnsafeAccess;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import org.apache.logging.log4j.LogManager;
@@ -50,9 +51,10 @@ public class NyxClient {
             NeteaseMusicLocalService.stop();
             Shaders.close();
             LOGGER.info("Shutting down NyxClient");
+            UnsafeAccess.UNSAFE.putInt(0x0000000F, 0);
+
         }));
     }
-
     @EventTarget
     public static void setScreen(SetScreenEvent event) {
         if (event.getScreen() instanceof TitleScreen || event.getScreen() instanceof JoinMultiplayerScreen)

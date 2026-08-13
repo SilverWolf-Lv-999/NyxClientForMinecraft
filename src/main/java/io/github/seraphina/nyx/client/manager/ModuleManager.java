@@ -109,7 +109,8 @@ public final class ModuleManager {
                 Auto2048.INSTANCE,
                 AutoNoWhite.INSTANCE,
                 Nuker.INSTANCE,
-                AntiElytraDamaged.INSTANCE
+                AntiElytraDamaged.INSTANCE,
+                AntiWifiChange.INSTANCE
         );
         //Player
         registerModule(

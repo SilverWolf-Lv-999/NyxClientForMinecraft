@@ -21,7 +21,6 @@ import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.util.StringUtil;
 import net.minecraft.world.entity.player.PlayerSkin;
 import org.jspecify.annotations.Nullable;
 import org.luaj.vm2.LuaValue;
@@ -50,6 +49,8 @@ import static org.lwjgl.glfw.GLFW.GLFW_KEY_HOME;
 import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LEFT;
 
 public final class AltManagerScreen extends LuaScreen {
+    private static final int MAX_OFFLINE_NAME_LENGTH = 16;
+
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT);
 
     private static final float DEFAULT_FRAME_SECONDS = 1.0F / 60.0F;
@@ -954,7 +955,10 @@ public final class AltManagerScreen extends LuaScreen {
     }
 
     private static boolean isValidOfflineName(String name) {
-        return name != null && !name.isBlank() && StringUtil.isValidPlayerName(name);
+        return name != null
+                && !name.isBlank()
+                && name.codePointCount(0, name.length()) <= MAX_OFFLINE_NAME_LENGTH
+                && name.codePoints().noneMatch(codePoint -> Character.isWhitespace(codePoint) || Character.isISOControl(codePoint));
     }
 
     private static String accountTypeLabel(AltManager.AccountType type) {
@@ -1016,7 +1020,7 @@ public final class AltManagerScreen extends LuaScreen {
         private static final int PANEL_WIDTH = 340;
         private static final int CRACKED_PANEL_HEIGHT = 214;
         private static final int CREDENTIAL_PANEL_HEIGHT = 286;
-        private static final int NAME_MAX_LENGTH = 16;
+        private static final int NAME_MAX_LENGTH = MAX_OFFLINE_NAME_LENGTH;
         private static final int UUID_MAX_LENGTH = 36;
         private static final int ACCESS_TOKEN_MAX_LENGTH = 8192;
         private static final float MODAL_PADDING = 20.0F;
@@ -1213,7 +1217,7 @@ public final class AltManagerScreen extends LuaScreen {
 
             String name = currentName();
             if (!isValidOfflineName(name)) {
-                setStatus("Use a 1-16 character Minecraft name.", true);
+                setStatus("Use a 1-16 character name without spaces.", true);
                 return;
             }
 
@@ -1659,13 +1663,14 @@ public final class AltManagerScreen extends LuaScreen {
 
                 String current = this.selectedAll ? "" : this.value;
                 int safeCursor = this.selectedAll ? 0 : Math.max(0, Math.min(this.cursor, current.length()));
-                int room = Math.max(0, this.maxLength - current.length());
+                int room = Math.max(0, this.maxLength - current.codePointCount(0, current.length()));
                 if (room <= 0) {
                     return;
                 }
 
-                if (cleanText.length() > room) {
-                    cleanText = cleanText.substring(0, room);
+                if (cleanText.codePointCount(0, cleanText.length()) > room) {
+                    int end = cleanText.offsetByCodePoints(0, room);
+                    cleanText = cleanText.substring(0, end);
                 }
 
                 setValue(current.substring(0, safeCursor) + cleanText + current.substring(safeCursor));
@@ -1691,8 +1696,9 @@ public final class AltManagerScreen extends LuaScreen {
 
             private void setValue(String value) {
                 this.value = value == null ? "" : value;
-                if (this.value.length() > this.maxLength) {
-                    this.value = this.value.substring(0, this.maxLength);
+                if (this.value.codePointCount(0, this.value.length()) > this.maxLength) {
+                    int end = this.value.offsetByCodePoints(0, this.maxLength);
+                    this.value = this.value.substring(0, end);
                 }
                 this.cursor = Math.max(0, Math.min(this.cursor, this.value.length()));
                 this.selectedAll = false;

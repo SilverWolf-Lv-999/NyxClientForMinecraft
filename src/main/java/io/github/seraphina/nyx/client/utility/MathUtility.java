@@ -51,6 +51,40 @@ public final class MathUtility {
         return 1.0F + c3 * (float)Math.pow(safe - 1.0F, 3.0F) + c1 * (float)Math.pow(safe - 1.0F, 2.0F);
     }
 
+    public static float cubicBezier(float value, float controlX1, float controlY1, float controlX2, float controlY2) {
+        float progress = clamp(value, 0.0F, 1.0F);
+        if (progress == 0.0F || progress == 1.0F) {
+            return progress;
+        }
+
+        float parameter = progress;
+        for (int iteration = 0; iteration < 6; iteration++) {
+            float x = cubicCoordinate(parameter, controlX1, controlX2) - progress;
+            float slope = cubicSlope(parameter, controlX1, controlX2);
+            if (Math.abs(slope) < 0.0001F) {
+                break;
+            }
+            parameter = clamp(parameter - x / slope, 0.0F, 1.0F);
+        }
+
+        float lower = 0.0F;
+        float upper = 1.0F;
+        for (int iteration = 0; iteration < 8; iteration++) {
+            float x = cubicCoordinate(parameter, controlX1, controlX2);
+            if (Math.abs(x - progress) < 0.0001F) {
+                break;
+            }
+            if (x < progress) {
+                lower = parameter;
+            } else {
+                upper = parameter;
+            }
+            parameter = (lower + upper) * 0.5F;
+        }
+
+        return cubicCoordinate(parameter, controlY1, controlY2);
+    }
+
     public static float animateLinear(float current, float target, float speed, float frameSeconds) {
         if (current == target) {
             return current;
@@ -120,6 +154,20 @@ public final class MathUtility {
 
     private static float snapToTarget(float value, float target) {
         return Math.abs(target - value) < SNAP_EPSILON ? target : value;
+    }
+
+    private static float cubicCoordinate(float parameter, float control1, float control2) {
+        float inverse = 1.0F - parameter;
+        return 3.0F * inverse * inverse * parameter * control1
+            + 3.0F * inverse * parameter * parameter * control2
+            + parameter * parameter * parameter;
+    }
+
+    private static float cubicSlope(float parameter, float control1, float control2) {
+        float inverse = 1.0F - parameter;
+        return 3.0F * inverse * inverse * control1
+            + 6.0F * inverse * parameter * (control2 - control1)
+            + 3.0F * parameter * parameter * (1.0F - control2);
     }
 
     public record ScreenPosition(float x, float y, float depth) {
