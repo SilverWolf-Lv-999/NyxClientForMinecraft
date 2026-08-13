@@ -16,8 +16,6 @@ import net.minecraft.world.phys.Vec3;
 )
 public class HighJump extends Module {
     public static final HighJump INSTANCE = new HighJump();
-
-    /** Multiplier applied to the upward velocity of each jump. */
     public final DoubleValue height = ValueBuild.doubleSetting("height", 1.5D, 1.0D, 5.0D, 0.1D, this);
 
     @EventTarget
@@ -27,9 +25,6 @@ public class HighJump extends Module {
         }
 
         Vec3 velocity = mc.player.getDeltaMovement();
-        if (velocity.y <= 0.0D) {
-            return;
-        }
 
         mc.player.setDeltaMovement(velocity.x, velocity.y * height.getValue(), velocity.z);
     }
