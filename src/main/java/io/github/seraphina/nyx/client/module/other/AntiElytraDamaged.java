@@ -11,6 +11,7 @@ import io.github.seraphina.nyx.client.value.ValueBuild;
 import io.github.seraphina.nyx.client.value.impl.BoolValue;
 import io.github.seraphina.nyx.client.value.impl.IntValue;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.world.item.Items;
 
 @ModuleInfo(name = "nyxclient.module.antielytradamaged.name", description = "nyxclient.module.antielytradamaged.description", category = Category.OTHER)
@@ -18,6 +19,7 @@ public class AntiElytraDamaged extends Module {
     public static final AntiElytraDamaged INSTANCE = new AntiElytraDamaged();
 
     public final BoolValue antiStop = ValueBuild.boolValue("Anti Stop", true, this);
+    public final BoolValue openInv = ValueBuild.boolValue("Open Inv", true, this);
     public final IntValue keepElytraTicks = ValueBuild.intSetting("keep elytra ticks", 2, 1, 19, 1, this);
 
     private int elytraTicks;
@@ -40,9 +42,21 @@ public class AntiElytraDamaged extends Module {
 
         elytraTicks = 0;
         int emptySlot = InventoryUtility.findEmptySlot();
-        if (emptySlot != InventoryUtility.NOT_FOUND && emptySlot != InventoryUtility.ARMOR_CHEST_SLOT
-                && InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, emptySlot)) {
-            InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, emptySlot);
+        if (emptySlot == InventoryUtility.NOT_FOUND || emptySlot == InventoryUtility.ARMOR_CHEST_SLOT) {
+            return;
+        }
+
+        if (!openInv.getValue()) {
+            cycleElytra(emptySlot);
+            return;
+        }
+
+        int containerId = mc.player.containerMenu.containerId;
+        mc.player.sendOpenInventory();
+        try {
+            cycleElytra(emptySlot);
+        } finally {
+            mc.player.connection.send(new ServerboundContainerClosePacket(containerId));
         }
     }
 
@@ -76,5 +90,11 @@ public class AntiElytraDamaged extends Module {
                 && !InventoryUtility.hasCarriedStack()
                 && mc.player.isFallFlying()
                 && InventoryUtility.getStack(InventoryUtility.ARMOR_CHEST_SLOT).is(Items.ELYTRA);
+    }
+
+    private void cycleElytra(int emptySlot) {
+        if (InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, emptySlot)) {
+            InventoryUtility.swapInventorySlots(InventoryUtility.ARMOR_CHEST_SLOT, emptySlot);
+        }
     }
 }

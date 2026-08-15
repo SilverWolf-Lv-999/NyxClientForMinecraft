@@ -1,5 +1,6 @@
 package io.github.seraphina.nyx.client.module.movement;
 
+import baritone.api.BaritoneAPI;
 import io.github.seraphina.nyx.client.events.api.EventTarget;
 import io.github.seraphina.nyx.client.events.impl.ClickEvent;
 import io.github.seraphina.nyx.client.events.impl.FallFlyingEvent;
@@ -351,7 +352,7 @@ public class ElytraFly extends Module {
     }
 
     private void applyNormalControlVelocity() {
-        Vec3 horizontalVelocity = MovingUtility.horizontalVelocity(flySpeed.getValue(), mc.player.getYRot());
+        Vec3 horizontalVelocity = MovingUtility.horizontalVelocity(flySpeed.getValue(), getFlightYaw(mc.player.getYRot()));
         Vec3 velocity = mc.player.getDeltaMovement();
         mc.player.setDeltaMovement(applyNormalControlModifiers(new Vec3(
                 horizontalVelocity.x,
@@ -365,7 +366,7 @@ public class ElytraFly extends Module {
             return;
         }
 
-        Vec3 boostVelocity = MovingUtility.horizontalVelocity(boost.getValue() / 10.0D, mc.player.getYRot());
+        Vec3 boostVelocity = MovingUtility.horizontalVelocity(boost.getValue() / 10.0D, getFlightYaw(mc.player.getYRot()));
         mc.player.setDeltaMovement(mc.player.getDeltaMovement().add(boostVelocity.x, 0.0D, boostVelocity.z));
     }
 
@@ -379,7 +380,7 @@ public class ElytraFly extends Module {
         float yaw = normalRotations == null ? mc.player.getYRot() : normalRotations.x;
         float pitch = normalRotations == null ? mc.player.getXRot() : normalRotations.y;
         if (hasHorizontalInput) {
-            yaw = getNormalMovementYaw(forward, strafe);
+            yaw = hasDirectElytraTarget() ? getFlightYaw(yaw) : getNormalMovementYaw(forward, strafe);
             if (vertical > 0) {
                 pitch = -45.0F;
             } else if (vertical < 0) {
@@ -396,6 +397,10 @@ public class ElytraFly extends Module {
             pitch = 89.0F;
         } else if (motionStop.getValue()) {
             velocity = velocity.multiply(1.0D, 0.0D, 1.0D);
+        }
+
+        if (hasDirectElytraTarget()) {
+            yaw = getFlightYaw(yaw);
         }
 
         if (!hasHorizontalInput && motionStop.getValue()) {
@@ -421,6 +426,22 @@ public class ElytraFly extends Module {
         }
 
         return yaw;
+    }
+
+    private float getFlightYaw(float fallbackYaw) {
+        return BaritoneAPI.getProvider()
+                .getPrimaryBaritone()
+                .getDirectElytraProcess()
+                .getTargetYaw()
+                .orElse(fallbackYaw);
+    }
+
+    private boolean hasDirectElytraTarget() {
+        return BaritoneAPI.getProvider()
+                .getPrimaryBaritone()
+                .getDirectElytraProcess()
+                .getTargetYaw()
+                .isPresent();
     }
 
     private void updateNormalInfinitePitch() {
